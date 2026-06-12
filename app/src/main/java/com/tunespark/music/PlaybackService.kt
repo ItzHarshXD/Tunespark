@@ -1,0 +1,330 @@
+package com.tunespark.music
+
+import android.content.Intent
+import androidx.annotation.OptIn
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
+import com.metrolist.innertube.YouTube
+import com.metrolist.innertube.models.SongItem
+import com.metrolist.innertube.models.WatchEndpoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class PlaybackService : MediaSessionService() {
+    private var mediaSession: MediaSession? = null
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var lastSeededVideoId: String? = null
+    private val seedingVideoIds = mutableSetOf<String>()
+
+    private companion object {
+        const val TAG = "PlaybackService"
+        const val TARGET_UPCOMING_ITEMS = 20
+        const val MIN_UPCOMING_ITEMS_BEFORE_REFILL = 5
+        const val UNRESOLVED_MEDIA_SCHEME = "tunespark"
+        const val UNRESOLVED_MEDIA_HOST = "unresolved"
+    }
+
+    @OptIn(UnstableApi::class)
+    override fun onCreate() {
+        super.onCreate()
+
+        // Configure AudioAttributes for standard music playback
+        val audioAttributes = AudioAttributes.Builder()
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setUsage(C.USAGE_MEDIA)
+            .build()
+
+        // Build ExoPlayer and set handleAudioFocus to true for automatic focus handling
+        val exoPlayer = ExoPlayer.Builder(this).build().apply {
+            setAudioAttributes(audioAttributes, true)
+        }
+
+        // Keep autoplay independent from the Activity. The service owns queue seeding,
+        // lazy URL resolution, and next-item prefetching.
+        exoPlayer.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (mediaItem == null) return
+                handleCurrentMediaItem(exoPlayer, mediaItem)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    exoPlayer.currentMediaItem?.let { handleCurrentMediaItem(exoPlayer, it) }
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                val currentItem = exoPlayer.currentMediaItem
+                if (currentItem != null && isUnresolvedMediaItem(currentItem)) {
+                    resolveCurrentMediaItem(exoPlayer, currentItem.mediaId)
+                }
+            }
+        })
+
+        mediaSession = MediaSession.Builder(this, exoPlayer)
+            .setCallback(CustomSessionCallback())
+            .build()
+    }
+
+    private fun handleCurrentMediaItem(exoPlayer: ExoPlayer, mediaItem: MediaItem) {
+        val videoId = mediaItem.mediaId
+        if (videoId.isBlank()) return
+
+        if (isUnresolvedMediaItem(mediaItem)) {
+            resolveCurrentMediaItem(exoPlayer, videoId)
+        } else {
+            seedRecommendations(exoPlayer, videoId)
+            preFetchNextMediaItem(exoPlayer)
+        }
+    }
+
+    private fun unresolvedMediaUri(videoId: String): String {
+        return "$UNRESOLVED_MEDIA_SCHEME://$UNRESOLVED_MEDIA_HOST/$videoId"
+    }
+
+    // ExoPlayer requires every queued MediaItem to have a URI. This internal URI
+    // marks a queue item whose real stream URL still needs to be resolved.
+    private fun isUnresolvedMediaItem(mediaItem: MediaItem): Boolean {
+        val uri = mediaItem.localConfiguration?.uri ?: return true
+        return uri.scheme == UNRESOLVED_MEDIA_SCHEME && uri.host == UNRESOLVED_MEDIA_HOST
+    }
+
+    private inner class CustomSessionCallback : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            val connectionResult = super.onConnect(session, controller)
+            val availableSessionCommands = connectionResult.availableSessionCommands.buildUpon()
+            // Let the Activity MediaController read the full queue and use standard
+            // transport controls exposed by the MediaSession notification.
+            val availablePlayerCommands = connectionResult.availablePlayerCommands.buildUpon()
+                .add(Player.COMMAND_GET_TIMELINE)
+                .add(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)
+                .add(Player.COMMAND_GET_METADATA)
+                .add(Player.COMMAND_SET_MEDIA_ITEM)
+                .add(Player.COMMAND_CHANGE_MEDIA_ITEMS)
+                .add(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
+                .add(Player.COMMAND_SEEK_TO_NEXT)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .build()
+
+            return MediaSession.ConnectionResult.accept(
+                availableSessionCommands.build(),
+                availablePlayerCommands
+            )
+        }
+    }
+
+    private fun resolveCurrentMediaItem(exoPlayer: ExoPlayer, videoId: String) {
+        serviceScope.launch(Dispatchers.IO) {
+            android.util.Log.d(TAG, "resolveCurrentMediaItem started for videoId: $videoId")
+            val resolvedUrl = StreamUrlResolver.resolveStreamUrl(videoId)
+            if (resolvedUrl != null) {
+                android.util.Log.d(TAG, "resolveCurrentMediaItem successfully resolved URL for videoId: $videoId")
+                withContext(Dispatchers.Main) {
+                    val currentIndex = exoPlayer.currentMediaItemIndex
+                    if (currentIndex < exoPlayer.mediaItemCount && exoPlayer.getMediaItemAt(currentIndex).mediaId == videoId) {
+                        val originalItem = exoPlayer.getMediaItemAt(currentIndex)
+                        val resolvedItem = buildPlayableMediaItem(
+                            videoId = videoId,
+                            streamUrl = resolvedUrl,
+                            metadata = originalItem.mediaMetadata
+                        )
+                        
+                        exoPlayer.replaceMediaItem(currentIndex, resolvedItem)
+                        exoPlayer.prepare()
+                        exoPlayer.play()
+                        seedRecommendations(exoPlayer, videoId)
+                        preFetchNextMediaItem(exoPlayer)
+                    }
+                }
+            } else {
+                android.util.Log.e(TAG, "resolveCurrentMediaItem failed to resolve URL for videoId: $videoId")
+            }
+        }
+    }
+
+    private fun preFetchNextMediaItem(exoPlayer: ExoPlayer) {
+        val nextIndex = exoPlayer.currentMediaItemIndex + 1
+        if (nextIndex < exoPlayer.mediaItemCount) {
+            val nextItem = exoPlayer.getMediaItemAt(nextIndex)
+            if (isUnresolvedMediaItem(nextItem)) {
+                val nextVideoId = nextItem.mediaId
+                serviceScope.launch(Dispatchers.IO) {
+                    android.util.Log.d(TAG, "preFetchNextMediaItem started for videoId: $nextVideoId")
+                    val resolvedUrl = StreamUrlResolver.resolveStreamUrl(nextVideoId)
+                    if (resolvedUrl != null) {
+                        android.util.Log.d(TAG, "preFetchNextMediaItem successfully pre-fetched URL for videoId: $nextVideoId")
+                        withContext(Dispatchers.Main) {
+                            if (nextIndex < exoPlayer.mediaItemCount && exoPlayer.getMediaItemAt(nextIndex).mediaId == nextVideoId) {
+                                val originalItem = exoPlayer.getMediaItemAt(nextIndex)
+                                val resolvedItem = buildPlayableMediaItem(
+                                    videoId = nextVideoId,
+                                    streamUrl = resolvedUrl,
+                                    metadata = originalItem.mediaMetadata
+                                )
+                                exoPlayer.replaceMediaItem(nextIndex, resolvedItem)
+                            }
+                        }
+                    } else {
+                        android.util.Log.e(TAG, "preFetchNextMediaItem failed to pre-fetch URL for videoId: $nextVideoId")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun seedRecommendations(exoPlayer: ExoPlayer, videoId: String) {
+        if (videoId == lastSeededVideoId) return
+        if (!seedingVideoIds.add(videoId)) return
+
+        val currentIndex = exoPlayer.currentMediaItemIndex
+        val upcomingCount = exoPlayer.mediaItemCount - currentIndex - 1
+        if (upcomingCount >= MIN_UPCOMING_ITEMS_BEFORE_REFILL) {
+            seedingVideoIds.remove(videoId)
+            return
+        }
+
+        val currentItem = exoPlayer.currentMediaItem
+        val artist = currentItem?.mediaMetadata?.artist?.toString() ?: ""
+        val title = currentItem?.mediaMetadata?.title?.toString() ?: ""
+
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                android.util.Log.d(TAG, "seedRecommendations started for videoId: $videoId")
+                val nextResult = YouTube.next(WatchEndpoint(videoId = videoId))
+                val nextRecommendations = nextResult
+                    .onFailure { exception ->
+                        android.util.Log.e(TAG, "seedRecommendations failed via YouTube.next: ${exception.message}", exception)
+                    }
+                    .getOrNull()
+                    ?.items
+                    ?: emptyList()
+
+                android.util.Log.d(TAG, "seedRecommendations retrieved ${nextRecommendations.size} recommendations from YouTube.next")
+
+                val fallbackSearch: suspend () -> List<SongItem> = {
+                    val searchQuery = listOf(title, artist)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" ")
+                        .ifBlank { artist.ifBlank { title } }
+
+                    if (searchQuery.isBlank()) {
+                        android.util.Log.w(TAG, "seedRecommendations has no title or artist for fallback search")
+                        emptyList()
+                    } else {
+                        android.util.Log.d(TAG, "seedRecommendations falling back to search query: $searchQuery")
+                        val searchResult = YouTube.search(query = searchQuery, filter = YouTube.SearchFilter.FILTER_SONG)
+                        if (searchResult.isSuccess) {
+                            val items = searchResult.getOrNull()?.items ?: emptyList()
+                            items.filterIsInstance<SongItem>()
+                                .also {
+                                    android.util.Log.d(TAG, "seedRecommendations fallback search retrieved ${it.size} songs")
+                                }
+                        } else {
+                            val searchEx = searchResult.exceptionOrNull()
+                            android.util.Log.e(TAG, "seedRecommendations fallback search failed: ${searchEx?.message}", searchEx)
+                            emptyList()
+                        }
+                    }
+                }
+
+                val existingVideoIds = withContext(Dispatchers.Main) {
+                    (0 until exoPlayer.mediaItemCount)
+                        .map { index -> exoPlayer.getMediaItemAt(index).mediaId }
+                        .toSet()
+                }
+                val itemsNeeded = (TARGET_UPCOMING_ITEMS - upcomingCount).coerceAtLeast(0)
+
+                var filteredRecs = nextRecommendations
+                    .filter { it.id !in existingVideoIds }
+                    .take(itemsNeeded)
+
+                if (filteredRecs.isEmpty()) {
+                    filteredRecs = fallbackSearch()
+                        .filter { it.id !in existingVideoIds }
+                        .take(itemsNeeded)
+                }
+
+                if (filteredRecs.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        if (exoPlayer.currentMediaItem?.mediaId == videoId) {
+                            val mediaItems = filteredRecs.map(::buildUnresolvedMediaItem)
+                            exoPlayer.addMediaItems(mediaItems)
+                            lastSeededVideoId = videoId
+                            preFetchNextMediaItem(exoPlayer)
+                            android.util.Log.d(TAG, "seedRecommendations successfully appended ${mediaItems.size} items to ExoPlayer")
+                        }
+                    }
+                } else {
+                    android.util.Log.w(TAG, "seedRecommendations got empty recommendations list, nothing to queue.")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "seedRecommendations unexpected error: ${e.message}", e)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    seedingVideoIds.remove(videoId)
+                }
+            }
+        }
+    }
+
+    private fun buildPlayableMediaItem(
+        videoId: String,
+        streamUrl: String,
+        metadata: MediaMetadata
+    ): MediaItem {
+        return MediaItem.Builder()
+            .setUri(streamUrl)
+            .setMediaId(videoId)
+            .setMediaMetadata(metadata)
+            .build()
+    }
+
+    private fun buildUnresolvedMediaItem(song: SongItem): MediaItem {
+        return MediaItem.Builder()
+            .setUri(unresolvedMediaUri(song.id))
+            .setMediaId(song.id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(song.title)
+                    .setArtist(song.artists.joinToString(", ") { it.name })
+                    .build()
+            )
+            .build()
+    }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
+        return mediaSession
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val player = mediaSession?.player
+        player?.pause()
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onDestroy() {
+        serviceScope.cancel()
+        mediaSession?.run {
+            player.release()
+            release()
+            mediaSession = null
+        }
+        super.onDestroy()
+    }
+}
