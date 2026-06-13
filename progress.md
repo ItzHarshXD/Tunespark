@@ -12,12 +12,27 @@ The project is split into two Gradle modules:
 
 The Android app module. It owns the UI, playback service, and app-level Android permissions.
 
-Key files:
+Key files and packages:
 
 - `app/src/main/java/com/tunespark/music/MainActivity.kt`
-  - Single-activity Jetpack Compose UI with custom state-based navigation across 5 screens (Home, Search, Radio, Settings, and Account).
-  - Connects to `PlaybackService` through a Media3 `MediaController`.
-  - Handles user interactions, global stream/shuffle-play triggers, and hosts settings options and dedicated views.
+  - Single-activity entry point. Boots the Jetpack Compose UI, binds to `PlaybackService` via Media3 `MediaController`, initializes `SessionManager`, and hosts global state variables. Delegates screen rendering cleanly to the individual composable screens.
+- `app/src/main/java/com/tunespark/music/ui/screens/`
+  - Modularized screens package hosting distinct, clean Jetpack Compose UI screens:
+    - `HomeScreen.kt`: Landing view with brand headers, settings launcher, quick shuffle play, and search launcher.
+    - `SearchScreen.kt`: Dedicated search field, queries YouTube Music, displays song results, and launches playback.
+    - `RadioScreen.kt`: Audio player view displaying up-next list and control triggers mapped to MediaController commands.
+    - `SettingsScreen.kt`: Interactive links leading to dedicated customization options.
+    - `AccountScreen.kt`: Manages optional YouTube Music login WebViews, sign-out actions, and live profile details.
+    - `AppearanceScreen.kt`: Styled theme selections (Light, Dark, System).
+    - `AiVoiceScreen.kt`: Controls and API keys configuration for Gemini / ElevenLabs backends.
+    - `CommentaryScreen.kt`: Customize dynamic list switches like weather updates, song intros, etc.
+    - `NotificationsScreen.kt`: Setting to turn on/off app notifications.
+    - `LocationScreen.kt`: Manages auto/manual GPS coordinates fetching for localized updates.
+    - `UpdatesScreen.kt`: Shows current version (v1.24.2) and update check actions.
+    - `SettingsHeader.kt`: A shared, beautiful back-navigated top-bar widget used across configurations.
+- `app/src/main/java/com/tunespark/music/SessionManager.kt`
+  - Manages secure, local persistence of YouTube session cookies in `SharedPreferences`.
+  - Handles locally-cached user profile details (avatar, name, email) and initializes the active session cookie in `:innertube` on app startup.
 - `app/src/main/java/com/tunespark/music/PlaybackService.kt`
   - Background `MediaSessionService`.
   - Owns the real `ExoPlayer` instance.
@@ -47,7 +62,7 @@ Key files:
 
 ## Screen Architecture
 
-TuneSpark has been structured into 5 distinct screens for clear separation of concerns and a native-feeling UX:
+TuneSpark has been structured into 11 distinct screens for clear separation of concerns and a native-feeling UX:
 
 1. **Home Screen**:
    - The landing screen containing the branding header, a dedicated **Settings** button, a **Quick Shuffle Play** card, and a **Search Music** button.
@@ -61,7 +76,20 @@ TuneSpark has been structured into 5 distinct screens for clear separation of co
    - Offers customization options: *Appearance*, *Account*, *AI and Voice*, *Commentary*, *Notifications*, *Location*, and *Updates*.
    - Stylized dark/black background layout with a custom red circular back button.
 5. **Account Screen**:
-   - The functional screen selected from Settings. Displays account subscriber details.
+   - The functional screen selected from Settings. Displays account details.
+   - Hosts the **Optional YouTube Music Sign-In** flow. If signed out, it presents a secure Google Sign-In prompt. If signed in, it displays live user profile details (avatar badge with initials, email, handle), connection status, and a fully-functional "Sign Out" option.
+6. **Appearance Screen**:
+   - Custom interface displaying "Select theme" with three stylized visual options (Light, Dark, and System Split) and selectable pill-shaped labels.
+7. **AI and Voice Screen**:
+   - Contains toggleable tabs for both "Gemini" and "ElevenLabs" options, instruction steps on how to obtain API keys, custom key input field with clipboard icon, customizable ElevenLabs Voice ID input box, a "Preview voice" action button, and a red commentary frequency slider.
+8. **Commentary Screen**:
+   - Dynamic list of option switches ("Weather updates", "Session opener", "Song intro", etc.) with stylized check circle toggle states.
+9. **Notifications Screen**:
+   - Simple setting view to disable or toggle notifications.
+10. **Location Screen**:
+    - Manage auto/manual location settings with active GPS switches, current coordinate display, and a dedicated GPS crosshair action button.
+11. **Updates Screen**:
+    - Displays current app version (v1.24.2) and hosts interactive dummy "Check for updates" buttons.
 
 ---
 
@@ -118,6 +146,24 @@ YouTube.search("$title $artist", YouTube.SearchFilter.FILTER_SONG)
 ```
 
 That fallback is app-side logic. The primary recommendation source is still InnerTube's `YouTube.next`.
+
+---
+
+## How YouTube Music Sign-In Works
+
+### 1. Secure OAuth-less Login Integration
+TuneSpark embeds a system-native, secure `WebView` pointing directly to Google's official sign-in endpoint (`accounts.google.com`). This ensures that credentials remain completely isolated and secure. The app never sees or stores user passwords.
+
+### 2. Cookie Extraction & Cryptographic Header Signing
+Upon successful Google Authentication, the app interceptively extracts session cookies (like `SAPISID`) via Android's `CookieManager`. On every authenticated InnerTube request:
+- InnerTube uses the `SAPISID` cookie along with the current timestamp to generate a SHA-1 cryptographic signature called `SAPISIDHASH`.
+- This hash is passed via the `Authorization` header, granting access to the official YouTube Music private API.
+
+### 3. Personalization & Playback Tracking
+Once signed in:
+- Calls to homepage browse endpoints (`YouTube.home()`) fetch the user's custom taste feeds, favorite mixes, and library.
+- Background recommendations (`YouTube.next()`) shift from generic charts to highly-tailored algorithmic radios.
+- Song playback actively updates the user's official YouTube Music listening history, training their personalized recommendations.
 
 ### 5. Placeholder Queue Items
 

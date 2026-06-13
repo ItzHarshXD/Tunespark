@@ -12,6 +12,10 @@ object SessionManager {
     private const val KEY_USER_EMAIL = "user_email"
     private const val KEY_USER_HANDLE = "user_handle"
     private const val KEY_USER_THUMBNAIL = "user_thumbnail"
+    private const val KEY_GEMINI_KEY = "gemini_api_key"
+    private const val KEY_ELEVENLABS_KEY = "elevenlabs_api_key"
+    private const val KEY_ELEVENLABS_VOICE_ID = "elevenlabs_voice_id"
+    private const val KEY_COMMENTARY_FREQUENCY = "commentary_frequency"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -83,5 +87,37 @@ object SessionManager {
     fun clearSession(context: Context) {
         getPrefs(context).edit().clear().apply()
         YouTube.cookie = null
+    }
+
+    fun getGeminiApiKey(context: Context): String {
+        return getPrefs(context).getString(KEY_GEMINI_KEY, "") ?: ""
+    }
+
+    fun saveGeminiApiKey(context: Context, key: String) {
+        getPrefs(context).edit().putString(KEY_GEMINI_KEY, key).apply()
+    }
+
+    fun getElevenLabsApiKey(context: Context): String {
+        return getPrefs(context).getString(KEY_ELEVENLABS_KEY, "") ?: ""
+    }
+
+    fun saveElevenLabsApiKey(context: Context, key: String) {
+        getPrefs(context).edit().putString(KEY_ELEVENLABS_KEY, key).apply()
+    }
+
+    fun getElevenLabsVoiceId(context: Context): String {
+        return getPrefs(context).getString(KEY_ELEVENLABS_VOICE_ID, "EXAVITQu4vr4xnSDxMaL") ?: "EXAVITQu4vr4xnSDxMaL"
+    }
+
+    fun saveElevenLabsVoiceId(context: Context, voiceId: String) {
+        getPrefs(context).edit().putString(KEY_ELEVENLABS_VOICE_ID, voiceId).apply()
+    }
+
+    fun getCommentaryFrequency(context: Context): Float {
+        return getPrefs(context).getFloat(KEY_COMMENTARY_FREQUENCY, 0.5f)
+    }
+
+    fun saveCommentaryFrequency(context: Context, frequency: Float) {
+        getPrefs(context).edit().putFloat(KEY_COMMENTARY_FREQUENCY, frequency).apply()
     }
 }
