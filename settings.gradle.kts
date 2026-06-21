@@ -24,5 +24,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Tunespark"
-include(":app", ":innertube")
- 
+include(":app", ":innertube", ":lrclib")

@@ -32,6 +32,68 @@ import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
 import kotlinx.coroutines.delay
+import com.metrolist.lrclib.LrcLib
+import androidx.compose.foundation.lazy.rememberLazyListState
+
+// Structured object representing a parsed lyric line with time synchronization
+data class LyricLine(val timestampMs: Long, val text: String)
+
+// Clean YouTube video titles of promotional metadata and clutter
+private fun cleanYouTubeTitle(title: String): String {
+    val cleanupPatterns = listOf(
+        Regex("""\s*\(.*?((?i)official|video|audio|lyrics|lyric|visualizer|hd|hq|4k|remaster|remix|live|acoustic|version|edit|extended|radio|clean|explicit).*?\)"""),
+        Regex("""\s*\[.*?((?i)official|video|audio|lyrics|lyric|visualizer|hd|hq|4k|remaster|remix|live|acoustic|version|edit|extended|radio|clean|explicit).*?\]"""),
+        Regex("""\s*【.*?】"""),
+        Regex("""\s*\|.*$"""),
+        Regex("""\s*-\s*((?i)official|video|audio|lyrics|lyric|visualizer).*$"""),
+        Regex("""\s*\((?i)feat\..*?\)"""),
+        Regex("""\s*\((?i)ft\..*?\)"""),
+        Regex("""\s*(?i)feat\..*$"""),
+        Regex("""\s*(?i)ft\..*$""")
+    )
+    var cleaned = title.trim()
+    for (pattern in cleanupPatterns) {
+        cleaned = cleaned.replace(pattern, "")
+    }
+    return cleaned.trim()
+}
+
+// Helper function to parse timestamps and clean lyrics
+private fun parseLyricsToLines(rawLyrics: String): List<LyricLine> {
+    val lines = rawLyrics.lines()
+    val cleanLines = mutableListOf<LyricLine>()
+    val timestampRegex = Regex("""^\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?]""")
+    for (line in lines) {
+        val trimmed = line.trim()
+        if (trimmed.isEmpty()) continue
+        // Filter out LRC file metadata tags
+        if (trimmed.startsWith("[ti:") || trimmed.startsWith("[ar:") || 
+            trimmed.startsWith("[al:") || trimmed.startsWith("[by:") || 
+            trimmed.startsWith("[length:") || trimmed.startsWith("[re:") || 
+            trimmed.startsWith("[ve:")) {
+            continue
+        }
+        val matched = timestampRegex.find(trimmed)
+        if (matched != null) {
+            val min = matched.groupValues[1].toLongOrNull() ?: 0L
+            val sec = matched.groupValues[2].toLongOrNull() ?: 0L
+            val hundredthsOrMs = matched.groupValues.getOrNull(3)?.takeIf { it.isNotEmpty() }
+            val ms = when (hundredthsOrMs?.length) {
+                2 -> hundredthsOrMs.toLong() * 10
+                3 -> hundredthsOrMs.toLong()
+                else -> 0L
+            }
+            val timestampMs = min * 60 * 1000 + sec * 1000 + ms
+            val lyricPart = trimmed.substring(matched.range.last + 1).trim()
+            if (lyricPart.isNotEmpty()) {
+                cleanLines.add(LyricLine(timestampMs, lyricPart))
+            }
+        } else {
+            cleanLines.add(LyricLine(-1L, trimmed))
+        }
+    }
+    return cleanLines
+}
 
 @Composable
 fun RadioScreen(
@@ -55,20 +117,103 @@ fun RadioScreen(
         onNavigate(AppScreen.HOME)
     }
 
-    // Exact lyrics of the song to show in a scrollable list
-    val lyricsLines = listOf(
-        "O jugni o.. patakha Guddi o",
-        "Nashe mein udi jaaye re haaye re",
-        "",
-        "Sajje khabbe dhabbe killi o",
-        "Patakha Guddi O",
-        "",
-        "Nashe mein udi jaaye re haaye re",
-        "",
-        "Sajje khabbe dhabbe killi o",
-        "",
-        "Maula tera maali"
-    )
+    // Dynamic lyrics state and loader
+    var lyricsLines by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
+    var isLyricsLoading by remember { mutableStateOf(false) }
+
+    // Live media playback position tracking for lyrics sync
+    var currentPosition by remember { mutableStateOf(0L) }
+    LaunchedEffect(isPlaying, exoPlayer) {
+        if (isPlaying) {
+            while (true) {
+                currentPosition = exoPlayer.currentPosition
+                delay(200) // Highly-responsive 200ms sampling for lyrical transitions
+            }
+        }
+    }
+
+    // Determine the current highlighted lyric line based on actual song position
+    val activeLyricIndex = remember(lyricsLines, currentPosition) {
+        val syncedLines = lyricsLines.filter { it.timestampMs >= 0 }
+        if (syncedLines.isEmpty()) {
+            -1
+        } else {
+            var bestIndex = -1
+            for (i in lyricsLines.indices) {
+                val line = lyricsLines[i]
+                if (line.timestampMs in 0..currentPosition) {
+                    bestIndex = i
+                }
+            }
+            bestIndex
+        }
+    }
+
+    LaunchedEffect(currentSongTitle, currentSongArtist) {
+        if (currentSongTitle.isEmpty() || currentSongTitle == "No Track Loaded" || currentSongTitle.startsWith("AI DJ") || currentSongTitle.startsWith("commentary_")) {
+            lyricsLines = listOf(LyricLine(-1L, "No lyrics available for this track."))
+            isLyricsLoading = false
+            return@LaunchedEffect
+        }
+
+        isLyricsLoading = true
+        lyricsLines = emptyList()
+
+        // Get duration on the Main/UI thread before switching context to IO dispatcher
+        val durationMs = exoPlayer.duration
+        val durationSec = if (durationMs > 0) (durationMs / 1000).toInt() else -1
+
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                // 1. Clean track metadata to eliminate YouTube specific promotional garbage
+                val cleanedTitle = cleanYouTubeTitle(currentSongTitle)
+                val cleanedArtist = currentSongArtist.trim()
+
+                // 2. Primary Query: Cleaned Title + Artist + Duration (most precise)
+                var result = LrcLib.getLyrics(
+                    title = cleanedTitle,
+                    artist = cleanedArtist,
+                    duration = durationSec
+                )
+                var rawLyrics = result.getOrNull()
+
+                // 3. Fallback 1: Drop strict duration constraints (search name only)
+                if (rawLyrics == null) {
+                    result = LrcLib.getLyrics(
+                        title = cleanedTitle,
+                        artist = cleanedArtist,
+                        duration = -1
+                    )
+                    rawLyrics = result.getOrNull()
+                }
+
+                // 4. Fallback 2: General text query (drop standard fields, perform text lookup)
+                if (rawLyrics == null) {
+                    val searchResult = LrcLib.lyrics(artist = cleanedArtist, title = cleanedTitle)
+                    val tracks = searchResult.getOrNull()
+                    if (!tracks.isNullOrEmpty()) {
+                        val matchedTrack = tracks.firstOrNull { it.syncedLyrics != null || it.plainLyrics != null }
+                        rawLyrics = matchedTrack?.syncedLyrics ?: matchedTrack?.plainLyrics
+                    }
+                }
+
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (rawLyrics != null) {
+                        val parsed = parseLyricsToLines(rawLyrics)
+                        lyricsLines = if (parsed.isNotEmpty()) parsed else listOf(LyricLine(-1L, "No lyrics found."))
+                    } else {
+                        lyricsLines = listOf(LyricLine(-1L, "No lyrics found for this song."))
+                    }
+                    isLyricsLoading = false
+                }
+            } catch (e: Exception) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    lyricsLines = listOf(LyricLine(-1L, "Could not load lyrics: ${e.localizedMessage ?: "Unknown error"}"))
+                    isLyricsLoading = false
+                }
+            }
+        }
+    }
 
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
@@ -279,33 +424,75 @@ fun RadioScreen(
 
             if (activeTab == "lyrics") {
                 // 4. Stylized Scrollable Lyrics Section
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    itemsIndexed(lyricsLines) { index, line ->
-                        // Set varying colors to mimic the fading/bold styles of the screenshot exactly
-                        val lineTextColor = when {
-                            index < 2 -> textColor
-                            index in 3..4 -> textColor
-                            index in 6..7 -> textColor.copy(alpha = 0.6f)
-                            index in 8..9 -> textColor.copy(alpha = 0.4f)
-                            else -> textColor.copy(alpha = 0.2f)
+                if (isLyricsLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = primaryColor)
+                    }
+                } else {
+                    val listState = rememberLazyListState()
+                    
+                    // Auto-scroll to active lyric line
+                    LaunchedEffect(activeLyricIndex) {
+                        if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
+                            listState.animateScrollToItem(activeLyricIndex)
                         }
-                        val fontWeight = if (index < 5 && line.isNotEmpty()) FontWeight.Bold else FontWeight.Normal
-                        val fontSize = if (index < 5 && line.isNotEmpty()) 20.sp else 18.sp
+                    }
 
-                        Text(
-                            text = line,
-                            color = lineTextColor,
-                            fontSize = fontSize,
-                            fontWeight = fontWeight,
-                            lineHeight = 26.sp,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        itemsIndexed(lyricsLines) { index, line ->
+                            val isPlaceholder = lyricsLines.size == 1 && (line.text.startsWith("No lyrics") || line.text.startsWith("Could not") || line.text.startsWith("No track"))
+                            val isActive = index == activeLyricIndex
+                            
+                            // Set varying colors to mimic the fading/bold styles of the screenshot exactly
+                            val lineTextColor = when {
+                                isPlaceholder -> textColor.copy(alpha = 0.5f)
+                                isActive -> textColor // Fully highlighted active line!
+                                activeLyricIndex == -1 -> {
+                                    // Fallback when not synced/paused: highlight the opening lines, progressively fading out
+                                    when {
+                                        index < 2 -> textColor
+                                        index in 2..4 -> textColor.copy(alpha = 0.8f)
+                                        index in 5..7 -> textColor.copy(alpha = 0.6f)
+                                        index in 8..10 -> textColor.copy(alpha = 0.4f)
+                                        else -> textColor.copy(alpha = 0.3f)
+                                    }
+                                }
+                                else -> {
+                                    // Dynamic distance fading from the active line for synced scrolling
+                                    val distance = kotlin.math.abs(index - activeLyricIndex)
+                                    when {
+                                        distance == 1 -> textColor.copy(alpha = 0.7f)
+                                        distance == 2 -> textColor.copy(alpha = 0.5f)
+                                        distance == 3 -> textColor.copy(alpha = 0.35f)
+                                        else -> textColor.copy(alpha = 0.2f)
+                                    }
+                                }
+                            }
+                            val fontWeight = if (isActive || (activeLyricIndex == -1 && index < 5 && !isPlaceholder)) FontWeight.Bold else FontWeight.Normal
+                            val fontSize = if (isActive || (activeLyricIndex == -1 && index < 5 && !isPlaceholder)) 22.sp else 18.sp
+
+                            Text(
+                                text = line.text,
+                                color = lineTextColor,
+                                fontSize = fontSize,
+                                fontWeight = fontWeight,
+                                lineHeight = 28.sp,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = if (isPlaceholder) TextAlign.Center else TextAlign.Start
+                            )
+                        }
                     }
                 }
             } else {
@@ -493,7 +680,9 @@ fun RadioEqualizerWaveform(exoPlayer: Player, isPlaying: Boolean) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.Bottom,
-        modifier = Modifier.padding(vertical = 12.dp)
+        modifier = Modifier
+            .height(80.dp) // Ample fixed height to contain the max visualizer height (56.dp) and padding without jitter
+            .padding(vertical = 12.dp)
     ) {
         baseHeights.forEachIndexed { index, baseHeight ->
             // Tie height fluctuation directly, accurately and deterministicly to current song position (beats)

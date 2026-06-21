@@ -49,4 +49,5 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.coil.compose)
     implementation(project(":innertube"))
+    implementation(project(":lrclib"))
 }
