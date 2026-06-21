@@ -1,5 +1,6 @@
 package com.tunespark.music.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -11,10 +12,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -22,8 +25,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.tunespark.music.AppScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SearchScreen(
@@ -38,124 +46,212 @@ fun SearchScreen(
 ) {
     val focusManager = LocalFocusManager.current
 
+    // Handle system back press
+    BackHandler {
+        onNavigate(AppScreen.HOME)
+    }
+
+    var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var localResults by remember { mutableStateOf<List<SongItem>>(searchResults) }
+    var localIsSearching by remember { mutableStateOf(false) }
+
+    // Reactive search and suggestions fetching
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isBlank()) {
+            suggestions = emptyList()
+            localResults = emptyList()
+            onSearchQueryChange("")
+            return@LaunchedEffect
+        }
+
+        // Debounce of 300ms to prevent high-frequency api calls
+        delay(300)
+        localIsSearching = true
+
+        try {
+            // Fetch autocomplete suggestions
+            val suggestionRes = withContext(Dispatchers.IO) {
+                YouTube.searchSuggestions(searchQuery)
+            }
+            if (suggestionRes.isSuccess) {
+                suggestions = suggestionRes.getOrNull()?.queries.orEmpty()
+            }
+
+            // Fetch actual search results
+            val resultsRes = withContext(Dispatchers.IO) {
+                YouTube.search(query = searchQuery, filter = YouTube.SearchFilter.FILTER_SONG)
+            }
+            if (resultsRes.isSuccess) {
+                val items = resultsRes.getOrNull()?.items.orEmpty()
+                localResults = items.filterIsInstance<SongItem>()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            localIsSearching = false
+        }
+    }
+
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .background(backgroundColor)
+            .padding(top = 16.dp, start = 16.dp, end = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = { onNavigate(AppScreen.HOME) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("← Home", fontWeight = FontWeight.Bold)
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = "Search Music",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-
+        // Pill-Shaped Search Input Field (exactly as shown in screenshot)
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchQueryChange,
-            label = { Text("Search songs...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search Icon") },
+            placeholder = { Text("Search songs, artists, albums...", color = Color.Gray) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search Icon", tint = textColor) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = {
                 focusManager.clearFocus()
-                onTriggerSearch()
             }),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = textColor,
+                unfocusedTextColor = textColor,
+                focusedBorderColor = textColor,
+                unfocusedBorderColor = textColor,
+                focusedContainerColor = backgroundColor,
+                unfocusedContainerColor = backgroundColor,
+                cursorColor = textColor
+            ),
+            shape = RoundedCornerShape(28.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 12.dp)
         )
 
-        if (isSearching) {
-            CircularProgressIndicator(modifier = Modifier.size(36.dp))
-            Spacer(modifier = Modifier.height(8.dp))
-        } else {
-            Button(
-                onClick = {
-                    focusManager.clearFocus()
-                    onTriggerSearch()
-                },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        // Loader indicator
+        if (localIsSearching && localResults.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Text("Search", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                CircularProgressIndicator(
+                    color = textColor,
+                    modifier = Modifier.size(36.dp)
+                )
             }
         }
 
-        Box(
+        LazyColumn(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth()
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (searchResults.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Search for your favorite tracks above!",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(searchResults) { song ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable {
-                                    onPlaySong(song)
-                                    onNavigate(AppScreen.RADIO)
-                                }
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = song.title,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = song.artists.joinToString(", ") { it.name },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+            // 1. Suggestions Section (if searchQuery is not empty)
+            if (searchQuery.isNotEmpty() && suggestions.isNotEmpty()) {
+                items(suggestions.take(3)) { suggestion ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                focusManager.clearFocus()
+                                onSearchQueryChange(suggestion)
                             }
-                            Text("▶", fontSize = 20.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 8.dp))
+                            .padding(vertical = 12.dp, horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Suggestion",
+                                tint = textColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = suggestion,
+                                color = textColor,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
+                        Text(
+                            text = "↗",
+                            color = textColor,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Add a small divider/space between suggestions and main results
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+
+            // 2. Results Section
+            if (localResults.isNotEmpty()) {
+                items(localResults) { song ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onPlaySong(song)
+                                onNavigate(AppScreen.RADIO)
+                            }
+                            .padding(vertical = 8.dp, horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            model = song.thumbnail,
+                            contentDescription = "Artwork",
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(28.dp)) // Fully circular/rounded artwork
+                                .background(MaterialTheme.colorScheme.secondary),
+                            contentScale = ContentScale.Crop
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = song.title,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = textColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = song.artists.joinToString(", ") { it.name },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = textColor.copy(alpha = 0.6f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            } else if (!localIsSearching && searchQuery.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillParentMaxHeight()
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Explore millions of tracks. Type a query above!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }

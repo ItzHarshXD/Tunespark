@@ -3,14 +3,10 @@ package com.tunespark.music.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -21,40 +17,17 @@ fun SettingsScreen(
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(backgroundColor)
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 32.dp)
-        ) {
-            IconButton(
-                onClick = { onNavigate(AppScreen.HOME) },
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(Color(0xFFFF0000), shape = CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = "Settings",
-                color = Color.White,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
+        SettingsHeader(title = "Settings", onBack = { onNavigate(AppScreen.HOME) })
 
         val settingsItems = listOf(
             "Appearance",
@@ -69,7 +42,7 @@ fun SettingsScreen(
         settingsItems.forEach { item ->
             Text(
                 text = item,
-                color = Color.White,
+                color = textColor,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Normal,
                 modifier = Modifier

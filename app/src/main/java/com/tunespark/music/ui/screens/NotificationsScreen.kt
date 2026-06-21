@@ -17,10 +17,13 @@ fun NotificationsScreen(
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(backgroundColor)
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
@@ -32,7 +35,7 @@ fun NotificationsScreen(
         ) {
             Text(
                 text = "Turn off notifications",
-                color = Color.White,
+                color = textColor,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 48.dp)

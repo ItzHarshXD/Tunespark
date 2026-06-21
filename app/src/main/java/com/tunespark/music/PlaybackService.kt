@@ -1,6 +1,7 @@
 package com.tunespark.music
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -27,9 +28,14 @@ class PlaybackService : MediaSessionService() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var lastSeededVideoId: String? = null
     private val seedingVideoIds = mutableSetOf<String>()
+    private var isGeneratingCommentary = false
 
-    private companion object {
-        const val TAG = "PlaybackService"
+    private var playlistSongsPlayedSinceCommentary = 0
+    private var lastCommentaryCheckedVideoId: String? = null
+
+    companion object {
+        var isPlaylistMode = false
+        private const val PLAYBACK_SERVICE_TAG = "PlaybackService"
         const val TARGET_UPCOMING_ITEMS = 20
         const val MIN_UPCOMING_ITEMS_BEFORE_REFILL = 5
         const val UNRESOLVED_MEDIA_SCHEME = "tunespark"
@@ -82,12 +88,90 @@ class PlaybackService : MediaSessionService() {
         val videoId = mediaItem.mediaId
         if (videoId.isBlank()) return
 
+        if (isCommentaryMediaItem(mediaItem)) {
+            preFetchNextMediaItem(exoPlayer)
+            return
+        }
+
         if (isUnresolvedMediaItem(mediaItem)) {
             resolveCurrentMediaItem(exoPlayer, videoId)
         } else {
-            seedRecommendations(exoPlayer, videoId)
-            preFetchNextMediaItem(exoPlayer)
+            if (isPlaylistMode) {
+                checkAndInsertPlaylistCommentary(exoPlayer, videoId)
+                preFetchNextMediaItem(exoPlayer)
+            } else {
+                seedRecommendations(exoPlayer, videoId)
+                preFetchNextMediaItem(exoPlayer)
+            }
         }
+    }
+
+    private fun checkAndInsertPlaylistCommentary(exoPlayer: ExoPlayer, videoId: String) {
+        if (videoId == lastCommentaryCheckedVideoId) return
+        lastCommentaryCheckedVideoId = videoId
+
+        val N = SessionManager.getCommentaryBlockSize(this)
+        playlistSongsPlayedSinceCommentary++
+
+        if (playlistSongsPlayedSinceCommentary >= N) {
+            val currentIndex = exoPlayer.currentMediaItemIndex
+            val upcomingSongs = mutableListOf<SongItem>()
+            
+            // Collect upcoming songs for commentary generation
+            for (i in (currentIndex + 1) until exoPlayer.mediaItemCount) {
+                val item = exoPlayer.getMediaItemAt(i)
+                if (!isCommentaryMediaItem(item)) {
+                    val title = item.mediaMetadata.title?.toString() ?: ""
+                    val artistName = item.mediaMetadata.artist?.toString() ?: ""
+                    val id = item.mediaId
+                    upcomingSongs.add(
+                        SongItem(
+                            id = id,
+                            title = title,
+                            artists = listOf(com.metrolist.innertube.models.Artist(artistName, null)),
+                            thumbnail = item.mediaMetadata.artworkUri?.toString() ?: ""
+                        )
+                    )
+                    if (upcomingSongs.size >= N) {
+                        break
+                    }
+                }
+            }
+
+            if (upcomingSongs.isNotEmpty()) {
+                serviceScope.launch(Dispatchers.IO) {
+                    try {
+                        val currentSongInfo = "'${exoPlayer.mediaMetadata.title}' by ${exoPlayer.mediaMetadata.artist}"
+                        val upcomingSongsList = upcomingSongs.map { "'${it.title}' by ${it.artists.joinToString(", ") { a -> a.name }}" }
+                        
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@PlaybackService, "AI DJ is writing commentary for the playlist...", Toast.LENGTH_SHORT).show()
+                        }
+
+                        val audioFile = TtsService.generateCommentaryAudio(
+                            context = this@PlaybackService,
+                            currentSong = currentSongInfo,
+                            upcomingSongs = upcomingSongsList
+                        )
+
+                        val commentaryItem = buildCommentaryMediaItem(audioFile)
+                        withContext(Dispatchers.Main) {
+                            if (exoPlayer.currentMediaItemIndex == currentIndex) {
+                                exoPlayer.addMediaItem(currentIndex + 1, commentaryItem)
+                                playlistSongsPlayedSinceCommentary = 0
+                                Toast.makeText(this@PlaybackService, "AI DJ Commentary generated successfully!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e(PLAYBACK_SERVICE_TAG, "Failed to create playlist commentary: ${e.message}", e)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun isCommentaryMediaItem(mediaItem: MediaItem): Boolean {
+        return mediaItem.mediaId.startsWith("commentary_")
     }
 
     private fun unresolvedMediaUri(videoId: String): String {
@@ -130,10 +214,10 @@ class PlaybackService : MediaSessionService() {
 
     private fun resolveCurrentMediaItem(exoPlayer: ExoPlayer, videoId: String) {
         serviceScope.launch(Dispatchers.IO) {
-            android.util.Log.d(TAG, "resolveCurrentMediaItem started for videoId: $videoId")
+            android.util.Log.d(PLAYBACK_SERVICE_TAG, "resolveCurrentMediaItem started for videoId: $videoId")
             val resolvedUrl = StreamUrlResolver.resolveStreamUrl(videoId)
             if (resolvedUrl != null) {
-                android.util.Log.d(TAG, "resolveCurrentMediaItem successfully resolved URL for videoId: $videoId")
+                android.util.Log.d(PLAYBACK_SERVICE_TAG, "resolveCurrentMediaItem successfully resolved URL for videoId: $videoId")
                 withContext(Dispatchers.Main) {
                     val currentIndex = exoPlayer.currentMediaItemIndex
                     if (currentIndex < exoPlayer.mediaItemCount && exoPlayer.getMediaItemAt(currentIndex).mediaId == videoId) {
@@ -152,7 +236,7 @@ class PlaybackService : MediaSessionService() {
                     }
                 }
             } else {
-                android.util.Log.e(TAG, "resolveCurrentMediaItem failed to resolve URL for videoId: $videoId")
+                android.util.Log.e(PLAYBACK_SERVICE_TAG, "resolveCurrentMediaItem failed to resolve URL for videoId: $videoId")
             }
         }
     }
@@ -164,10 +248,10 @@ class PlaybackService : MediaSessionService() {
             if (isUnresolvedMediaItem(nextItem)) {
                 val nextVideoId = nextItem.mediaId
                 serviceScope.launch(Dispatchers.IO) {
-                    android.util.Log.d(TAG, "preFetchNextMediaItem started for videoId: $nextVideoId")
+                    android.util.Log.d(PLAYBACK_SERVICE_TAG, "preFetchNextMediaItem started for videoId: $nextVideoId")
                     val resolvedUrl = StreamUrlResolver.resolveStreamUrl(nextVideoId)
                     if (resolvedUrl != null) {
-                        android.util.Log.d(TAG, "preFetchNextMediaItem successfully pre-fetched URL for videoId: $nextVideoId")
+                        android.util.Log.d(PLAYBACK_SERVICE_TAG, "preFetchNextMediaItem successfully pre-fetched URL for videoId: $nextVideoId")
                         withContext(Dispatchers.Main) {
                             if (nextIndex < exoPlayer.mediaItemCount && exoPlayer.getMediaItemAt(nextIndex).mediaId == nextVideoId) {
                                 val originalItem = exoPlayer.getMediaItemAt(nextIndex)
@@ -180,7 +264,7 @@ class PlaybackService : MediaSessionService() {
                             }
                         }
                     } else {
-                        android.util.Log.e(TAG, "preFetchNextMediaItem failed to pre-fetch URL for videoId: $nextVideoId")
+                        android.util.Log.e(PLAYBACK_SERVICE_TAG, "preFetchNextMediaItem failed to pre-fetch URL for videoId: $nextVideoId")
                     }
                 }
             }
@@ -191,9 +275,32 @@ class PlaybackService : MediaSessionService() {
         if (videoId == lastSeededVideoId) return
         if (!seedingVideoIds.add(videoId)) return
 
+        val N = SessionManager.getCommentaryBlockSize(this)
+        
+        // Count how many total songs are in the queue (excluding commentaries)
+        var totalSongsCount = 0
+        for (i in 0 until exoPlayer.mediaItemCount) {
+            val item = exoPlayer.getMediaItemAt(i)
+            if (!isCommentaryMediaItem(item)) {
+                totalSongsCount++
+            }
+        }
+
+        val isFirstStart = totalSongsCount == 1 && N > 1
+        val itemsNeeded = if (isFirstStart) N - 1 else N
+
+        // Count how many upcoming songs are in the queue (excluding commentaries)
         val currentIndex = exoPlayer.currentMediaItemIndex
-        val upcomingCount = exoPlayer.mediaItemCount - currentIndex - 1
-        if (upcomingCount >= MIN_UPCOMING_ITEMS_BEFORE_REFILL) {
+        var upcomingSongsCount = 0
+        for (i in (currentIndex + 1) until exoPlayer.mediaItemCount) {
+            val item = exoPlayer.getMediaItemAt(i)
+            if (!isCommentaryMediaItem(item)) {
+                upcomingSongsCount++
+            }
+        }
+
+        // Refill only if upcoming count drops below 2 songs
+        if (upcomingSongsCount >= 2) {
             seedingVideoIds.remove(videoId)
             return
         }
@@ -204,17 +311,17 @@ class PlaybackService : MediaSessionService() {
 
         serviceScope.launch(Dispatchers.IO) {
             try {
-                android.util.Log.d(TAG, "seedRecommendations started for videoId: $videoId")
+                android.util.Log.d(PLAYBACK_SERVICE_TAG, "seedRecommendations started for videoId: $videoId")
                 val nextResult = YouTube.next(WatchEndpoint(videoId = videoId))
                 val nextRecommendations = nextResult
                     .onFailure { exception ->
-                        android.util.Log.e(TAG, "seedRecommendations failed via YouTube.next: ${exception.message}", exception)
+                        android.util.Log.e(PLAYBACK_SERVICE_TAG, "seedRecommendations failed via YouTube.next: ${exception.message}", exception)
                     }
                     .getOrNull()
                     ?.items
                     ?: emptyList()
 
-                android.util.Log.d(TAG, "seedRecommendations retrieved ${nextRecommendations.size} recommendations from YouTube.next")
+                android.util.Log.d(PLAYBACK_SERVICE_TAG, "seedRecommendations retrieved ${nextRecommendations.size} recommendations from YouTube.next")
 
                 val fallbackSearch: suspend () -> List<SongItem> = {
                     val searchQuery = listOf(title, artist)
@@ -223,20 +330,20 @@ class PlaybackService : MediaSessionService() {
                         .ifBlank { artist.ifBlank { title } }
 
                     if (searchQuery.isBlank()) {
-                        android.util.Log.w(TAG, "seedRecommendations has no title or artist for fallback search")
+                        android.util.Log.w(PLAYBACK_SERVICE_TAG, "seedRecommendations has no title or artist for fallback search")
                         emptyList()
                     } else {
-                        android.util.Log.d(TAG, "seedRecommendations falling back to search query: $searchQuery")
+                        android.util.Log.d(PLAYBACK_SERVICE_TAG, "seedRecommendations falling back to search query: $searchQuery")
                         val searchResult = YouTube.search(query = searchQuery, filter = YouTube.SearchFilter.FILTER_SONG)
                         if (searchResult.isSuccess) {
                             val items = searchResult.getOrNull()?.items ?: emptyList()
                             items.filterIsInstance<SongItem>()
                                 .also {
-                                    android.util.Log.d(TAG, "seedRecommendations fallback search retrieved ${it.size} songs")
+                                    android.util.Log.d(PLAYBACK_SERVICE_TAG, "seedRecommendations fallback search retrieved ${it.size} songs")
                                 }
                         } else {
                             val searchEx = searchResult.exceptionOrNull()
-                            android.util.Log.e(TAG, "seedRecommendations fallback search failed: ${searchEx?.message}", searchEx)
+                            android.util.Log.e(PLAYBACK_SERVICE_TAG, "seedRecommendations fallback search failed: ${searchEx?.message}", searchEx)
                             emptyList()
                         }
                     }
@@ -247,8 +354,7 @@ class PlaybackService : MediaSessionService() {
                         .map { index -> exoPlayer.getMediaItemAt(index).mediaId }
                         .toSet()
                 }
-                val itemsNeeded = (TARGET_UPCOMING_ITEMS - upcomingCount).coerceAtLeast(0)
-
+                
                 var filteredRecs = nextRecommendations
                     .filter { it.id !in existingVideoIds }
                     .take(itemsNeeded)
@@ -260,20 +366,30 @@ class PlaybackService : MediaSessionService() {
                 }
 
                 if (filteredRecs.isNotEmpty()) {
+                    val finalSongsToAppend = filteredRecs.take(itemsNeeded)
+                    
+                    // Asynchronously generate and synthesize the commentary interlude for these upcoming songs
+                    val commentaryItem = if (isFirstStart) null else createCommentaryItem(exoPlayer, finalSongsToAppend)
+
                     withContext(Dispatchers.Main) {
                         if (exoPlayer.currentMediaItem?.mediaId == videoId) {
-                            val mediaItems = filteredRecs.map(::buildUnresolvedMediaItem)
+                            val mediaItems = mutableListOf<MediaItem>()
+                            if (commentaryItem != null) {
+                                mediaItems.add(commentaryItem)
+                            }
+                            mediaItems.addAll(finalSongsToAppend.map(::buildUnresolvedMediaItem))
+                            
                             exoPlayer.addMediaItems(mediaItems)
                             lastSeededVideoId = videoId
                             preFetchNextMediaItem(exoPlayer)
-                            android.util.Log.d(TAG, "seedRecommendations successfully appended ${mediaItems.size} items to ExoPlayer")
+                            android.util.Log.d(PLAYBACK_SERVICE_TAG, "seedRecommendations successfully appended ${mediaItems.size} items to ExoPlayer")
                         }
                     }
                 } else {
-                    android.util.Log.w(TAG, "seedRecommendations got empty recommendations list, nothing to queue.")
+                    android.util.Log.w(PLAYBACK_SERVICE_TAG, "seedRecommendations got empty recommendations list, nothing to queue.")
                 }
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "seedRecommendations unexpected error: ${e.message}", e)
+                android.util.Log.e(PLAYBACK_SERVICE_TAG, "seedRecommendations unexpected error: ${e.message}", e)
             } finally {
                 withContext(Dispatchers.Main) {
                     seedingVideoIds.remove(videoId)
@@ -302,9 +418,65 @@ class PlaybackService : MediaSessionService() {
                 MediaMetadata.Builder()
                     .setTitle(song.title)
                     .setArtist(song.artists.joinToString(", ") { it.name })
+                    .setArtworkUri(android.net.Uri.parse(song.thumbnail))
                     .build()
             )
             .build()
+    }
+
+    private fun buildCommentaryMediaItem(audioFile: java.io.File): MediaItem {
+        val commentaryId = "commentary_${System.currentTimeMillis()}"
+        return MediaItem.Builder()
+            .setUri(android.net.Uri.fromFile(audioFile))
+            .setMediaId(commentaryId)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("AI DJ Commentary")
+                    .setArtist("TuneSpark AI DJ")
+                    .build()
+            )
+            .build()
+    }
+
+    private suspend fun createCommentaryItem(exoPlayer: ExoPlayer, upcomingSongItems: List<SongItem>): MediaItem? {
+        val geminiKey = SessionManager.getGeminiApiKey(this@PlaybackService)
+        if (geminiKey.isBlank()) {
+            android.util.Log.w(PLAYBACK_SERVICE_TAG, "createCommentaryItem: Gemini API Key is blank! Skipping commentary.")
+            return null
+        }
+
+        val upcomingSongsList = upcomingSongItems.map { "'${it.title}' by ${it.artists.joinToString(", ") { a -> a.name }}" }
+        
+        val currentSongInfo = withContext(Dispatchers.Main) {
+            val item = exoPlayer.currentMediaItem
+            if (item != null) {
+                "'${item.mediaMetadata.title}' by ${item.mediaMetadata.artist}"
+            } else null
+        }
+
+        withContext(Dispatchers.Main) {
+            Toast.makeText(this@PlaybackService, "AI DJ is writing commentary for the next set of songs...", Toast.LENGTH_SHORT).show()
+        }
+
+        return try {
+            android.util.Log.d(PLAYBACK_SERVICE_TAG, "createCommentaryItem: Generating commentary audio...")
+            val audioFile = TtsService.generateCommentaryAudio(
+                context = this@PlaybackService,
+                currentSong = currentSongInfo,
+                upcomingSongs = upcomingSongsList
+            )
+            android.util.Log.d(PLAYBACK_SERVICE_TAG, "createCommentaryItem: Successfully generated commentary audio: ${audioFile.absolutePath}")
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@PlaybackService, "AI DJ Commentary generated successfully!", Toast.LENGTH_SHORT).show()
+            }
+            buildCommentaryMediaItem(audioFile)
+        } catch (e: Exception) {
+            android.util.Log.e(PLAYBACK_SERVICE_TAG, "createCommentaryItem failed: ${e.message}", e)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@PlaybackService, "AI DJ Commentary failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+            null
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {

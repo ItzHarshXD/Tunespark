@@ -43,6 +43,8 @@ class MainActivity : ComponentActivity() {
         controllerFuture = MediaController.Builder(this, sessionToken).buildAsync()
 
         setContent {
+            val context = LocalContext.current
+            var themeSetting by remember { mutableStateOf(SessionManager.getTheme(context)) }
             var controller by remember { mutableStateOf<MediaController?>(null) }
 
             DisposableEffect(Unit) {
@@ -59,13 +61,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            TunesparkTheme {
+            TunesparkTheme(themeSetting = themeSetting) {
                 Scaffold(
                     modifier = Modifier.fillMaxSize()
                 ) { innerPadding ->
                     controller?.let { player ->
                         MainPlayerScreen(
                             exoPlayer = player,
+                            themeSetting = themeSetting,
+                            onThemeSettingChange = { newTheme ->
+                                themeSetting = newTheme
+                                SessionManager.saveTheme(context, newTheme)
+                            },
                             modifier = Modifier.padding(innerPadding)
                         )
                     } ?: Box(
@@ -96,11 +103,17 @@ enum class AppScreen {
     COMMENTARY,
     NOTIFICATIONS,
     LOCATION,
-    UPDATES
+    UPDATES,
+    PLAYLISTS
 }
 
 @Composable
-fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
+fun MainPlayerScreen(
+    exoPlayer: Player,
+    themeSetting: String,
+    onThemeSettingChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
     val coroutineScope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
@@ -145,6 +158,7 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
 
     var currentSongTitle by remember { mutableStateOf("No Track Loaded") }
     var currentSongArtist by remember { mutableStateOf("") }
+    var currentSongArtwork by remember { mutableStateOf<String?>(null) }
 
     var playQueue by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var currentTrackIndex by remember { mutableStateOf(-1) }
@@ -195,6 +209,7 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                 currentSongTitle = mediaMetadata.title?.toString() ?: "No Track Loaded"
                 currentSongArtist = mediaMetadata.artist?.toString() ?: ""
+                currentSongArtwork = mediaMetadata.artworkUri?.toString()
             }
 
             override fun onEvents(player: Player, events: Player.Events) {
@@ -208,6 +223,7 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
         // Initialize state from current player session
         currentSongTitle = exoPlayer.mediaMetadata.title?.toString() ?: "No Track Loaded"
         currentSongArtist = exoPlayer.mediaMetadata.artist?.toString() ?: ""
+        currentSongArtwork = exoPlayer.mediaMetadata.artworkUri?.toString()
         updateQueue()
 
         if (playbackState == Player.STATE_READY) {
@@ -250,13 +266,89 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
         }
     }
 
+    // Play list of songs in playlist mode starting from a specific index
+    val playPlaylist = { playlistName: String, songs: List<SongItem>, startIndex: Int ->
+        isLoading = true
+        errorMessage = null
+        statusMessage = "Loading playlist '$playlistName'..."
+        PlaybackService.isPlaylistMode = true
+
+        coroutineScope.launch {
+            if (songs.isEmpty() || startIndex !in songs.indices) {
+                isLoading = false
+                statusMessage = "Playlist is empty or invalid index."
+                return@launch
+            }
+
+            val targetSong = songs[startIndex]
+            currentSongTitle = targetSong.title
+            currentSongArtist = targetSong.artists.joinToString(", ") { it.name }
+            currentSongArtwork = targetSong.thumbnail
+
+            val fetchedUrl = withContext(Dispatchers.IO) {
+                StreamUrlResolver.resolveStreamUrl(targetSong.id)
+            }
+
+            if (fetchedUrl != null) {
+                try {
+                    exoPlayer.stop()
+                    exoPlayer.clearMediaItems()
+
+                    // Add all songs as MediaItems (resolve only the target song eagerly)
+                    songs.forEachIndexed { index, song ->
+                        val item = if (index == startIndex) {
+                            MediaItem.Builder()
+                                .setUri(fetchedUrl)
+                                .setMediaId(song.id)
+                                .setMediaMetadata(
+                                    MediaMetadata.Builder()
+                                        .setTitle(song.title)
+                                        .setArtist(song.artists.joinToString(", ") { it.name })
+                                        .setArtworkUri(android.net.Uri.parse(song.thumbnail))
+                                        .build()
+                                )
+                                .build()
+                        } else {
+                            MediaItem.Builder()
+                                .setUri(android.net.Uri.parse("tunespark://unresolved/${song.id}"))
+                                .setMediaId(song.id)
+                                .setMediaMetadata(
+                                    MediaMetadata.Builder()
+                                        .setTitle(song.title)
+                                        .setArtist(song.artists.joinToString(", ") { it.name })
+                                        .setArtworkUri(android.net.Uri.parse(song.thumbnail))
+                                        .build()
+                                )
+                                .build()
+                        }
+                        exoPlayer.addMediaItem(item)
+                    }
+
+                    exoPlayer.seekTo(startIndex, 0)
+                    exoPlayer.prepare()
+                    exoPlayer.play()
+                    isLoading = false
+                    statusMessage = "Playing Playlist: $playlistName"
+                } catch (e: Exception) {
+                    isLoading = false
+                    errorMessage = "Playlist playback failed: ${e.message}"
+                }
+            } else {
+                isLoading = false
+                errorMessage = "Failed to fetch stream URL for song"
+            }
+        }
+    }
+
     // The tapped song is resolved eagerly so playback starts immediately. The
     // service seeds and resolves the rest of the autoplay queue in the background.
     val playSong = { song: SongItem ->
+        PlaybackService.isPlaylistMode = false
         isLoading = true
         errorMessage = null
         currentSongTitle = song.title
         currentSongArtist = song.artists.joinToString(", ") { it.name }
+        currentSongArtwork = song.thumbnail
         statusMessage = "Fetching stream..."
 
         coroutineScope.launch {
@@ -265,6 +357,34 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
             }
             if (fetchedUrl != null) {
                 try {
+                    // Generate introductory start commentary if Gemini key is present
+                    val geminiKey = SessionManager.getGeminiApiKey(context)
+                    val startCommentaryItem = if (geminiKey.isNotBlank()) {
+                        statusMessage = "AI DJ is warming up..."
+                        withContext(Dispatchers.IO) {
+                            try {
+                                val audioFile = TtsService.generateCommentaryAudio(
+                                    context = context,
+                                    currentSong = null,
+                                    upcomingSongs = listOf("'${song.title}' by ${song.artists.joinToString(", ") { it.name }}")
+                                )
+                                MediaItem.Builder()
+                                    .setUri(android.net.Uri.fromFile(audioFile))
+                                    .setMediaId("commentary_${System.currentTimeMillis()}")
+                                    .setMediaMetadata(
+                                        MediaMetadata.Builder()
+                                            .setTitle("AI DJ Welcome")
+                                            .setArtist("TuneSpark AI DJ")
+                                            .build()
+                                    )
+                                    .build()
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                null
+                            }
+                        }
+                    } else null
+
                     val mediaItem = MediaItem.Builder()
                         .setUri(fetchedUrl)
                         .setMediaId(song.id)
@@ -272,13 +392,19 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
                             MediaMetadata.Builder()
                                 .setTitle(song.title)
                                 .setArtist(song.artists.joinToString(", ") { it.name })
+                                .setArtworkUri(android.net.Uri.parse(song.thumbnail))
                                 .build()
                         )
                         .build()
 
                     exoPlayer.stop()
                     exoPlayer.clearMediaItems()
-                    exoPlayer.setMediaItem(mediaItem)
+                    
+                    if (startCommentaryItem != null) {
+                        exoPlayer.addMediaItem(startCommentaryItem)
+                    }
+                    exoPlayer.addMediaItem(mediaItem)
+                    
                     exoPlayer.prepare()
                     exoPlayer.play()
                     isLoading = false
@@ -295,6 +421,7 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
     }
 
     val shufflePlay: () -> Unit = {
+        PlaybackService.isPlaylistMode = false
         isShuffling = true
         errorMessage = null
         statusMessage = "Loading regional mix..."
@@ -357,6 +484,12 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
             AppScreen.HOME -> {
                 HomeScreen(
                     currentSongTitle = currentSongTitle,
+                    currentSongArtist = currentSongArtist,
+                    currentSongArtwork = currentSongArtwork,
+                    isPlaying = isPlaying,
+                    onPlayPauseToggle = {
+                        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                    },
                     isShuffling = isShuffling,
                     onNavigate = { currentScreen = it },
                     onShufflePlay = shufflePlay
@@ -396,6 +529,7 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
                     currentTrackIndex = currentTrackIndex,
                     currentSongTitle = currentSongTitle,
                     currentSongArtist = currentSongArtist,
+                    currentSongArtwork = currentSongArtwork,
                     isPlaying = isPlaying,
                     isLoading = isLoading,
                     errorMessage = errorMessage,
@@ -407,6 +541,8 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
             }
             AppScreen.APPEARANCE -> {
                 AppearanceScreen(
+                    currentTheme = themeSetting,
+                    onThemeChange = onThemeSettingChange,
                     onNavigate = { currentScreen = it }
                 )
             }
@@ -432,6 +568,14 @@ fun MainPlayerScreen(exoPlayer: Player, modifier: Modifier = Modifier) {
             }
             AppScreen.UPDATES -> {
                 UpdatesScreen(
+                    onNavigate = { currentScreen = it }
+                )
+            }
+            AppScreen.PLAYLISTS -> {
+                PlaylistsScreen(
+                    onPlayPlaylist = { name, songs, startIndex ->
+                        playPlaylist(name, songs, startIndex)
+                    },
                     onNavigate = { currentScreen = it }
                 )
             }

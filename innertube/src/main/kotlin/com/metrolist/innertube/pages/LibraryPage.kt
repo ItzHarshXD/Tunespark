@@ -213,6 +213,39 @@ data class LibraryPage(
                     )
                 }
 
+                renderer.isPlaylist -> {
+                    val title = renderer.flexColumns.firstOrNull()
+                        ?.musicResponsiveListItemFlexColumnRenderer?.text
+                        ?.runs?.firstOrNull()?.text ?: return null
+                    val playlistId = renderer.navigationEndpoint?.browseEndpoint?.browseId?.removePrefix("VL") ?: return null
+
+                    val subtitleRuns = renderer.flexColumns.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs
+                    val authorRun = subtitleRuns?.firstOrNull()
+                    val songCountText = subtitleRuns?.lastOrNull()?.text
+
+                    val thumbnailUrl = renderer.thumbnail?.musicThumbnailRenderer?.getThumbnailUrl()
+
+                    PlaylistItem(
+                        id = playlistId,
+                        title = title,
+                        author = authorRun?.let {
+                            Artist(
+                                name = it.text,
+                                id = it.navigationEndpoint?.browseEndpoint?.browseId
+                            )
+                        },
+                        songCountText = songCountText,
+                        thumbnail = thumbnailUrl,
+                        playEndpoint = renderer.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchPlaylistEndpoint,
+                        shuffleEndpoint = renderer.menu?.menuRenderer?.items?.find {
+                            it.menuNavigationItemRenderer?.icon?.iconType == "MUSIC_SHUFFLE"
+                        }?.menuNavigationItemRenderer?.navigationEndpoint?.watchPlaylistEndpoint,
+                        radioEndpoint = renderer.menu?.menuRenderer?.items?.find {
+                            it.menuNavigationItemRenderer?.icon?.iconType == "MIX"
+                        }?.menuNavigationItemRenderer?.navigationEndpoint?.watchPlaylistEndpoint,
+                    )
+                }
+
                 renderer.isArtist -> ArtistItem(
                     id = renderer.navigationEndpoint?.browseEndpoint?.browseId ?: return null,
                     title = renderer.flexColumns.firstOrNull()?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.text

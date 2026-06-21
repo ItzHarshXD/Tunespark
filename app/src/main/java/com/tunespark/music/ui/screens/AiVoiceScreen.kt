@@ -49,10 +49,15 @@ fun AiVoiceScreen(
         }
     }
 
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onPrimaryColor = MaterialTheme.colorScheme.onPrimary
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(backgroundColor)
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
@@ -72,12 +77,12 @@ fun AiVoiceScreen(
                     .weight(1f)
                     .height(48.dp)
                     .then(
-                        if (activeAiTab != "Gemini") Modifier.border(1.dp, Color.White, RoundedCornerShape(24.dp))
+                        if (activeAiTab != "Gemini") Modifier.border(1.dp, textColor, RoundedCornerShape(24.dp))
                         else Modifier
                     ),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (activeAiTab == "Gemini") Color(0xFFFF0000) else Color.Transparent,
-                    contentColor = Color.White
+                    contentColor = if (activeAiTab == "Gemini") Color.White else textColor
                 ),
                 shape = RoundedCornerShape(24.dp)
             ) {
@@ -91,12 +96,12 @@ fun AiVoiceScreen(
                     .weight(1f)
                     .height(48.dp)
                     .then(
-                        if (activeAiTab != "ElevenLabs") Modifier.border(1.dp, Color.White, RoundedCornerShape(24.dp))
+                        if (activeAiTab != "ElevenLabs") Modifier.border(1.dp, textColor, RoundedCornerShape(24.dp))
                         else Modifier
                     ),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (activeAiTab == "ElevenLabs") Color(0xFFFF0000) else Color.Transparent,
-                    contentColor = Color.White
+                    contentColor = if (activeAiTab == "ElevenLabs") Color.White else textColor
                 ),
                 shape = RoundedCornerShape(24.dp)
             ) {
@@ -106,8 +111,8 @@ fun AiVoiceScreen(
 
         if (activeAiTab == "Gemini") {
             // Gemini Content
-            Text("How to get your free key:", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
-            
+            Text("How to get your free key:", color = textColor, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
+
             val geminiSteps = listOf(
                 "1. Go to aistudio.google.com/api-keys",
                 "2. Tap “Get API key”",
@@ -124,12 +129,12 @@ fun AiVoiceScreen(
                                 append("aistudio.google.com/api-keys")
                             }
                         },
-                        color = Color.White,
+                        color = textColor,
                         fontSize = 16.sp,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                 } else {
-                    Text(text = step, color = Color.White, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(text = step, color = textColor, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
                 }
             }
 
@@ -148,10 +153,10 @@ fun AiVoiceScreen(
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White
+                    unfocusedBorderColor = textColor,
+                    focusedBorderColor = textColor,
+                    unfocusedTextColor = textColor,
+                    focusedTextColor = textColor
                 ),
                 trailingIcon = {
                     IconButton(onClick = {
@@ -165,9 +170,44 @@ fun AiVoiceScreen(
                     }
                 }
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // A little check box on the Gemini tab for TTS service
+            var isGeminiTts by remember { mutableStateOf(SessionManager.getActiveTtsProvider(context) == "Gemini") }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        isGeminiTts = !isGeminiTts
+                        SessionManager.saveActiveTtsProvider(context, if (isGeminiTts) "Gemini" else "ElevenLabs")
+                    }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = isGeminiTts,
+                    onCheckedChange = { checked ->
+                        isGeminiTts = checked
+                        SessionManager.saveActiveTtsProvider(context, if (checked) "Gemini" else "ElevenLabs")
+                    },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Color(0xFFFF0000),
+                        uncheckedColor = textColor,
+                        checkmarkColor = Color.White
+                    )
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Use Gemini for TTS (otherwise ElevenLabs will be used)",
+                    color = textColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
         } else {
             // ElevenLabs Content
-            Text("How to get your free key:", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
+            Text("How to get your free key:", color = textColor, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
 
             val elevenSteps = listOf(
                 "1. Go to elevenlabs.io/app/developers/api-keys",
@@ -185,12 +225,12 @@ fun AiVoiceScreen(
                                 append("elevenlabs.io/app/developers/api-keys")
                             }
                         },
-                        color = Color.White,
+                        color = textColor,
                         fontSize = 16.sp,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                 } else {
-                    Text(text = step, color = Color.White, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(text = step, color = textColor, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
                 }
             }
 
@@ -209,10 +249,10 @@ fun AiVoiceScreen(
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White
+                    unfocusedBorderColor = textColor,
+                    focusedBorderColor = textColor,
+                    unfocusedTextColor = textColor,
+                    focusedTextColor = textColor
                 ),
                 trailingIcon = {
                     IconButton(onClick = {
@@ -243,12 +283,12 @@ fun AiVoiceScreen(
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
-                    unfocusedBorderColor = Color.White,
-                    focusedBorderColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White
+                    unfocusedBorderColor = textColor,
+                    focusedBorderColor = textColor,
+                    unfocusedTextColor = textColor,
+                    focusedTextColor = textColor
                 ),
-                label = { Text("Voice ID", color = Color.White) }
+                label = { Text("Voice ID", color = textColor) }
             )
         }
 
@@ -271,7 +311,7 @@ fun AiVoiceScreen(
                         } else {
                             TtsService.generateElevenLabsTts(context, currentKey, previewText, elevenLabsVoiceId)
                         }
-                        
+
                         activePlayer?.release()
                         val mp = MediaPlayer().apply {
                             setDataSource(file.absolutePath)
@@ -293,8 +333,8 @@ fun AiVoiceScreen(
                 .fillMaxWidth()
                 .height(56.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color.White,
-                contentColor = Color.Black,
+                containerColor = primaryColor,
+                contentColor = onPrimaryColor,
                 disabledContainerColor = Color.Gray,
                 disabledContentColor = Color.White
             ),
@@ -303,14 +343,15 @@ fun AiVoiceScreen(
             Text(
                 text = if (isGenerating) "Generating Preview..." else "Preview voice",
                 fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
+                fontSize = 16.sp,
+                color = if (isGenerating) Color.White else onPrimaryColor
             )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
         // Commentary Frequency Slider
-        Text("Commentary Frequency", color = Color.White, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
+        Text("Commentary Frequency", color = textColor, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
         Slider(
             value = commentaryFrequency,
             onValueChange = {

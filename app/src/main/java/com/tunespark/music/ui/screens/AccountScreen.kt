@@ -48,6 +48,11 @@ fun AccountScreen(
     val context = LocalContext.current
     var showWebView by remember { mutableStateOf(false) }
 
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val onSecondaryColor = MaterialTheme.colorScheme.onSecondary
+
     if (showWebView) {
         YouTubeSignInWebView(
             onCookieExtracted = { cookies ->
@@ -79,37 +84,11 @@ fun AccountScreen(
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .background(Color.Black)
+                .background(backgroundColor)
                 .padding(24.dp),
             horizontalAlignment = Alignment.Start
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 32.dp)
-            ) {
-                IconButton(
-                    onClick = { onNavigate(AppScreen.SETTINGS) },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(Color(0xFFFF0000), shape = CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowBack,
-                        contentDescription = "Back to Settings",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = "Account",
-                    color = Color.White,
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            SettingsHeader(title = "Account", onBack = { onNavigate(AppScreen.SETTINGS) })
 
             if (profileError != null) {
                 Card(
@@ -174,7 +153,7 @@ fun AccountScreen(
 
                         Text(
                             text = info.name,
-                            color = Color.White,
+                            color = textColor,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -201,7 +180,7 @@ fun AccountScreen(
 
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                            colors = CardDefaults.cardColors(containerColor = secondaryColor)
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp)
@@ -215,7 +194,7 @@ fun AccountScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = "Linked to YouTube Music via active session",
-                                    color = Color.White,
+                                    color = onSecondaryColor,
                                     fontSize = 16.sp
                                 )
                             }
@@ -249,7 +228,7 @@ fun AccountScreen(
                         Box(
                             modifier = Modifier
                                 .size(80.dp)
-                                .background(Color(0xFF222222), shape = CircleShape),
+                                .background(secondaryColor, shape = CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -262,7 +241,7 @@ fun AccountScreen(
 
                         Text(
                             text = "Unlock Your Personal Library",
-                            color = Color.White,
+                            color = textColor,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
@@ -303,16 +282,21 @@ fun YouTubeSignInWebView(
 ) {
     var webPageLoading by remember { mutableStateOf(true) }
 
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val onSecondaryColor = MaterialTheme.colorScheme.onSecondary
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(backgroundColor)
     ) {
         // Premium, Trustworthy Top App Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF121212))
+                .background(secondaryColor)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -335,7 +319,7 @@ fun YouTubeSignInWebView(
             Column {
                 Text(
                     text = "Sign In",
-                    color = Color.White,
+                    color = onSecondaryColor,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -354,11 +338,11 @@ fun YouTubeSignInWebView(
         if (webPageLoading) {
             LinearProgressIndicator(
                 color = Color(0xFFFF0000),
-                trackColor = Color.Black,
+                trackColor = backgroundColor,
                 modifier = Modifier.fillMaxWidth()
             )
         } else {
-            HorizontalDivider(color = Color(0xFF222222), thickness = 1.dp)
+            HorizontalDivider(color = secondaryColor, thickness = 1.dp)
         }
 
         // Native Secure Web Container

@@ -18,10 +18,13 @@ fun UpdatesScreen(
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(backgroundColor)
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
@@ -29,14 +32,14 @@ fun UpdatesScreen(
 
         Text(
             text = "App version",
-            color = Color.White,
+            color = textColor,
             fontSize = 24.sp,
             fontWeight = FontWeight.Normal
         )
 
         Text(
             text = "v1.24.2",
-            color = Color.White,
+            color = textColor,
             fontSize = 36.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(top = 8.dp)
@@ -51,7 +54,7 @@ fun UpdatesScreen(
             ) {
                 Text(
                     text = "Check for updates",
-                    color = Color.White,
+                    color = textColor,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier

@@ -16,6 +16,8 @@ object SessionManager {
     private const val KEY_ELEVENLABS_KEY = "elevenlabs_api_key"
     private const val KEY_ELEVENLABS_VOICE_ID = "elevenlabs_voice_id"
     private const val KEY_COMMENTARY_FREQUENCY = "commentary_frequency"
+    private const val KEY_ACTIVE_TTS_PROVIDER = "active_tts_provider"
+    private const val KEY_THEME = "app_theme"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -119,5 +121,26 @@ object SessionManager {
 
     fun saveCommentaryFrequency(context: Context, frequency: Float) {
         getPrefs(context).edit().putFloat(KEY_COMMENTARY_FREQUENCY, frequency).apply()
+    }
+
+    fun getActiveTtsProvider(context: Context): String {
+        return getPrefs(context).getString(KEY_ACTIVE_TTS_PROVIDER, "Gemini") ?: "Gemini"
+    }
+
+    fun saveActiveTtsProvider(context: Context, provider: String) {
+        getPrefs(context).edit().putString(KEY_ACTIVE_TTS_PROVIDER, provider).apply()
+    }
+
+    fun getCommentaryBlockSize(context: Context): Int {
+        val freq = getCommentaryFrequency(context)
+        return Math.round(freq * 7).toInt() + 1
+    }
+
+    fun getTheme(context: Context): String {
+        return getPrefs(context).getString(KEY_THEME, "System") ?: "System"
+    }
+
+    fun saveTheme(context: Context, theme: String) {
+        getPrefs(context).edit().putString(KEY_THEME, theme).apply()
     }
 }

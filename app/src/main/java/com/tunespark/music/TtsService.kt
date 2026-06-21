@@ -226,4 +226,149 @@ object TtsService {
             return@withContext tempFile
         }
     }
+
+    private suspend fun findWorkingTextModel(apiKey: String): String = withContext(Dispatchers.IO) {
+        val cleanApiKey = apiKey.trim()
+        val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$cleanApiKey"
+
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (response.isSuccessful) {
+                val responseString = response.body?.string() ?: ""
+                try {
+                    val jsonResponse = JSONObject(responseString)
+                    val modelsArray = jsonResponse.getJSONArray("models")
+                    
+                    val candidates = mutableListOf<String>()
+                    for (i in 0 until modelsArray.length()) {
+                        val modelObj = modelsArray.getJSONObject(i)
+                        val name = modelObj.getString("name") // e.g. "models/gemini-1.5-flash"
+                        val methods = modelObj.getJSONArray("supportedGenerationMethods")
+                        
+                        var supportsGenerateContent = false
+                        for (j in 0 until methods.length()) {
+                            if (methods.getString(j) == "generateContent") {
+                                supportsGenerateContent = true
+                                break
+                            }
+                        }
+                        
+                        if (supportsGenerateContent && !name.contains("tts") && !name.contains("translation")) {
+                            candidates.add(name)
+                        }
+                    }
+                    
+                    val preferred = candidates.find { it.contains("gemini-1.5-flash-latest") }
+                        ?: candidates.find { it.contains("gemini-1.5-flash") }
+                        ?: candidates.find { it.contains("gemini-2.5-flash") }
+                        ?: candidates.find { it.contains("gemini-2.0-flash") }
+                        ?: candidates.find { it.contains("flash") }
+                        ?: candidates.firstOrNull()
+                        
+                    if (preferred != null) {
+                        android.util.Log.d("TtsService", "Dynamic model discovery selected: $preferred")
+                        return@withContext preferred
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("TtsService", "Failed to parse models list, falling back: ${e.message}")
+                }
+            } else {
+                android.util.Log.e("TtsService", "Failed to query models list: Code ${response.code}")
+            }
+            
+            return@withContext "models/gemini-1.5-flash"
+        }
+    }
+
+    suspend fun generateCommentaryScript(
+        apiKey: String,
+        currentSong: String?,
+        upcomingSongs: List<String>
+    ): String = withContext(Dispatchers.IO) {
+        val cleanApiKey = apiKey.trim()
+        val modelName = findWorkingTextModel(cleanApiKey)
+        val url = "https://generativelanguage.googleapis.com/v1beta/$modelName:generateContent?key=$cleanApiKey"
+
+        val prompt = StringBuilder().apply {
+            append("You are a friendly, cool, professional AI radio host for 'TuneSpark AI DJ'.\n")
+            if (currentSong != null) {
+                append("The user just finished listening to: $currentSong.\n")
+            }
+            if (upcomingSongs.isNotEmpty()) {
+                append("Coming up next, you are transitioning to these songs: ${upcomingSongs.joinToString(", ")}.\n")
+            }
+            append("Generate a brief, engaging radio host transition or commentary script (1 to 2 sentences, maximum 25-30 words). ")
+            append("Make it flow naturally, mention the transition, and keep it extremely snappy and professional. ")
+            append("Output ONLY the spoken text. Do not include any actions, stage directions, sound effects, introductory greetings, markdown, or quotation marks.")
+        }.toString()
+
+        val requestJson = JSONObject().apply {
+            put("contents", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("text", prompt)
+                        })
+                    })
+                })
+            })
+        }
+
+        val body = requestJson.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(url)
+            .post(body)
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val responseBody = response.body?.string() ?: ""
+                throw Exception("Failed to generate script: Code ${response.code}. Detail: $responseBody")
+            }
+            val responseString = response.body?.string() ?: throw Exception("Empty response body from Gemini script generator")
+            try {
+                val jsonResponse = JSONObject(responseString)
+                val candidates = jsonResponse.getJSONArray("candidates")
+                val content = candidates.getJSONObject(0).getJSONObject("content")
+                val parts = content.getJSONArray("parts")
+                val generatedText = parts.getJSONObject(0).getString("text").trim()
+                return@withContext generatedText.replace("\"", "").replace("\n", " ")
+            } catch (e: Exception) {
+                throw Exception("Failed to parse Gemini script response: ${e.message}. Response: $responseString")
+            }
+        }
+    }
+
+    suspend fun generateCommentaryAudio(
+        context: Context,
+        currentSong: String?,
+        upcomingSongs: List<String>
+    ): File {
+        val provider = SessionManager.getActiveTtsProvider(context)
+        val geminiKey = SessionManager.getGeminiApiKey(context)
+        val elevenLabsKey = SessionManager.getElevenLabsApiKey(context)
+        val voiceId = SessionManager.getElevenLabsVoiceId(context)
+
+        if (geminiKey.isBlank()) {
+            throw Exception("Gemini API key is required to generate AI commentary script.")
+        }
+
+        // 1. Generate the script using Gemini 3.1
+        val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs)
+        android.util.Log.d("TtsService", "Generated script: $script")
+
+        // 2. Synthesize using the active TTS provider
+        return if (provider == "ElevenLabs") {
+            if (elevenLabsKey.isBlank()) {
+                throw Exception("ElevenLabs API key is required for ElevenLabs TTS.")
+            }
+            generateElevenLabsTts(context, elevenLabsKey, script, voiceId)
+        } else {
+            generateGeminiTts(context, geminiKey, script)
+        }
+    }
 }

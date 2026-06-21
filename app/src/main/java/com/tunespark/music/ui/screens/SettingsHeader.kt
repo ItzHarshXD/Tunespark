@@ -41,7 +41,7 @@ fun SettingsHeader(
         Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = title,
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onBackground,
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold
         )

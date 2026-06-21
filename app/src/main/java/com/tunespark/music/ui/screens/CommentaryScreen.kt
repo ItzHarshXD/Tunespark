@@ -29,10 +29,15 @@ fun CommentaryScreen(
         "Skip reaction"
     )
 
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onPrimaryColor = MaterialTheme.colorScheme.onPrimary
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(backgroundColor)
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
@@ -56,14 +61,14 @@ fun CommentaryScreen(
                 Box(
                     modifier = Modifier
                         .size(28.dp)
-                        .background(if (isChecked) Color.White else Color.Transparent, CircleShape)
-                        .border(2.dp, if (isChecked) Color.White else Color.Gray, CircleShape),
+                        .background(if (isChecked) primaryColor else Color.Transparent, CircleShape)
+                        .border(2.dp, if (isChecked) primaryColor else Color.Gray, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     if (isChecked) {
                         Text(
                             text = "✓",
-                            color = Color.Black,
+                            color = onPrimaryColor,
                             fontSize = 16.sp,
                             fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                         )
@@ -72,7 +77,7 @@ fun CommentaryScreen(
                 Spacer(modifier = Modifier.width(16.dp))
                 Text(
                     text = option,
-                    color = Color.White,
+                    color = textColor,
                     fontSize = 22.sp,
                     fontWeight = androidx.compose.ui.text.font.FontWeight.Normal
                 )

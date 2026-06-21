@@ -18,8 +18,9 @@ Key files and packages:
   - Single-activity entry point. Boots the Jetpack Compose UI, binds to `PlaybackService` via Media3 `MediaController`, initializes `SessionManager`, and hosts global state variables. Delegates screen rendering cleanly to the individual composable screens.
 - `app/src/main/java/com/tunespark/music/ui/screens/`
   - Modularized screens package hosting distinct, clean Jetpack Compose UI screens:
-    - `HomeScreen.kt`: Landing view with brand headers, settings launcher, quick shuffle play, and search launcher.
-    - `SearchScreen.kt`: Dedicated search field, queries YouTube Music, displays song results, and launches playback.
+    - `HomeScreen.kt`: Dynamic, light-themed premium dashboard. Displays current system clock and local weather. Reacts instantly to play state: displays a beautiful spectrum visualizer, a circular play-controller, and compact mini-player when playing, or a personalized greeting with categories and a "Start Radio" button when inactive.
+    - `PlaylistsScreen.kt`: Highly-polished 3-column interactive layout supporting Light and Dark themes dynamically. Displays pill tabs ("Playlists", "Albums", "Artists"), sorting triggers, search navigation, and structured playlists: Liked (red with central heart outline) and local lists. Triggers background playlist playback mode with sequential commentary injections.
+    - `SearchScreen.kt`: Advanced zero-button interactive search screen. Displays real-time auto-suggestions and reactive song search results side-by-side as you type, matching a clean white minimalist aesthetic.
     - `RadioScreen.kt`: Audio player view displaying up-next list and control triggers mapped to MediaController commands.
     - `SettingsScreen.kt`: Interactive links leading to dedicated customization options.
     - `AccountScreen.kt`: Manages optional YouTube Music login WebViews, sign-out actions, and live profile details.
@@ -40,6 +41,9 @@ Key files and packages:
 - `app/src/main/java/com/tunespark/music/StreamUrlResolver.kt`
   - Resolves a YouTube video ID into a playable stream URL.
   - Tries several InnerTube client profiles and picks the first usable direct stream URL.
+- `app/src/main/java/com/tunespark/music/WeatherService.kt`
+  - Integrates Open-Meteo's free, no-key-required weather API via OkHttp.
+  - Parses the active coordinates from SharedPreferences and returns live temperature, weather codes, and mapped description emojis.
 - `app/src/main/AndroidManifest.xml`
   - Declares network, foreground service, media playback, and service registration requirements.
 
@@ -62,16 +66,26 @@ Key files:
 
 ## Screen Architecture
 
-TuneSpark has been structured into 11 distinct screens for clear separation of concerns and a native-feeling UX:
+TuneSpark has been structured into 12 distinct screens for clear separation of concerns and a native-feeling UX:
 
 1. **Home Screen**:
-   - The landing screen containing the branding header, a dedicated **Settings** button, a **Quick Shuffle Play** card, and a **Search Music** button.
-   - If a track is already playing or loaded, a convenient **Go to Radio Screen** button appears.
+   - A highly polished, light-themed system dashboard featuring a real-time system clock and localized weather info.
+   - Implements two dynamic layouts tailored to the active audio state:
+     - **Active Playback Mode**: Displays a large circular play/pause controller, an elegant vector-dot equalizer waveform, a "Stop Radio" action button, and a modern compact bottom mini-player alongside search/playlist controls.
+     - **Inactive Mode**: Displays a personalized greeting ("Good Evening, Harsh"), horizontal scrollable tags (Chill, Feel good, Commute, Party), and an outlined "Start Radio" quick-play card, next to search/playlist pill triggers at the bottom.
 2. **Search Screen**:
    - Dedicated search layout. Users enter queries, trigger YouTube Music searches, and select a track.
    - Selecting a track immediately triggers playback and transitions to the Radio screen.
 3. **Radio Screen**:
-   - The playback view. Displays the standard **Up Next** queue and hosts the persistent playback controller card at the bottom.
+   - A dedicated premium audio player view completely distinct from the Home screen, designed to perfectly match the user's provided target design.
+   - Features a custom top header bar containing:
+     - Left: A solid black circle Back button with a white back arrow to return the user to the Home screen without stopping playback.
+     - Center: A solid black Play/Pause capsule button showing current state (e.g. "⏸ Pause" or "▶ Play") in bold white text.
+     - Right: A solid red circle Close button with a white "X" to immediately stop playback and return to the Home screen.
+   - Features a central, prominent dot-matrix Equalizer Waveform visualizer located below the top bar and above the song details, which uses physics-simulated bass, mid, and treble components to dance accurately on the song's real-time beats.
+   - Features a Song details section with rounded square artwork on the left, and bold title & artist details on the right.
+   - Features a beautiful, scrollable, styled lyrics block with the first lines highlighted in bold black, progressively fading out into lighter shades of gray.
+   - Features a capsule Skip button at the very bottom with a white background, black border, a solid black circle on the left containing a skip next icon, and "Skip song" text centered.
 4. **Settings Screen**:
    - Offers customization options: *Appearance*, *Account*, *AI and Voice*, *Commentary*, *Notifications*, *Location*, and *Updates*.
    - Stylized dark/black background layout with a custom red circular back button.
@@ -90,8 +104,42 @@ TuneSpark has been structured into 11 distinct screens for clear separation of c
     - Manage auto/manual location settings with active GPS switches, current coordinate display, and a dedicated GPS crosshair action button.
 11. **Updates Screen**:
     - Displays current app version (v1.24.2) and hosts interactive dummy "Check for updates" buttons.
+12. **Playlists Screen**:
+    - Designed precisely to match reference layouts for both Light and Dark themes.
+    - Displays top capsule pill tabs ("Playlists", "Albums", "Artists"), "Date added ↓" sorting options, and a search icon.
+    - Features a clean 3-column grid of playlist items. The "Liked" playlist features a prominent red card with a white heart outline icon, while other playlists are rendered with rounded squares using adaptive backgrounds (solid black in Light theme and solid white in Dark theme).
+    - Selecting any playlist instantly loads its complete song collection into the background media service, sets `isPlaylistMode` to true, and launches the player view.
 
 ---
+
+## How Playback Works
+
+### Sequential Playback Flow & AI Commentary Injection
+
+To create a radio-host-style music streaming experience (like Spotify's AI DJ mode), TuneSpark integrates dynamic background playback queues with AI commentary and voice synthesis tracks using the Gemini 3.1 Flash and ElevenLabs engines.
+
+#### 1. Dynamic Block Sizing (Commentary Frequency)
+The active song block size ($N$) is dynamically parsed from the user's Commentary Frequency setting:
+- A float value from the slider UI in the **AI and Voice Settings** screen is mapped to a block size between 1 and 8 songs.
+- The UI displays this mapped value in real-time (e.g., "Commentary Frequency: Every 4 songs").
+- This block size determines how many consecutive songs play before an AI interlude.
+
+#### 2. Unified Lookahead Refilling and Commentary Generation
+Instead of a separate dynamic injection loop, `PlaybackService` unifies queue refilling and commentary injection:
+- It monitors the number of upcoming songs in the queue (excluding commentaries).
+- When the upcoming songs count drops below 2, it triggers a background refilling operation.
+- It fetches the next block of exactly $N$ recommendations.
+- It asynchronously generates a context-aware radio host commentary script (25-30 words) using **Gemini 3.1 Flash Preview** describing the upcoming songs and transitions.
+- It synthesizes the voice track using the active provider:
+  - **Gemini TTS**: Speaks through the prebuilt `Kore` voice.
+  - **ElevenLabs**: Speaks using the configured Voice ID (e.g. `EXAVITQu4vr4xnSDxMaL`) and customized high-quality voice settings.
+- It builds and appends both the synthesized commentary item (`mediaId` starting with `commentary_`) and the $N$ recommendations as a single, perfectly structured batch (`[Commentary] + [Block of N Songs]`).
+
+#### 3. Clean Playback Service Routing
+When the player encounters a commentary item, it routes around standard YouTube recommendations:
+- It skips resolving YouTube stream URLs.
+- It skips recommending new tracks on the next watch endpoint.
+- It continues lookahead pre-fetching for subsequent song tracks, maintaining a flawless, zero-lag transition between the commentary and the next batch of music.
 
 ## How Playback Works
 

@@ -86,6 +86,14 @@ fun LocationScreen(
         }
     }
 
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onPrimaryColor = MaterialTheme.colorScheme.onPrimary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val onSecondaryColor = MaterialTheme.colorScheme.onSecondary
+
     if (showManualDialog) {
         var manualCity by remember { mutableStateOf("") }
         var manualLat by remember { mutableStateOf("") }
@@ -93,8 +101,8 @@ fun LocationScreen(
 
         AlertDialog(
             onDismissRequest = { showManualDialog = false },
-            title = { Text("Enter Location Manually", color = Color.White) },
-            containerColor = Color(0xFF1E1E1E),
+            title = { Text("Enter Location Manually", color = textColor) },
+            containerColor = surfaceColor,
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -102,9 +110,9 @@ fun LocationScreen(
                         onValueChange = { manualCity = it },
                         label = { Text("City, State", color = Color.Gray) },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFFFF0000),
+                            focusedTextColor = textColor,
+                            unfocusedTextColor = textColor,
+                            focusedBorderColor = primaryColor,
                             unfocusedBorderColor = Color.Gray
                         ),
                         modifier = Modifier.fillMaxWidth()
@@ -114,9 +122,9 @@ fun LocationScreen(
                         onValueChange = { manualLat = it },
                         label = { Text("Latitude (e.g. 40.7128)", color = Color.Gray) },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFFFF0000),
+                            focusedTextColor = textColor,
+                            unfocusedTextColor = textColor,
+                            focusedBorderColor = primaryColor,
                             unfocusedBorderColor = Color.Gray
                         ),
                         modifier = Modifier.fillMaxWidth()
@@ -126,9 +134,9 @@ fun LocationScreen(
                         onValueChange = { manualLng = it },
                         label = { Text("Longitude (e.g. -74.0060)", color = Color.Gray) },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFFFF0000),
+                            focusedTextColor = textColor,
+                            unfocusedTextColor = textColor,
+                            focusedBorderColor = primaryColor,
                             unfocusedBorderColor = Color.Gray
                         ),
                         modifier = Modifier.fillMaxWidth()
@@ -154,14 +162,14 @@ fun LocationScreen(
                         
                         showManualDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000))
+                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor, contentColor = onPrimaryColor)
                 ) {
-                    Text("Save", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Save", color = onPrimaryColor, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showManualDialog = false }) {
-                    Text("Cancel", color = Color.White)
+                    Text("Cancel", color = textColor)
                 }
             }
         )
@@ -170,7 +178,7 @@ fun LocationScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(backgroundColor)
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
@@ -185,7 +193,7 @@ fun LocationScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Automatic Location",
-                    color = Color.White,
+                    color = textColor,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -202,8 +210,8 @@ fun LocationScreen(
                     sharedPrefs.edit().putBoolean("auto_location", checked).apply()
                 },
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color(0xFFFF0000),
-                    checkedTrackColor = Color(0xFFFF0000).copy(alpha = 0.5f),
+                    checkedThumbColor = primaryColor,
+                    checkedTrackColor = primaryColor.copy(alpha = 0.5f),
                     uncheckedThumbColor = Color.Gray,
                     uncheckedTrackColor = Color.DarkGray
                 )
@@ -224,7 +232,7 @@ fun LocationScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Current: $locationDisplay",
-                    color = Color.White,
+                    color = textColor,
                     fontSize = 16.sp
                 )
                 if (gpsStatusText.isNotEmpty()) {
@@ -304,8 +312,8 @@ fun LocationScreen(
                 .fillMaxWidth()
                 .height(56.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF2C2C2C),
-                contentColor = Color.White
+                containerColor = secondaryColor,
+                contentColor = onSecondaryColor
             ),
             shape = RoundedCornerShape(28.dp)
         ) {
@@ -321,7 +329,8 @@ fun LocationScreen(
                 Text(
                     text = "Enter Location Manually",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    fontSize = 16.sp,
+                    color = onSecondaryColor
                 )
             }
         }

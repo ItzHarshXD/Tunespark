@@ -19,14 +19,18 @@ import com.tunespark.music.AppScreen
 
 @Composable
 fun AppearanceScreen(
+    currentTheme: String,
+    onThemeChange: (String) -> Unit,
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedTheme by remember { mutableStateOf("System") }
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(backgroundColor)
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
@@ -34,7 +38,7 @@ fun AppearanceScreen(
 
         Text(
             text = "Select theme",
-            color = Color.White,
+            color = textColor,
             fontSize = 20.sp,
             fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
             modifier = Modifier.padding(bottom = 32.dp)
@@ -48,43 +52,44 @@ fun AppearanceScreen(
             // Light Theme
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable { selectedTheme = "Light" }
+                modifier = Modifier.clickable { onThemeChange("Light") }
             ) {
                 Box(
                     modifier = Modifier
                         .size(80.dp)
                         .background(Color.White, shape = CircleShape)
+                        .border(1.5.dp, textColor.copy(alpha = 0.2f), CircleShape)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                ThemeLabel(text = "Light", isSelected = selectedTheme == "Light")
+                ThemeLabel(text = "Light", isSelected = currentTheme == "Light")
             }
 
             // Dark Theme
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable { selectedTheme = "Dark" }
+                modifier = Modifier.clickable { onThemeChange("Dark") }
             ) {
                 Box(
                     modifier = Modifier
                         .size(80.dp)
                         .background(Color.Black, shape = CircleShape)
-                        .border(1.5.dp, Color.White, CircleShape)
+                        .border(1.5.dp, textColor.copy(alpha = 0.2f), CircleShape)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                ThemeLabel(text = "Dark", isSelected = selectedTheme == "Dark")
+                ThemeLabel(text = "Dark", isSelected = currentTheme == "Dark")
             }
 
             // System Theme
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable { selectedTheme = "System" }
+                modifier = Modifier.clickable { onThemeChange("System") }
             ) {
                 Box(
                     modifier = Modifier
                         .size(80.dp)
                         .clip(CircleShape)
                         .background(Color.Black)
-                        .border(1.5.dp, Color.White, CircleShape)
+                        .border(1.5.dp, textColor, CircleShape)
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         drawRect(
@@ -94,7 +99,7 @@ fun AppearanceScreen(
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                ThemeLabel(text = "System", isSelected = selectedTheme == "System")
+                ThemeLabel(text = "System", isSelected = currentTheme == "System")
             }
         }
     }
@@ -102,13 +107,14 @@ fun AppearanceScreen(
 
 @Composable
 fun ThemeLabel(text: String, isSelected: Boolean) {
+    val textColor = MaterialTheme.colorScheme.onBackground
     if (isSelected) {
         Box(
             modifier = Modifier
-                .border(1.5.dp, Color.White, RoundedCornerShape(12.dp))
+                .border(1.5.dp, textColor, RoundedCornerShape(12.dp))
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         ) {
-            Text(text = text, color = Color.White, fontSize = 14.sp)
+            Text(text = text, color = textColor, fontSize = 14.sp)
         }
     } else {
         Text(text = text, color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp))
