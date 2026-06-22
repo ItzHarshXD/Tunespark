@@ -39,7 +39,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 data class LyricLine(val timestampMs: Long, val text: String)
 
 // Clean YouTube video titles of promotional metadata and clutter
-private fun cleanYouTubeTitle(title: String): String {
+fun cleanYouTubeTitle(title: String): String {
     val cleanupPatterns = listOf(
         Regex("""\s*\(.*?((?i)official|video|audio|lyrics|lyric|visualizer|hd|hq|4k|remaster|remix|live|acoustic|version|edit|extended|radio|clean|explicit).*?\)"""),
         Regex("""\s*\[.*?((?i)official|video|audio|lyrics|lyric|visualizer|hd|hq|4k|remaster|remix|live|acoustic|version|edit|extended|radio|clean|explicit).*?\]"""),
@@ -59,7 +59,7 @@ private fun cleanYouTubeTitle(title: String): String {
 }
 
 // Helper function to parse timestamps and clean lyrics
-private fun parseLyricsToLines(rawLyrics: String): List<LyricLine> {
+fun parseLyricsToLines(rawLyrics: String): List<LyricLine> {
     val lines = rawLyrics.lines()
     val cleanLines = mutableListOf<LyricLine>()
     val timestampRegex = Regex("""^\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?]""")
@@ -110,16 +110,14 @@ fun RadioScreen(
     hasPreviousTrack: Boolean,
     hasNextTrack: Boolean,
     onNavigate: (AppScreen) -> Unit,
+    lyricsLines: List<LyricLine>,
+    isLyricsLoading: Boolean,
     modifier: Modifier = Modifier
 ) {
     // Handle back button press (smooth navigate back to Home Screen)
     BackHandler {
         onNavigate(AppScreen.HOME)
     }
-
-    // Dynamic lyrics state and loader
-    var lyricsLines by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
-    var isLyricsLoading by remember { mutableStateOf(false) }
 
     // Live media playback position tracking for lyrics sync
     var currentPosition by remember { mutableStateOf(0L) }
@@ -146,72 +144,6 @@ fun RadioScreen(
                 }
             }
             bestIndex
-        }
-    }
-
-    LaunchedEffect(currentSongTitle, currentSongArtist) {
-        if (currentSongTitle.isEmpty() || currentSongTitle == "No Track Loaded" || currentSongTitle.startsWith("AI DJ") || currentSongTitle.startsWith("commentary_")) {
-            lyricsLines = listOf(LyricLine(-1L, "No lyrics available for this track."))
-            isLyricsLoading = false
-            return@LaunchedEffect
-        }
-
-        isLyricsLoading = true
-        lyricsLines = emptyList()
-
-        // Get duration on the Main/UI thread before switching context to IO dispatcher
-        val durationMs = exoPlayer.duration
-        val durationSec = if (durationMs > 0) (durationMs / 1000).toInt() else -1
-
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                // 1. Clean track metadata to eliminate YouTube specific promotional garbage
-                val cleanedTitle = cleanYouTubeTitle(currentSongTitle)
-                val cleanedArtist = currentSongArtist.trim()
-
-                // 2. Primary Query: Cleaned Title + Artist + Duration (most precise)
-                var result = LrcLib.getLyrics(
-                    title = cleanedTitle,
-                    artist = cleanedArtist,
-                    duration = durationSec
-                )
-                var rawLyrics = result.getOrNull()
-
-                // 3. Fallback 1: Drop strict duration constraints (search name only)
-                if (rawLyrics == null) {
-                    result = LrcLib.getLyrics(
-                        title = cleanedTitle,
-                        artist = cleanedArtist,
-                        duration = -1
-                    )
-                    rawLyrics = result.getOrNull()
-                }
-
-                // 4. Fallback 2: General text query (drop standard fields, perform text lookup)
-                if (rawLyrics == null) {
-                    val searchResult = LrcLib.lyrics(artist = cleanedArtist, title = cleanedTitle)
-                    val tracks = searchResult.getOrNull()
-                    if (!tracks.isNullOrEmpty()) {
-                        val matchedTrack = tracks.firstOrNull { it.syncedLyrics != null || it.plainLyrics != null }
-                        rawLyrics = matchedTrack?.syncedLyrics ?: matchedTrack?.plainLyrics
-                    }
-                }
-
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    if (rawLyrics != null) {
-                        val parsed = parseLyricsToLines(rawLyrics)
-                        lyricsLines = if (parsed.isNotEmpty()) parsed else listOf(LyricLine(-1L, "No lyrics found."))
-                    } else {
-                        lyricsLines = listOf(LyricLine(-1L, "No lyrics found for this song."))
-                    }
-                    isLyricsLoading = false
-                }
-            } catch (e: Exception) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    lyricsLines = listOf(LyricLine(-1L, "Could not load lyrics: ${e.localizedMessage ?: "Unknown error"}"))
-                    isLyricsLoading = false
-                }
-            }
         }
     }
 

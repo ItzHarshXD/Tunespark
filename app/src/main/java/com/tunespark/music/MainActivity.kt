@@ -1,4 +1,4 @@
-package com.tunespark.music
+ackage com.tunespark.music
 
 import android.content.ComponentName
 import android.os.Bundle
@@ -23,6 +23,11 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.tunespark.music.ui.theme.TunesparkTheme
 import com.tunespark.music.ui.screens.*
+import com.tunespark.music.ui.screens.LyricLine
+import com.tunespark.music.ui.screens.cleanYouTubeTitle
+import com.tunespark.music.ui.screens.parseLyricsToLines
+import com.metrolist.lrclib.LrcLib
+import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -118,7 +123,7 @@ fun MainPlayerScreen(
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
 
-    var currentScreen by remember { mutableStateOf(AppScreen.HOME) }
+    var currentScreen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
     var accountInfo by remember { mutableStateOf<com.metrolist.innertube.models.AccountInfo?>(SessionManager.getCachedAccountInfo(context)) }
     var isLoadingProfile by remember { mutableStateOf(false) }
     var profileError by remember { mutableStateOf<String?>(null) }
@@ -159,6 +164,75 @@ fun MainPlayerScreen(
     var currentSongTitle by remember { mutableStateOf("No Track Loaded") }
     var currentSongArtist by remember { mutableStateOf("") }
     var currentSongArtwork by remember { mutableStateOf<String?>(null) }
+
+    var hoistedLyricsLines by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
+    var hoistedIsLyricsLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentSongTitle, currentSongArtist) {
+        if (currentSongTitle.isEmpty() || currentSongTitle == "No Track Loaded" || currentSongTitle.startsWith("AI DJ") || currentSongTitle.startsWith("commentary_")) {
+            hoistedLyricsLines = listOf(LyricLine(-1L, "No lyrics available for this track."))
+            hoistedIsLyricsLoading = false
+            return@LaunchedEffect
+        }
+
+        hoistedIsLyricsLoading = true
+        hoistedLyricsLines = emptyList()
+
+        // Get duration on the Main/UI thread before switching context to IO dispatcher
+        val durationMs = exoPlayer.duration
+        val durationSec = if (durationMs > 0) (durationMs / 1000).toInt() else -1
+
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            try {
+                // 1. Clean track metadata to eliminate YouTube specific promotional garbage
+                val cleanedTitle = cleanYouTubeTitle(currentSongTitle)
+                val cleanedArtist = currentSongArtist.trim()
+
+                // 2. Primary Query: Cleaned Title + Artist + Duration (most precise)
+                var result = LrcLib.getLyrics(
+                    title = cleanedTitle,
+                    artist = cleanedArtist,
+                    duration = durationSec
+                )
+                var rawLyrics = result.getOrNull()
+
+                // 3. Fallback 1: Drop strict duration constraints (search name only)
+                if (rawLyrics == null) {
+                    result = LrcLib.getLyrics(
+                        title = cleanedTitle,
+                        artist = cleanedArtist,
+                        duration = -1
+                    )
+                    rawLyrics = result.getOrNull()
+                }
+
+                // 4. Fallback 2: General text query (drop standard fields, perform text lookup)
+                if (rawLyrics == null) {
+                    val searchResult = LrcLib.lyrics(artist = cleanedArtist, title = cleanedTitle)
+                    val tracks = searchResult.getOrNull()
+                    if (!tracks.isNullOrEmpty()) {
+                        val matchedTrack = tracks.firstOrNull { it.syncedLyrics != null || it.plainLyrics != null }
+                        rawLyrics = matchedTrack?.syncedLyrics ?: matchedTrack?.plainLyrics
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (rawLyrics != null) {
+                        val parsed = parseLyricsToLines(rawLyrics)
+                        hoistedLyricsLines = if (parsed.isNotEmpty()) parsed else listOf(LyricLine(-1L, "No lyrics found."))
+                    } else {
+                        hoistedLyricsLines = listOf(LyricLine(-1L, "No lyrics found for this song."))
+                    }
+                    hoistedIsLyricsLoading = false
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    hoistedLyricsLines = listOf(LyricLine(-1L, "Could not load lyrics: ${e.localizedMessage ?: "Unknown error"}"))
+                    hoistedIsLyricsLoading = false
+                }
+            }
+        }
+    }
 
     var playQueue by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var currentTrackIndex by remember { mutableStateOf(-1) }
@@ -536,7 +610,9 @@ fun MainPlayerScreen(
                     statusMessage = statusMessage,
                     hasPreviousTrack = hasPreviousTrack,
                     hasNextTrack = hasNextTrack,
-                    onNavigate = { currentScreen = it }
+                    onNavigate = { currentScreen = it },
+                    lyricsLines = hoistedLyricsLines,
+                    isLyricsLoading = hoistedIsLyricsLoading
                 )
             }
             AppScreen.APPEARANCE -> {
