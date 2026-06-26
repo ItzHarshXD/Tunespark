@@ -262,13 +262,7 @@ object TtsService {
                         }
                     }
                     
-                    val preferred = candidates.find { it.contains("gemini-1.5-flash-latest") }
-                        ?: candidates.find { it.contains("gemini-1.5-flash") }
-                        ?: candidates.find { it.contains("gemini-2.5-flash") }
-                        ?: candidates.find { it.contains("gemini-2.0-flash") }
-                        ?: candidates.find { it.contains("flash") }
-                        ?: candidates.firstOrNull()
-                        
+                    val preferred = candidates.find { it.contains("gemini-3.1-flash-lite") }
                     if (preferred != null) {
                         android.util.Log.d("TtsService", "Dynamic model discovery selected: $preferred")
                         return@withContext preferred
@@ -280,7 +274,7 @@ object TtsService {
                 android.util.Log.e("TtsService", "Failed to query models list: Code ${response.code}")
             }
             
-            return@withContext "models/gemini-1.5-flash"
+            return@withContext "models/gemini-3.1-flash-lite"
         }
     }
 
@@ -347,7 +341,7 @@ object TtsService {
         context: Context,
         currentSong: String?,
         upcomingSongs: List<String>
-    ): File {
+    ): Pair<File, String> {
         val provider = SessionManager.getActiveTtsProvider(context)
         val geminiKey = SessionManager.getGeminiApiKey(context)
         val elevenLabsKey = SessionManager.getElevenLabsApiKey(context)
@@ -357,18 +351,31 @@ object TtsService {
             throw Exception("Gemini API key is required to generate AI commentary script.")
         }
 
-        // 1. Generate the script using Gemini 3.1
-        val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs)
-        android.util.Log.d("TtsService", "Generated script: $script")
+        var lastException: Exception? = null
+        for (attempt in 1..3) {
+            try {
+                // 1. Generate the script using Gemini 3.1
+                val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs)
+                android.util.Log.d("TtsService", "Generated script (Attempt $attempt): $script")
 
-        // 2. Synthesize using the active TTS provider
-        return if (provider == "ElevenLabs") {
-            if (elevenLabsKey.isBlank()) {
-                throw Exception("ElevenLabs API key is required for ElevenLabs TTS.")
+                // 2. Synthesize using the active TTS provider
+                val audioFile = if (provider == "ElevenLabs") {
+                    if (elevenLabsKey.isBlank()) {
+                        throw Exception("ElevenLabs API key is required for ElevenLabs TTS.")
+                    }
+                    generateElevenLabsTts(context, elevenLabsKey, script, voiceId)
+                } else {
+                    generateGeminiTts(context, geminiKey, script)
+                }
+                return Pair(audioFile, script)
+            } catch (e: Exception) {
+                lastException = e
+                android.util.Log.e("TtsService", "Attempt $attempt failed: ${e.message}")
+                if (attempt < 3) {
+                    kotlinx.coroutines.delay(2000L * attempt) // backoff: 2s, 4s
+                }
             }
-            generateElevenLabsTts(context, elevenLabsKey, script, voiceId)
-        } else {
-            generateGeminiTts(context, geminiKey, script)
         }
+        throw lastException ?: Exception("Unknown error generating commentary audio after 3 attempts.")
     }
 }

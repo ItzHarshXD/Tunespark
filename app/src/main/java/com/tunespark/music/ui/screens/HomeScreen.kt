@@ -33,6 +33,7 @@ import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
 import com.tunespark.music.WeatherInfo
 import com.tunespark.music.WeatherService
+import com.tunespark.music.ui.theme.BitcountSingleFontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -58,7 +59,6 @@ fun HomeScreen(
     var timeString by remember { mutableStateOf("12:00") }
 
     LaunchedEffect(Unit) {
-        // Fetch current system time dynamically
         while (true) {
             val cal = java.util.Calendar.getInstance()
             val hourVal = cal.get(java.util.Calendar.HOUR)
@@ -72,7 +72,7 @@ fun HomeScreen(
     LaunchedEffect(Unit) {
         val sharedPrefs = context.getSharedPreferences("tunespark_location_prefs", Context.MODE_PRIVATE)
         val locationDisplay = sharedPrefs.getString("location_display", "San Francisco, CA (37.7749, -122.4194)") ?: "San Francisco, CA (37.7749, -122.4194)"
-        
+
         isWeatherLoading = true
         weatherError = null
         try {
@@ -114,8 +114,8 @@ fun HomeScreen(
             Text(
                 text = "Tunespark",
                 fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Normal,
+                fontFamily = BitcountSingleFontFamily,
                 color = textColor
             )
             IconButton(
@@ -125,7 +125,7 @@ fun HomeScreen(
                     .border(1.dp, textColor, RoundedCornerShape(8.dp))
             ) {
                 Icon(
-                    imageVector = Icons.Default.Settings, // Settings gear icon
+                    imageVector = Icons.Default.Settings,
                     contentDescription = "Settings",
                     tint = textColor,
                     modifier = Modifier.size(24.dp)
@@ -134,14 +134,16 @@ fun HomeScreen(
         }
 
         // Center Content Column
+        // FIX 1: Changed Arrangement.SpaceBetween → Arrangement.Top to eliminate the huge middle gap
+        // FIX 2: Increased bottom padding from 72.dp → 84.dp so content never overlaps the bottom bar
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 80.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+                .padding(top = 56.dp, bottom = 84.dp),
+            verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Upper middle: Large Clock and Localized Weather Info
+            // Upper section: Large Clock and Weather Info
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
@@ -154,7 +156,7 @@ fun HomeScreen(
                     fontFamily = FontFamily.SansSerif,
                     textAlign = TextAlign.Center
                 )
-                
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
@@ -181,9 +183,12 @@ fun HomeScreen(
                 }
             }
 
+            // FIX 3: Added Spacer here — replaces the implicit SpaceBetween gap with a clean fixed gap
+            Spacer(modifier = Modifier.height(40.dp))
+
             // Middle section depends on play state
             if (currentSongTitle != "No Track Loaded") {
-                // SONG IS PLAYING (IMAGE 1 STATE)
+                // SONG IS PLAYING
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
@@ -206,7 +211,6 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.height(32.dp))
 
-                    // Stunning Waveform Visualizer
                     EqualizerWaveform()
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -227,7 +231,7 @@ fun HomeScreen(
                     }
                 }
             } else {
-                // SONG IS NOT PLAYING (IMAGE 2 STATE)
+                // SONG IS NOT PLAYING (Idle state)
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.Start
@@ -245,11 +249,13 @@ fun HomeScreen(
                         modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
                     )
 
-                    // Horizontal tags scroll/row
+                    // Horizontal mood tags
                     val tags = listOf("Chill", "Feel good", "Commute", "Party")
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 24.dp)
                     ) {
                         items(tags) { tag ->
                             Box(
@@ -262,7 +268,7 @@ fun HomeScreen(
                         }
                     }
 
-                    // Start Radio pill button with SkipNext/Start icon in left black circle
+                    // Start Radio pill button
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -297,13 +303,13 @@ fun HomeScreen(
                             modifier = Modifier.weight(1f),
                             textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.width(48.dp)) // symmetry balancing
+                        Spacer(modifier = Modifier.width(48.dp))
                     }
                 }
             }
         }
 
-        // Bottom Bars depend on play state
+        // Bottom Bar
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -312,13 +318,12 @@ fun HomeScreen(
                 .fillMaxWidth()
         ) {
             if (currentSongTitle != "No Track Loaded") {
-                // Bottom bar when playing (IMAGE 1 Bottom)
+                // Bottom bar when playing
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Search Circle Button
                     Box(
                         modifier = Modifier
                             .size(56.dp)
@@ -335,7 +340,7 @@ fun HomeScreen(
                         )
                     }
 
-                    // Compact Mini-Player Card
+                    // Mini-Player Card
                     Row(
                         modifier = Modifier
                             .height(56.dp)
@@ -363,7 +368,7 @@ fun HomeScreen(
                                     .clip(CircleShape)
                                     .background(Color.DarkGray),
                                 contentAlignment = Alignment.Center
-                              ) {
+                            ) {
                                 Text("🎵", fontSize = 18.sp)
                             }
                         }
@@ -372,7 +377,7 @@ fun HomeScreen(
                             Text(
                                 text = currentSongTitle,
                                 color = onPrimaryColor,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Medium,
                                 fontSize = 14.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -387,7 +392,6 @@ fun HomeScreen(
                         }
                     }
 
-                    // Playlist Circle Button
                     Box(
                         modifier = Modifier
                             .size(56.dp)
@@ -405,12 +409,11 @@ fun HomeScreen(
                     }
                 }
             } else {
-                // Bottom bar when NOT playing (IMAGE 2 Bottom)
+                // Bottom bar when NOT playing
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Search Pill Button
                     Row(
                         modifier = Modifier
                             .height(56.dp)
@@ -436,7 +439,6 @@ fun HomeScreen(
                         )
                     }
 
-                    // Playlist Pill Button
                     Row(
                         modifier = Modifier
                             .height(56.dp)
@@ -467,7 +469,6 @@ fun HomeScreen(
     }
 }
 
-// Utility extensions
 private fun Int.getDpOrPx(): androidx.compose.ui.unit.Dp = this.dp
 
 @Composable

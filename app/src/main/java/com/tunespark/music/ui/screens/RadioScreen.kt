@@ -35,10 +35,8 @@ import kotlinx.coroutines.delay
 import com.metrolist.lrclib.LrcLib
 import androidx.compose.foundation.lazy.rememberLazyListState
 
-// Structured object representing a parsed lyric line with time synchronization
 data class LyricLine(val timestampMs: Long, val text: String)
 
-// Clean YouTube video titles of promotional metadata and clutter
 fun cleanYouTubeTitle(title: String): String {
     val cleanupPatterns = listOf(
         Regex("""\s*\(.*?((?i)official|video|audio|lyrics|lyric|visualizer|hd|hq|4k|remaster|remix|live|acoustic|version|edit|extended|radio|clean|explicit).*?\)"""),
@@ -58,7 +56,6 @@ fun cleanYouTubeTitle(title: String): String {
     return cleaned.trim()
 }
 
-// Helper function to parse timestamps and clean lyrics
 fun parseLyricsToLines(rawLyrics: String): List<LyricLine> {
     val lines = rawLyrics.lines()
     val cleanLines = mutableListOf<LyricLine>()
@@ -66,10 +63,9 @@ fun parseLyricsToLines(rawLyrics: String): List<LyricLine> {
     for (line in lines) {
         val trimmed = line.trim()
         if (trimmed.isEmpty()) continue
-        // Filter out LRC file metadata tags
-        if (trimmed.startsWith("[ti:") || trimmed.startsWith("[ar:") || 
-            trimmed.startsWith("[al:") || trimmed.startsWith("[by:") || 
-            trimmed.startsWith("[length:") || trimmed.startsWith("[re:") || 
+        if (trimmed.startsWith("[ti:") || trimmed.startsWith("[ar:") ||
+            trimmed.startsWith("[al:") || trimmed.startsWith("[by:") ||
+            trimmed.startsWith("[length:") || trimmed.startsWith("[re:") ||
             trimmed.startsWith("[ve:")) {
             continue
         }
@@ -114,23 +110,20 @@ fun RadioScreen(
     isLyricsLoading: Boolean,
     modifier: Modifier = Modifier
 ) {
-    // Handle back button press (smooth navigate back to Home Screen)
     BackHandler {
         onNavigate(AppScreen.HOME)
     }
 
-    // Live media playback position tracking for lyrics sync
     var currentPosition by remember { mutableStateOf(0L) }
     LaunchedEffect(isPlaying, exoPlayer) {
         if (isPlaying) {
             while (true) {
                 currentPosition = exoPlayer.currentPosition
-                delay(200) // Highly-responsive 200ms sampling for lyrical transitions
+                delay(200)
             }
         }
     }
 
-    // Determine the current highlighted lyric line based on actual song position
     val activeLyricIndex = remember(lyricsLines, currentPosition) {
         val syncedLines = lyricsLines.filter { it.timestampMs >= 0 }
         if (syncedLines.isEmpty()) {
@@ -158,7 +151,7 @@ fun RadioScreen(
         modifier = modifier
             .fillMaxSize()
             .background(backgroundColor)
-            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .padding(horizontal = 24.dp, vertical = 0.dp)
     ) {
         Column(
             modifier = Modifier
@@ -166,17 +159,20 @@ fun RadioScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+            // FIX: Changed Arrangement.SpaceBetween → Arrangement.Top
+            // SpaceBetween was distributing extra space between every child (including Spacers),
+            // creating large unpredictable gaps — especially visible below the top bar.
+            // Explicit Spacers below now own all the vertical rhythm.
+            verticalArrangement = Arrangement.Top
         ) {
-            // 1. Top Bar Navigation and Control Section
+            // 1. Top Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp),
+                    .padding(top = 12.dp, bottom = 0.dp), // FIX: was only padding(top=8dp); added explicit bottom=0dp for clarity
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Left: Black Circle Back Button
                 Box(
                     modifier = Modifier
                         .size(56.dp)
@@ -193,7 +189,6 @@ fun RadioScreen(
                     )
                 }
 
-                // Center: Capsule-shaped Play/Pause Toggle button
                 Row(
                     modifier = Modifier
                         .height(56.dp)
@@ -226,12 +221,11 @@ fun RadioScreen(
                     )
                 }
 
-                // Right: Red Circle Close/Stop Button
                 Box(
                     modifier = Modifier
                         .size(56.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFFF3B30)) // Vibrant red color matching screenshot exactly
+                        .background(Color(0xFFFF3B30))
                         .clickable {
                             exoPlayer.stop()
                             onNavigate(AppScreen.HOME)
@@ -247,21 +241,20 @@ fun RadioScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // 2. High-Accuracy Dot-Matrix Sound Visualizer
+            // 2. Dot-Matrix Sound Visualizer
             RadioEqualizerWaveform(exoPlayer = exoPlayer, isPlaying = isPlaying)
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // 3. Current Song details Row
+            // 3. Current Song Details Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp),
+                    .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Round-Corner Album Artwork Thumbnail
                 Box(
                     modifier = Modifier
                         .size(64.dp)
@@ -287,14 +280,13 @@ fun RadioScreen(
 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                // Track Title and Artist Details
                 Column(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(
                         text = currentSongTitle,
                         fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.Medium,
                         color = textColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -310,24 +302,25 @@ fun RadioScreen(
                 }
             }
 
-            // Toggle Tab Selector (Lyrics vs Up Next Queue)
-            var activeTab by remember { mutableStateOf("lyrics") } // "lyrics" or "queue"
-            
+            // 4. Tab Selector
+            var activeTab by remember { mutableStateOf("lyrics") }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
-                    .height(36.dp),
+                    .height(40.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Lyrics Tab Pill
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
                         .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
                         .clickable { activeTab = "lyrics" }
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Lyrics",
@@ -336,14 +329,15 @@ fun RadioScreen(
                         fontWeight = FontWeight.Bold
                     )
                 }
-                
-                // Queue/Up Next Tab Pill
+
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
                         .background(if (activeTab == "queue") primaryColor else secondaryColor)
                         .clickable { activeTab = "queue" }
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Up Next",
@@ -354,8 +348,8 @@ fun RadioScreen(
                 }
             }
 
+            // 5. Content Area (Lyrics or Queue)
             if (activeTab == "lyrics") {
-                // 4. Stylized Scrollable Lyrics Section
                 if (isLyricsLoading) {
                     Box(
                         modifier = Modifier
@@ -367,8 +361,7 @@ fun RadioScreen(
                     }
                 } else {
                     val listState = rememberLazyListState()
-                    
-                    // Auto-scroll to active lyric line
+
                     LaunchedEffect(activeLyricIndex) {
                         if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
                             listState.animateScrollToItem(activeLyricIndex)
@@ -380,19 +373,17 @@ fun RadioScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                            .padding(vertical = 12.dp),
+                            .padding(vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         itemsIndexed(lyricsLines) { index, line ->
                             val isPlaceholder = lyricsLines.size == 1 && (line.text.startsWith("No lyrics") || line.text.startsWith("Could not") || line.text.startsWith("No track"))
                             val isActive = index == activeLyricIndex
-                            
-                            // Set varying colors to mimic the fading/bold styles of the screenshot exactly
+
                             val lineTextColor = when {
                                 isPlaceholder -> textColor.copy(alpha = 0.5f)
-                                isActive -> textColor // Fully highlighted active line!
+                                isActive -> textColor
                                 activeLyricIndex == -1 -> {
-                                    // Fallback when not synced/paused: highlight the opening lines, progressively fading out
                                     when {
                                         index < 2 -> textColor
                                         index in 2..4 -> textColor.copy(alpha = 0.8f)
@@ -402,7 +393,6 @@ fun RadioScreen(
                                     }
                                 }
                                 else -> {
-                                    // Dynamic distance fading from the active line for synced scrolling
                                     val distance = kotlin.math.abs(index - activeLyricIndex)
                                     when {
                                         distance == 1 -> textColor.copy(alpha = 0.7f)
@@ -412,7 +402,7 @@ fun RadioScreen(
                                     }
                                 }
                             }
-                            val fontWeight = if (isActive || (activeLyricIndex == -1 && index < 5 && !isPlaceholder)) FontWeight.Bold else FontWeight.Normal
+                            val fontWeight = if (isActive || (activeLyricIndex == -1 && index < 5 && !isPlaceholder)) FontWeight.Medium else FontWeight.Normal
                             val fontSize = if (isActive || (activeLyricIndex == -1 && index < 5 && !isPlaceholder)) 22.sp else 18.sp
 
                             Text(
@@ -428,22 +418,21 @@ fun RadioScreen(
                     }
                 }
             } else {
-                // 4. Up Next Queue Section
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(vertical = 12.dp),
+                        .padding(vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     itemsIndexed(playQueue) { index, item ->
                         val isCurrent = index == currentTrackIndex
                         val isCommentary = item.mediaId.startsWith("commentary_")
-                        
+
                         val title = item.mediaMetadata.title?.toString() ?: "Unknown Song"
                         val artist = item.mediaMetadata.artist?.toString() ?: "Unknown Artist"
                         val artworkUri = item.mediaMetadata.artworkUri
-                        
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -455,7 +444,6 @@ fun RadioScreen(
                                 .padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Queue Number or Play Indicator
                             if (isCurrent) {
                                 Text(
                                     text = "▶",
@@ -473,10 +461,9 @@ fun RadioScreen(
                                     textAlign = TextAlign.Center
                                 )
                             }
-                            
+
                             Spacer(modifier = Modifier.width(8.dp))
-                            
-                            // Thumbnail
+
                             Box(
                                 modifier = Modifier
                                     .size(48.dp)
@@ -506,18 +493,17 @@ fun RadioScreen(
                                     }
                                 }
                             }
-                            
+
                             Spacer(modifier = Modifier.width(12.dp))
-                            
-                            // Title & Artist
+
                             Column(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text(
                                     text = title,
                                     fontSize = 15.sp,
-                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isCommentary) Color(0xFF5856D6) else textColor, // Premium purple for AI DJ commentary
+                                    fontWeight = if (isCurrent) FontWeight.Medium else FontWeight.Normal,
+                                    color = if (isCommentary) Color(0xFF5856D6) else textColor,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -535,28 +521,27 @@ fun RadioScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 5. Skip Song capsule button at the very bottom
+            // 6. Skip Song button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
-                    .border(2.dp, primaryColor, RoundedCornerShape(32.dp))
-                    .clip(RoundedCornerShape(32.dp))
+                    .height(56.dp)
+                    .border(1.5.dp, primaryColor, RoundedCornerShape(28.dp))
+                    .clip(RoundedCornerShape(28.dp))
                     .background(backgroundColor)
                     .clickable {
                         if (exoPlayer.hasNextMediaItem()) {
                             exoPlayer.seekToNext()
                         }
                     }
-                    .padding(horizontal = 6.dp),
+                    .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Solid primary color circle containing skip next icon on left
                 Box(
                     modifier = Modifier
-                        .size(52.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(primaryColor),
                     contentAlignment = Alignment.Center
@@ -569,7 +554,6 @@ fun RadioScreen(
                     )
                 }
 
-                // Text centered inside the pill
                 Text(
                     text = "Skip song",
                     color = textColor,
@@ -578,8 +562,7 @@ fun RadioScreen(
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
-                // Empty spacer matching left padding for optical alignment symmetry
-                Spacer(modifier = Modifier.width(52.dp))
+                Spacer(modifier = Modifier.width(48.dp))
             }
         }
     }
@@ -590,15 +573,14 @@ fun RadioEqualizerWaveform(exoPlayer: Player, isPlaying: Boolean) {
     val baseHeights = listOf(
         1, 1, 2, 3, 4, 3, 2, 1, 1, 1, 4, 5, 4, 1, 1, 2, 3, 2, 1, 1, 1
     )
-    
-    // Sample real-time media player attributes to make it dance live
+
     var currentPosition by remember { mutableStateOf(0L) }
-    
+
     if (isPlaying) {
         LaunchedEffect(Unit) {
             while (true) {
                 currentPosition = exoPlayer.currentPosition
-                delay(25) // Ultra-responsive 25ms sampling for fluid beat movements
+                delay(25)
             }
         }
     } else {
@@ -606,34 +588,32 @@ fun RadioEqualizerWaveform(exoPlayer: Player, isPlaying: Boolean) {
             currentPosition = 0L
         }
     }
-    
+
     val primaryColor = MaterialTheme.colorScheme.primary
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.Bottom,
         modifier = Modifier
-            .height(80.dp) // Ample fixed height to contain the max visualizer height (56.dp) and padding without jitter
+            .height(80.dp)
             .padding(vertical = 12.dp)
     ) {
         baseHeights.forEachIndexed { index, baseHeight ->
-            // Tie height fluctuation directly, accurately and deterministicly to current song position (beats)
             val height = if (isPlaying && currentPosition > 0) {
-                // Synthesize bass, mid, and treble frequencies for an exceptionally realistic audio visualizer
                 val wave = when {
-                    index < 7 -> { // Bass: heavy low-frequency rhythmic beats
-                        val bassPeriod = 500.0 // 120 BPM beat structure
+                    index < 7 -> {
+                        val bassPeriod = 500.0
                         val phase = (currentPosition % bassPeriod) / bassPeriod
                         val beatAttack = if (phase < 0.15) phase / 0.15 else 1.0 - ((phase - 0.15) / 0.85)
                         val extraNoise = kotlin.math.sin(currentPosition / 50.0 + index) * 0.5
                         baseHeight + (beatAttack * 3.5 + extraNoise).toInt()
                     }
-                    index in 7..14 -> { // Mids: mid-frequency melodic waves
+                    index in 7..14 -> {
                         val midWave1 = kotlin.math.sin(currentPosition / 80.0 + index * 0.5) * 1.5
                         val midWave2 = kotlin.math.cos(currentPosition / 150.0 - index * 0.3) * 1.0
                         baseHeight + (midWave1 + midWave2).toInt()
                     }
-                    else -> { // Trebles: fast high-frequency sparkles
+                    else -> {
                         val trebleWave = kotlin.math.sin(currentPosition / 30.0 + index * 1.2) * 2.0
                         val randomSparkle = if ((currentPosition + index * 10) % 200 < 50) 1.5 else -0.5
                         baseHeight + (trebleWave + randomSparkle).toInt()
@@ -643,7 +623,7 @@ fun RadioEqualizerWaveform(exoPlayer: Player, isPlaying: Boolean) {
             } else {
                 baseHeight
             }
-            
+
             Column(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally

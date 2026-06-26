@@ -33,8 +33,23 @@ class PlaybackService : MediaSessionService() {
     private var playlistSongsPlayedSinceCommentary = 0
     private var lastCommentaryCheckedVideoId: String? = null
 
+    fun resetPlaylistCounter() {
+        playlistSongsPlayedSinceCommentary = 0
+        lastCommentaryCheckedVideoId = null
+    }
+
     companion object {
-        var isPlaylistMode = false
+        private var _isPlaylistMode = false
+        var isPlaylistMode: Boolean
+            get() = _isPlaylistMode
+            set(value) {
+                _isPlaylistMode = value
+                if (value) {
+                    instance?.resetPlaylistCounter()
+                }
+            }
+
+        private var instance: PlaybackService? = null
         private const val PLAYBACK_SERVICE_TAG = "PlaybackService"
         const val TARGET_UPCOMING_ITEMS = 20
         const val MIN_UPCOMING_ITEMS_BEFORE_REFILL = 5
@@ -45,6 +60,7 @@ class PlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
+        instance = this
 
         // Configure AudioAttributes for standard music playback
         val audioAttributes = AudioAttributes.Builder()
@@ -110,6 +126,12 @@ class PlaybackService : MediaSessionService() {
         if (videoId == lastCommentaryCheckedVideoId) return
         lastCommentaryCheckedVideoId = videoId
 
+        val geminiKey = SessionManager.getGeminiApiKey(this)
+        if (geminiKey.isBlank()) {
+            android.util.Log.w(PLAYBACK_SERVICE_TAG, "checkAndInsertPlaylistCommentary: Gemini API Key is blank! Skipping commentary.")
+            return
+        }
+
         val N = SessionManager.getCommentaryBlockSize(this)
         playlistSongsPlayedSinceCommentary++
 
@@ -139,22 +161,22 @@ class PlaybackService : MediaSessionService() {
             }
 
             if (upcomingSongs.isNotEmpty()) {
+                val currentSongInfo = "'${exoPlayer.mediaMetadata.title}' by ${exoPlayer.mediaMetadata.artist}"
+                val upcomingSongsList = upcomingSongs.map { "'${it.title}' by ${it.artists.joinToString(", ") { a -> a.name }}" }
+
                 serviceScope.launch(Dispatchers.IO) {
                     try {
-                        val currentSongInfo = "'${exoPlayer.mediaMetadata.title}' by ${exoPlayer.mediaMetadata.artist}"
-                        val upcomingSongsList = upcomingSongs.map { "'${it.title}' by ${it.artists.joinToString(", ") { a -> a.name }}" }
-                        
                         withContext(Dispatchers.Main) {
                             Toast.makeText(this@PlaybackService, "AI DJ is writing commentary for the playlist...", Toast.LENGTH_SHORT).show()
                         }
 
-                        val audioFile = TtsService.generateCommentaryAudio(
+                        val (audioFile, script) = TtsService.generateCommentaryAudio(
                             context = this@PlaybackService,
                             currentSong = currentSongInfo,
                             upcomingSongs = upcomingSongsList
                         )
 
-                        val commentaryItem = buildCommentaryMediaItem(audioFile)
+                        val commentaryItem = buildCommentaryMediaItem(audioFile, script)
                         withContext(Dispatchers.Main) {
                             if (exoPlayer.currentMediaItemIndex == currentIndex) {
                                 exoPlayer.addMediaItem(currentIndex + 1, commentaryItem)
@@ -164,6 +186,9 @@ class PlaybackService : MediaSessionService() {
                         }
                     } catch (e: Exception) {
                         android.util.Log.e(PLAYBACK_SERVICE_TAG, "Failed to create playlist commentary: ${e.message}", e)
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@PlaybackService, "AI DJ Commentary failed: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
             }
@@ -231,8 +256,13 @@ class PlaybackService : MediaSessionService() {
                         exoPlayer.replaceMediaItem(currentIndex, resolvedItem)
                         exoPlayer.prepare()
                         exoPlayer.play()
-                        seedRecommendations(exoPlayer, videoId)
-                        preFetchNextMediaItem(exoPlayer)
+                        if (isPlaylistMode) {
+                            checkAndInsertPlaylistCommentary(exoPlayer, videoId)
+                            preFetchNextMediaItem(exoPlayer)
+                        } else {
+                            seedRecommendations(exoPlayer, videoId)
+                            preFetchNextMediaItem(exoPlayer)
+                        }
                     }
                 }
             } else {
@@ -424,7 +454,7 @@ class PlaybackService : MediaSessionService() {
             .build()
     }
 
-    private fun buildCommentaryMediaItem(audioFile: java.io.File): MediaItem {
+    private fun buildCommentaryMediaItem(audioFile: java.io.File, script: String): MediaItem {
         val commentaryId = "commentary_${System.currentTimeMillis()}"
         return MediaItem.Builder()
             .setUri(android.net.Uri.fromFile(audioFile))
@@ -433,6 +463,7 @@ class PlaybackService : MediaSessionService() {
                 MediaMetadata.Builder()
                     .setTitle("AI DJ Commentary")
                     .setArtist("TuneSpark AI DJ")
+                    .setDescription(script)
                     .build()
             )
             .build()
@@ -460,7 +491,7 @@ class PlaybackService : MediaSessionService() {
 
         return try {
             android.util.Log.d(PLAYBACK_SERVICE_TAG, "createCommentaryItem: Generating commentary audio...")
-            val audioFile = TtsService.generateCommentaryAudio(
+            val (audioFile, script) = TtsService.generateCommentaryAudio(
                 context = this@PlaybackService,
                 currentSong = currentSongInfo,
                 upcomingSongs = upcomingSongsList
@@ -469,7 +500,7 @@ class PlaybackService : MediaSessionService() {
             withContext(Dispatchers.Main) {
                 Toast.makeText(this@PlaybackService, "AI DJ Commentary generated successfully!", Toast.LENGTH_SHORT).show()
             }
-            buildCommentaryMediaItem(audioFile)
+            buildCommentaryMediaItem(audioFile, script)
         } catch (e: Exception) {
             android.util.Log.e(PLAYBACK_SERVICE_TAG, "createCommentaryItem failed: ${e.message}", e)
             withContext(Dispatchers.Main) {
@@ -497,6 +528,7 @@ class PlaybackService : MediaSessionService() {
             release()
             mediaSession = null
         }
+        instance = null
         super.onDestroy()
     }
 }

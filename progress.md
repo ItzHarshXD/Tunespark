@@ -21,7 +21,7 @@ Key files and packages:
     - `HomeScreen.kt`: Dynamic, light-themed premium dashboard. Displays current system clock and local weather. Reacts instantly to play state: displays a beautiful spectrum visualizer, a circular play-controller, and compact mini-player when playing, or a personalized greeting with categories and a "Start Radio" button when inactive.
     - `PlaylistsScreen.kt`: Highly-polished 3-column interactive layout supporting Light and Dark themes dynamically. Displays pill tabs ("Playlists", "Albums", "Artists"), sorting triggers, search navigation, and structured playlists: Liked (red with central heart outline) and local lists. Triggers background playlist playback mode with sequential commentary injections.
     - `SearchScreen.kt`: Advanced zero-button interactive search screen. Displays real-time auto-suggestions and reactive song search results side-by-side as you type, matching a clean white minimalist aesthetic.
-    - `RadioScreen.kt`: Audio player view displaying up-next list and control triggers mapped to MediaController commands.
+    - `RadioScreen.kt`: Audio player view displaying up-next list and control triggers mapped to MediaController commands. Houses the high-accuracy dot-matrix sound visualizer with layout bounds stability, and renders real-time auto-scrolling time-synced lyrics with proximity-based opacity fading.
     - `SettingsScreen.kt`: Interactive links leading to dedicated customization options.
     - `AccountScreen.kt`: Manages optional YouTube Music login WebViews, sign-out actions, and live profile details.
     - `AppearanceScreen.kt`: Styled theme selections (Light, Dark, System).
@@ -82,9 +82,9 @@ TuneSpark has been structured into 12 distinct screens for clear separation of c
      - Left: A solid black circle Back button with a white back arrow to return the user to the Home screen without stopping playback.
      - Center: A solid black Play/Pause capsule button showing current state (e.g. "⏸ Pause" or "▶ Play") in bold white text.
      - Right: A solid red circle Close button with a white "X" to immediately stop playback and return to the Home screen.
-   - Features a central, prominent dot-matrix Equalizer Waveform visualizer located below the top bar and above the song details, which uses physics-simulated bass, mid, and treble components to dance accurately on the song's real-time beats.
+   - Features a central, prominent dot-matrix Equalizer Waveform visualizer located below the top bar and above the song details, which uses physics-simulated bass, mid, and treble components to dance accurately on the song's real-time beats. Stabilized with fixed layout height constraints to prevent content-shaking jitter.
    - Features a Song details section with rounded square artwork on the left, and bold title & artist details on the right.
-   - Features a beautiful, scrollable, styled lyrics block with the first lines highlighted in bold black, progressively fading out into lighter shades of gray.
+   - Features a premium, scrollable, styled lyrics block leveraging the integrated `:lrclib` module with microsecond-accurate timestamp parsing. Renders time-synced auto-scrolling using a centered `LazyListState` list, featuring Spotify-style progressive fading (highlighting the currently active spoken line and fading neighboring lines). Hoists lyrics loading in the parent scope for zero-latency in-memory background caching during navigation.
    - Features a capsule Skip button at the very bottom with a white background, black border, a solid black circle on the left containing a skip next icon, and "Skip song" text centered.
 4. **Settings Screen**:
    - Offers customization options: *Appearance*, *Account*, *AI and Voice*, *Commentary*, *Notifications*, *Location*, and *Updates*.
@@ -255,3 +255,32 @@ How it works:
 - **Seed Song Acquisition**: Upon clicking, the app fetches a pool of high-quality potential tracks from various sources including regional charts and trending music (`YouTube.getChartsPage()`), editorial/community home collections (`YouTube.home()`), and popular/viral trending search fallbacks.
 - **Randomized Seeding**: The song pool is shuffled, and a random seed track is chosen. This prevents repetitiveness and ensures a completely unique queue each time the shuffle button is tapped.
 - **Radio/Queue Generation**: Once the random seed track starts playing, the background `PlaybackService` automatically seeds and generates the continuous autoplay queue/radio via `YouTube.next()` in the background.
+
+---
+
+## Typography and Theme Customization Update
+
+The app has been configured to follow a highly-structured, premium design system with strict color and font specifications:
+
+- **Typography**:
+  - Integrated the official Google Fonts provider with GMS secure caching certificates.
+  - Set **DM Sans** as the default typography standard across all Jetpack Compose screens.
+  - Set the beautiful, digital-styled **Bitcount Single** font family exclusively for the "Tunespark" logo branding on the Home screen header.
+- **Color Palette**:
+  - Unified the theme to strictly employ **Pure Black**, **Pure White**, and **Red Accent** colors.
+  - Designed deep contrast environments for both Light Mode (White-rich) and Dark Mode (Black-rich), with vibrant Red highlights on primary indicators, selections, buttons, and active items.
+
+---
+
+## Completed Milestones & Spacing Harmonization
+
+We have successfully refined and completed the premium user experience across all primary app screens:
+
+### 1. Spacing, Alignment, & Padding Refinements
+- **Home Screen Alignment**: Adjusted the vertical center content column's top padding from `80.dp` to `56.dp` and bottom padding from `100.dp` to `72.dp`. This brings elements closer to the status bar and bottom bars, reclaiming visual balance and eliminating excessive blank spaces.
+- **Playlist Screen Alignment**: Reduced the top margins inside the detailed playlist view's `LazyColumn` header space from `16.dp` to `0.dp`, aligning content cleanly below the status bar bounds. Adjusted the main grid Column top padding and row vertical spacing to keep the pill navigation tabs snug and perfectly balanced.
+- **Radio Screen Alignment**: Replaced double-padding on the outer container Box of the Radio screen from `vertical = 16.dp` to `vertical = 0.dp`. The system safe-insets (`statusBarsPadding()` and `navigationBarsPadding()`) are now strictly leveraged, allowing player controls and lyrics sections to beautifully fit the display heights without clipping or awkward gaps.
+
+### 2. Universal Button Size & Style Harmonization
+- **Standardized Capsule Action Buttons**: Main action buttons (e.g., *Stop Radio*, *Start Radio*, *Skip song*) have been standardized to exactly `56.dp` height with perfect capsule corner shapes (`RoundedCornerShape(28.dp)`) and unified border weights (`1.5.dp`).
+- **Standardized Tab Navigation Pill Buttons**: Tab navigation pill elements (e.g., *Playlists/Albums/Artists* on Playlists screen, and *Lyrics/Up Next* on Radio screen) are now standardized to a crisp `40.dp` height and a rounded capsule corner shape (`RoundedCornerShape(20.dp)`), featuring perfectly center-aligned content instead of variable padding values, establishing flawless, high-fidelity UI consistency universally.

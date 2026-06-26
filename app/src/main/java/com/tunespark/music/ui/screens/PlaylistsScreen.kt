@@ -1,9 +1,12 @@
 package com.tunespark.music.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.VectorConverter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -14,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -24,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.stylusHoverIcon
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -46,14 +51,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// Universal wrapper representing an item in the playlists grid (whether real or mock fallback)
 data class LibraryGridItem(
     val id: String,
     val title: String,
     val subtitle: String,
     val thumbnailUrl: String? = null,
     val isLiked: Boolean = false,
-    val rawItem: YTItem? = null
+    val rawItem: YTItem? = null,
+    val authorName: String? = null,
+    val authorAvatarUrl: String? = null
 )
 
 @Composable
@@ -68,38 +74,32 @@ fun PlaylistsScreen(
     val textColor = MaterialTheme.colorScheme.onBackground
     val primaryColor = MaterialTheme.colorScheme.primary
 
-    // Tab control state ("Playlists", "Albums", "Artists")
     var selectedTab by remember { mutableStateOf("Playlists") }
 
-    // Navigation and detail view states
     var activePlaylistId by remember { mutableStateOf<String?>(null) }
     var activePlaylistName by remember { mutableStateOf("") }
     var activePlaylistThumbnail by remember { mutableStateOf<String?>(null) }
     var activePlaylistSongCountText by remember { mutableStateOf("") }
     var activePlaylistIsLiked by remember { mutableStateOf(false) }
     var activePlaylistRawItem by remember { mutableStateOf<YTItem?>(null) }
+    var activePlaylistAuthorName by remember { mutableStateOf<String?>(null) }
+    var activePlaylistAuthorAvatarUrl by remember { mutableStateOf<String?>(null) }
 
-    // Detailed playlist songs state
     var playlistSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isSongsLoading by remember { mutableStateOf(false) }
 
-    // Intercept back clicks
     BackHandler {
         if (activePlaylistId != null) {
-            // If in detailed playlist view, return to grid
             activePlaylistId = null
             playlistSongs = emptyList()
         } else {
-            // If in grid view, navigate back home
             onNavigate(AppScreen.HOME)
         }
     }
 
-    // Dynamic states for fetched library contents (Grid view)
     var gridItems by remember { mutableStateOf<List<LibraryGridItem>>(emptyList()) }
     var isLoadingGrid by remember { mutableStateOf(false) }
 
-    // High-fidelity local fallback items when signed out or offline (matches target screenshots perfectly)
     val fallbackPlaylists = remember {
         listOf(
             LibraryGridItem(id = "LM", title = "Liked", subtitle = "Your favorites", isLiked = true),
@@ -127,7 +127,6 @@ fun PlaylistsScreen(
         )
     }
 
-    // List of real streamable tracks to use as seed fallback
     val realPlayableSongs = remember {
         listOf(
             SongItem("4NRXx6U8ABQ", "Blinding Lights", listOf(Artist("The Weeknd", null)), thumbnail = "https://img.youtube.com/vi/4NRXx6U8ABQ/0.jpg"),
@@ -143,7 +142,6 @@ fun PlaylistsScreen(
         )
     }
 
-    // Function to generate 'songCount' songs using the real playable song pool for fallback play
     val generatePlaylistSongs = { count: Int ->
         if (count <= 0) {
             emptyList<SongItem>()
@@ -152,24 +150,15 @@ fun PlaylistsScreen(
             for (i in 0 until count) {
                 val baseSong = realPlayableSongs[i % realPlayableSongs.size]
                 val uniqueId = if (i >= realPlayableSongs.size) "${baseSong.id}_$i" else baseSong.id
-                songs.add(
-                    SongItem(
-                        id = uniqueId,
-                        title = baseSong.title,
-                        artists = baseSong.artists,
-                        thumbnail = baseSong.thumbnail
-                    )
-                )
+                songs.add(SongItem(id = uniqueId, title = baseSong.title, artists = baseSong.artists, thumbnail = baseSong.thumbnail))
             }
             songs
         }
     }
 
-    // Reactive fetching of real playlists, albums, and artists when signed in
     LaunchedEffect(selectedTab) {
         val userSignedIn = SessionManager.isUserSignedIn(context)
         if (!userSignedIn) {
-            // Load local mock fallback items if the user is not signed in
             gridItems = when (selectedTab) {
                 "Playlists" -> fallbackPlaylists
                 "Albums" -> fallbackAlbums
@@ -187,86 +176,40 @@ fun PlaylistsScreen(
             }
 
             try {
-                android.util.Log.d("TuneSpark", "Fetching library for browseId: $browseId")
                 val result = YouTube.library(browseId)
                 withContext(Dispatchers.Main) {
                     isLoadingGrid = false
                     if (result.isSuccess) {
                         val libPage = result.getOrNull()
                         val items = libPage?.items.orEmpty()
-                        android.util.Log.d("TuneSpark", "Library fetch success for $browseId, items count: ${items.size}")
-                        items.forEachIndexed { i, item ->
-                            android.util.Log.d("TuneSpark", "Item $i: class=${item::class.java.simpleName} id=${item.id} title=${item.title}")
-                        }
 
                         if (items.isEmpty()) {
-                            android.util.Log.d("TuneSpark", "Library $browseId is empty, showing fallbacks")
-                            // Fallback if the user's library is empty
                             gridItems = when (selectedTab) {
                                 "Playlists" -> fallbackPlaylists
                                 "Albums" -> fallbackAlbums
                                 else -> fallbackArtists
                             }
                         } else {
-                            // Convert InnerTube models to our grid UI items
                             val fetchedItems = mutableListOf<LibraryGridItem>()
-
-                            // Always insert a "Liked" playlist at the start if playing Playlists
                             if (selectedTab == "Playlists") {
-                                fetchedItems.add(
-                                    LibraryGridItem(
-                                        id = "LM",
-                                        title = "Liked",
-                                        subtitle = "Your liked songs",
-                                        isLiked = true
-                                    )
-                                )
+                                fetchedItems.add(LibraryGridItem(id = "LM", title = "Liked", subtitle = "Your liked songs", isLiked = true))
                             }
-
                             items.forEach { ytItem ->
                                 when (ytItem) {
                                     is PlaylistItem -> {
-                                        fetchedItems.add(
-                                            LibraryGridItem(
-                                                id = ytItem.id,
-                                                title = ytItem.title,
-                                                subtitle = ytItem.songCountText ?: "Songs",
-                                                thumbnailUrl = ytItem.thumbnail,
-                                                rawItem = ytItem
-                                            )
-                                        )
+                                        val titleLower = ytItem.title.lowercase()
+                                        if (titleLower != "liked music" && titleLower != "episodes for later") {
+                                            fetchedItems.add(LibraryGridItem(id = ytItem.id, title = ytItem.title, subtitle = ytItem.songCountText ?: "Songs", thumbnailUrl = ytItem.thumbnail, rawItem = ytItem, authorName = ytItem.author?.name, authorAvatarUrl = ytItem.authorAvatarUrl))
+                                        }
                                     }
-                                    is AlbumItem -> {
-                                        fetchedItems.add(
-                                            LibraryGridItem(
-                                                id = ytItem.id,
-                                                title = ytItem.title,
-                                                subtitle = ytItem.artists?.joinToString(", ") { it.name } ?: "Album",
-                                                thumbnailUrl = ytItem.thumbnail,
-                                                rawItem = ytItem
-                                            )
-                                        )
-                                    }
-                                    is ArtistItem -> {
-                                        fetchedItems.add(
-                                            LibraryGridItem(
-                                                id = ytItem.id,
-                                                title = ytItem.title,
-                                                subtitle = "Artist",
-                                                thumbnailUrl = ytItem.thumbnail,
-                                                rawItem = ytItem
-                                            )
-                                        )
-                                    }
+                                    is AlbumItem -> fetchedItems.add(LibraryGridItem(id = ytItem.id, title = ytItem.title, subtitle = ytItem.artists?.joinToString(", ") { it.name } ?: "Album", thumbnailUrl = ytItem.thumbnail, rawItem = ytItem))
+                                    is ArtistItem -> fetchedItems.add(LibraryGridItem(id = ytItem.id, title = ytItem.title, subtitle = "Artist", thumbnailUrl = ytItem.thumbnail, rawItem = ytItem))
                                     else -> {}
                                 }
                             }
                             gridItems = fetchedItems
                         }
                     } else {
-                        val exception = result.exceptionOrNull()
-                        android.util.Log.e("TuneSpark", "Library fetch failed for browseId: $browseId", exception)
-                        // Fallback on error
                         gridItems = when (selectedTab) {
                             "Playlists" -> fallbackPlaylists
                             "Albums" -> fallbackAlbums
@@ -275,7 +218,6 @@ fun PlaylistsScreen(
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("TuneSpark", "Exception while fetching library for browseId: $browseId", e)
                 withContext(Dispatchers.Main) {
                     isLoadingGrid = false
                     gridItems = when (selectedTab) {
@@ -288,7 +230,6 @@ fun PlaylistsScreen(
         }
     }
 
-    // Reactive fetching of playlist songs when an item is selected
     LaunchedEffect(activePlaylistId) {
         val playlistId = activePlaylistId ?: return@LaunchedEffect
         isSongsLoading = true
@@ -300,50 +241,34 @@ fun PlaylistsScreen(
                 val rawItem = activePlaylistRawItem
 
                 if (activePlaylistIsLiked || playlistId == "LM") {
-                    // Fetch real Liked Songs via the standard "LM" playlist endpoint
                     val playlistResult = YouTube.playlist("LM")
-                    if (playlistResult.isSuccess) {
-                        tracks = playlistResult.getOrNull()?.songs.orEmpty()
-                    }
+                    if (playlistResult.isSuccess) tracks = playlistResult.getOrNull()?.songs.orEmpty()
                 } else if (rawItem is PlaylistItem || playlistId.startsWith("PL") || playlistId.startsWith("RD")) {
-                    // Fetch tracks of the user's custom playlist or a public/fallback playlist
                     val playlistResult = YouTube.playlist(playlistId)
                     if (playlistResult.isSuccess) {
                         val playlistPage = playlistResult.getOrNull()
                         tracks = playlistPage?.songs.orEmpty()
-
-                        // Dynamically update metadata if available
                         playlistPage?.playlist?.let { playlistMeta ->
                             withContext(Dispatchers.Main) {
                                 if (activePlaylistName == "Today's Hits" || activePlaylistName == "Chill Hits" || activePlaylistName == "Lo-Fi Beats" || activePlaylistName == "Workout Energy" || activePlaylistName == "Party Starter") {
                                     activePlaylistName = playlistMeta.title
-                                    if (playlistMeta.thumbnail != null) {
-                                        activePlaylistThumbnail = playlistMeta.thumbnail
-                                    }
+                                    if (playlistMeta.thumbnail != null) activePlaylistThumbnail = playlistMeta.thumbnail
                                     activePlaylistSongCountText = playlistMeta.songCountText ?: "${tracks.size} songs"
                                 }
                             }
                         }
                     }
                 } else if (rawItem is AlbumItem) {
-                    // Fetch songs of the user's album
                     val albumResult = YouTube.albumSongs(rawItem.playlistId, rawItem)
-                    if (albumResult.isSuccess) {
-                        tracks = albumResult.getOrNull().orEmpty()
-                    }
+                    if (albumResult.isSuccess) tracks = albumResult.getOrNull().orEmpty()
                 } else if (rawItem is ArtistItem) {
-                    // Fetch songs by searching for the artist
                     val searchResult = YouTube.search(activePlaylistName, YouTube.SearchFilter.FILTER_SONG)
-                    if (searchResult.isSuccess) {
-                        tracks = searchResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
-                    }
+                    if (searchResult.isSuccess) tracks = searchResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
                 }
 
-                // If signed out, offline, or fetching produced empty tracks, fall back to simulated tracks
                 if (tracks.isEmpty()) {
                     val countStr = activePlaylistSongCountText.filter { it.isDigit() }
-                    val count = countStr.toIntOrNull() ?: 15
-                    tracks = generatePlaylistSongs(count)
+                    tracks = generatePlaylistSongs(countStr.toIntOrNull() ?: 15)
                 }
 
                 withContext(Dispatchers.Main) {
@@ -354,261 +279,278 @@ fun PlaylistsScreen(
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     val countStr = activePlaylistSongCountText.filter { it.isDigit() }
-                    val count = countStr.toIntOrNull() ?: 15
-                    playlistSongs = generatePlaylistSongs(count)
+                    playlistSongs = generatePlaylistSongs(countStr.toIntOrNull() ?: 15)
                     isSongsLoading = false
                 }
             }
         }
     }
 
+
+//    for individual playlist
     if (activePlaylistId != null) {
-        // ==========================================
-        // 1. OPENED DETAILED PLAYLIST VIEW (FULLY FUNCTIONAL)
-        // ==========================================
         Box(
             modifier = modifier
                 .fillMaxSize()
                 .background(backgroundColor)
         ) {
-            LazyColumn(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-                // Header Space
-                item {
-                    Column(
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            activePlaylistId = null
+                            playlistSongs = emptyList()
+                        },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(top = 16.dp, bottom = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .size(44.dp)
+                            .background(textColor, CircleShape)
                     ) {
-                        // Top Navigation back button row
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    activePlaylistId = null
-                                    playlistSongs = emptyList()
-                                },
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .border(1.5.dp, textColor, CircleShape)
-                                    .background(backgroundColor, CircleShape)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = textColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text(
-                                text = "Playlist View",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor
-                            )
-                        }
-
-                        // Playlists cover art (rounded square) matching provided screenshot layouts
-                        Box(
-                            modifier = Modifier
-                                .size(180.dp)
-                                .clip(RoundedCornerShape(32.dp))
-                                .background(
-                                    color = if (activePlaylistIsLiked) {
-                                        Color(0xFFFF2D1A)
-                                    } else {
-                                        textColor
-                                    }
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (activePlaylistIsLiked) {
-                                Icon(
-                                    imageVector = Icons.Default.FavoriteBorder,
-                                    contentDescription = "Heart",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(56.dp)
-                                )
-                            } else if (!activePlaylistThumbnail.isNullOrEmpty()) {
-                                AsyncImage(
-                                    model = activePlaylistThumbnail,
-                                    contentDescription = activePlaylistName,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Playlist Title
-                        Text(
-                            text = activePlaylistName,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textColor,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 8.dp)
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = backgroundColor,
+                            modifier = Modifier.size(20.dp)
                         )
-
-                        // Playlist Description
-                        Text(
-                            text = if (activePlaylistIsLiked) "Your ultimate collections • ${playlistSongs.size} songs" else "By TuneSpark • ${playlistSongs.size} songs",
-                            fontSize = 14.sp,
-                            color = Color.Gray,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 20.dp)
-                        )
-
-                        // Action Play & Shuffle Row
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                        ) {
-                            // Play Capsule Button
-                            Button(
-                                onClick = {
-                                    if (playlistSongs.isNotEmpty()) {
-                                        onPlayPlaylist(activePlaylistName, playlistSongs, 0)
-                                        onNavigate(AppScreen.RADIO)
-                                    }
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = textColor,
-                                    contentColor = backgroundColor
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Play", fontWeight = FontWeight.Bold)
-                            }
-
-                            // Shuffle Capsule Button
-                            Button(
-                                onClick = {
-                                    if (playlistSongs.isNotEmpty()) {
-                                        val shuffled = playlistSongs.shuffled()
-                                        onPlayPlaylist(activePlaylistName, shuffled, 0)
-                                        onNavigate(AppScreen.RADIO)
-                                    }
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.Gray.copy(alpha = 0.2f),
-                                    contentColor = textColor
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                            ) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Shuffle", modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Shuffle", fontWeight = FontWeight.Bold)
-                            }
-                        }
                     }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Text(
+                        text = "Playlist View",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = textColor
+                    )
                 }
 
-                // Songs List View
-                if (isSongsLoading) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(bottom = 32.dp)
+                ) {
                     item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(180.dp),
-                            contentAlignment = Alignment.Center
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            CircularProgressIndicator(color = textColor)
-                        }
-                    }
-                } else if (playlistSongs.isEmpty()) {
-                    item {
-                        Text(
-                            text = "No songs found in this playlist.",
-                            color = Color.Gray,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(top = 24.dp)
-                        )
-                    }
-                } else {
-                    itemsIndexed(playlistSongs) { index, song ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    // Play playlist starting from this index
-                                    onPlayPlaylist(activePlaylistName, playlistSongs, index)
-                                    onNavigate(AppScreen.RADIO)
-                                }
-                                .padding(vertical = 10.dp, horizontal = 4.dp)
-                        ) {
-                            // Song Track Number
-                            Text(
-                                text = "${index + 1}",
-                                color = Color.Gray,
-                                fontSize = 14.sp,
-                                modifier = Modifier.width(32.dp),
-                                textAlign = TextAlign.Center
-                            )
-
-                            // Album Artwork thumbnail
                             Box(
                                 modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.Gray.copy(alpha = 0.2f)),
+                                    .size(180.dp)
+                                    .clip(RoundedCornerShape(32.dp))
+                                    .background(
+                                        color = if (activePlaylistIsLiked) Color(0xFFFF0000) else textColor
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (!song.thumbnail.isNullOrEmpty()) {
+                                if (activePlaylistIsLiked) {
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = "Heart",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(76.dp)
+
+                                    )
+                                } else if (!activePlaylistThumbnail.isNullOrEmpty()) {
                                     AsyncImage(
-                                        model = song.thumbnail,
-                                        contentDescription = song.title,
+                                        model = activePlaylistThumbnail,
+                                        contentDescription = activePlaylistName,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
                                     )
-                                } else {
-                                    Text("🎵", fontSize = 18.sp)
                                 }
                             }
 
-                            Spacer(modifier = Modifier.width(16.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
 
-                            // Title & Artists
-                            Column(
-                                modifier = Modifier.weight(1f)
+                            Text(
+                                text = activePlaylistName,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = textColor,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+
+                            val accountInfo = remember(context) { SessionManager.getCachedAccountInfo(context) }
+                            val authorName = if (activePlaylistIsLiked || activePlaylistId == "LM") accountInfo?.name ?: "You" else activePlaylistAuthorName ?: "TuneSpark"
+                            val authorAvatarUrl = if (activePlaylistIsLiked || activePlaylistId == "LM") accountInfo?.thumbnailUrl else activePlaylistAuthorAvatarUrl
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 20.dp)
                             ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Gray.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (!authorAvatarUrl.isNullOrEmpty()) {
+                                        AsyncImage(
+                                            model = authorAvatarUrl,
+                                            contentDescription = "Author Avatar",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Text(
+                                            text = if (authorName.isNotEmpty()) authorName.take(1).uppercase() else "T",
+                                            color = textColor,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
                                 Text(
-                                    text = song.title,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = song.artists.joinToString(", ") { it.name },
-                                    fontSize = 13.sp,
+                                    text = "By $authorName • ${playlistSongs.size} songs",
+                                    fontSize = 14.sp,
                                     color = Color.Gray,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(top = 2.dp)
+                                    textAlign = TextAlign.Center
                                 )
+                            }
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        if (playlistSongs.isNotEmpty()) {
+                                            onPlayPlaylist(activePlaylistName, playlistSongs, 0)
+                                            onNavigate(AppScreen.RADIO)
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(24.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = textColor,
+                                        contentColor = backgroundColor
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Play", fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        if (playlistSongs.isNotEmpty()) {
+                                            val shuffled = playlistSongs.shuffled()
+                                            onPlayPlaylist(activePlaylistName, shuffled, 0)
+                                            onNavigate(AppScreen.RADIO)
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(24.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.Gray.copy(alpha = 0.2f),
+                                        contentColor = textColor
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "Shuffle", modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Shuffle", fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(20.dp))
+                        }
+                    }
+
+                    if (isSongsLoading) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = textColor)
+                            }
+                        }
+                    } else if (playlistSongs.isEmpty()) {
+                        item {
+                            Text(
+                                text = "No songs found in this playlist.",
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 24.dp)
+                            )
+                        }
+                    } else {
+                        itemsIndexed(playlistSongs) { index, song ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onPlayPlaylist(activePlaylistName, playlistSongs, index)
+                                        onNavigate(AppScreen.RADIO)
+                                    }
+                                    .padding(vertical = 10.dp, horizontal = 4.dp)
+                            ) {
+
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.Gray.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (!song.thumbnail.isNullOrEmpty()) {
+                                        AsyncImage(
+                                            model = song.thumbnail,
+                                            contentDescription = song.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Text("🎵", fontSize = 18.sp)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(16.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = song.title,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Normal,
+                                        color = textColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = song.artists.joinToString(", ") { it.name },
+                                        fontSize = 13.sp,
+                                        color = Color.Gray,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
@@ -616,103 +558,59 @@ fun PlaylistsScreen(
             }
         }
     } else {
-        // ==========================================
-        // 2. MAIN PLAYLISTS GRID SELECTION VIEW
-        // ==========================================
+        // ── GRID VIEW ────────────────────────────────────────────────────
         Column(
             modifier = modifier
                 .fillMaxSize()
                 .background(backgroundColor)
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 0.dp)
         ) {
-            // Pill Navigation Tabs at the Top ("Playlists", "Albums", "Artists")
+            // Tabs
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp),
+                    .horizontalScroll(rememberScrollState())
+                    .padding(top = 4.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 listOf("Playlists", "Albums", "Artists").forEach { tab ->
                     val isSelected = tab == selectedTab
                     Box(
                         modifier = Modifier
-                            .border(
-                                width = 1.5.dp,
-                                color = textColor,
-                                shape = RoundedCornerShape(20.dp)
-                            )
-                            .background(
-                                color = if (isSelected) textColor else Color.Transparent,
-                                shape = RoundedCornerShape(20.dp)
-                            )
+                            .height(40.dp)
+                            .border(width = 1.5.dp, color = textColor, shape = RoundedCornerShape(20.dp))
+                            .background(color = if (isSelected) textColor else Color.Transparent, shape = RoundedCornerShape(20.dp))
                             .clickable { selectedTab = tab }
-                            .padding(horizontal = 24.dp, vertical = 8.dp)
+                            .padding(horizontal = 24.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = tab,
-                            color = if (isSelected) backgroundColor else textColor,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text(text = tab, color = if (isSelected) backgroundColor else textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Sort Header ("Date added ↓" and Search Icon)
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { /* Sort Action */ }
-                ) {
-                    Text(
-                        text = "Date added",
-                        color = textColor,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { }) {
+                    Text(text = "Date added", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "↓",
-                        color = textColor,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(text = "↓", color = textColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
-
-                IconButton(
-                    onClick = { onNavigate(AppScreen.SEARCH) },
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = textColor,
-                        modifier = Modifier.size(24.dp)
-                    )
+                IconButton(onClick = { onNavigate(AppScreen.SEARCH) }, modifier = Modifier.size(24.dp)) {
+                    Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = textColor, modifier = Modifier.size(24.dp))
                 }
             }
 
-            // Circular progress indicator during API load
             if (isLoadingGrid && gridItems.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = textColor)
                 }
             } else {
-                // Grid of items (3-Column Layout matching target screenshots perfectly)
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -722,74 +620,36 @@ fun PlaylistsScreen(
                     items(gridItems) { item ->
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    // Open playlist detailed view
-                                    activePlaylistId = item.id
-                                    activePlaylistName = item.title
-                                    activePlaylistThumbnail = item.thumbnailUrl
-                                    activePlaylistSongCountText = item.subtitle
-                                    activePlaylistIsLiked = item.isLiked
-                                    activePlaylistRawItem = item.rawItem
-                                }
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                activePlaylistId = item.id
+                                activePlaylistName = item.title
+                                activePlaylistThumbnail = item.thumbnailUrl
+                                activePlaylistSongCountText = item.subtitle
+                                activePlaylistIsLiked = item.isLiked
+                                activePlaylistRawItem = item.rawItem
+                                activePlaylistAuthorName = item.authorName
+                                activePlaylistAuthorAvatarUrl = item.authorAvatarUrl
+                            }
                         ) {
-                            // Rounded Square card design matching the provided image designs
                             Box(
                                 modifier = Modifier
                                     .aspectRatio(1f)
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(28.dp))
-                                    .background(
-                                        color = if (item.isLiked) {
-                                            // Bright red for the "Liked" playlist card
-                                            Color(0xFFFF2D1A)
-                                        } else {
-                                            // Solid black in Light theme / Solid white in Dark theme
-                                            textColor
-                                        }
-                                    ),
+                                    .background(color = if (item.isLiked) Color(0xFFFF0000) else textColor),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (item.isLiked) {
-                                    Icon(
-                                        imageVector = Icons.Default.FavoriteBorder,
-                                        contentDescription = "Heart",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(44.dp)
-                                    )
+                                    Icon(imageVector = Icons.Default.Favorite, contentDescription = "Heart", tint = Color.White, modifier = Modifier.size(44.dp))
                                 } else if (!item.thumbnailUrl.isNullOrEmpty()) {
-                                    // Display real thumbnail artwork for the playlist/album/artist when signed in
-                                    AsyncImage(
-                                        model = item.thumbnailUrl,
-                                        contentDescription = item.title,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+                                    AsyncImage(model = item.thumbnailUrl, contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(6.dp))
 
-                            // Center-aligned text elements matching the screenshots
-                            Text(
-                                text = item.title,
-                                color = textColor,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
-
-                            Text(
-                                text = item.subtitle,
-                                color = Color.Gray,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
+                            Text(text = item.title, color = textColor, fontWeight = FontWeight.Medium, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                            Text(text = item.subtitle, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                         }
                     }
                 }

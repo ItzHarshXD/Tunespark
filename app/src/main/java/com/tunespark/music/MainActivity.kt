@@ -1,7 +1,8 @@
-ackage com.tunespark.music
+package com.tunespark.music
 
 import android.content.ComponentName
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -169,7 +170,18 @@ fun MainPlayerScreen(
     var hoistedIsLyricsLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(currentSongTitle, currentSongArtist) {
-        if (currentSongTitle.isEmpty() || currentSongTitle == "No Track Loaded" || currentSongTitle.startsWith("AI DJ") || currentSongTitle.startsWith("commentary_")) {
+        if (currentSongTitle.startsWith("AI DJ") || currentSongTitle.startsWith("commentary_") || currentSongTitle.startsWith("AI DJ Welcome") || currentSongTitle.startsWith("AI DJ Commentary")) {
+            val description = exoPlayer.currentMediaItem?.mediaMetadata?.description?.toString() ?: ""
+            if (description.isNotBlank()) {
+                hoistedLyricsLines = listOf(LyricLine(-1L, description))
+            } else {
+                hoistedLyricsLines = listOf(LyricLine(-1L, "AI DJ is speaking..."))
+            }
+            hoistedIsLyricsLoading = false
+            return@LaunchedEffect
+        }
+
+        if (currentSongTitle.isEmpty() || currentSongTitle == "No Track Loaded") {
             hoistedLyricsLines = listOf(LyricLine(-1L, "No lyrics available for this track."))
             hoistedIsLyricsLoading = false
             return@LaunchedEffect
@@ -365,11 +377,48 @@ fun MainPlayerScreen(
 
             if (fetchedUrl != null) {
                 try {
+                    var commentaryException: Exception? = null
+                    val geminiKey = SessionManager.getGeminiApiKey(context)
+                    val startCommentaryItem = if (geminiKey.isNotBlank()) {
+                        statusMessage = "AI DJ is warming up..."
+                        withContext(Dispatchers.IO) {
+                            try {
+                                val (audioFile, script) = TtsService.generateCommentaryAudio(
+                                    context = context,
+                                    currentSong = null,
+                                    upcomingSongs = listOf("'${targetSong.title}' by ${targetSong.artists.joinToString(", ") { it.name }}")
+                                )
+                                MediaItem.Builder()
+                                    .setUri(android.net.Uri.fromFile(audioFile))
+                                    .setMediaId("commentary_${System.currentTimeMillis()}")
+                                    .setMediaMetadata(
+                                        MediaMetadata.Builder()
+                                            .setTitle("AI DJ Welcome")
+                                            .setArtist("TuneSpark AI DJ")
+                                            .setDescription(script)
+                                            .build()
+                                    )
+                                    .build()
+                            } catch (e: Exception) {
+                                commentaryException = e
+                                null
+                            }
+                        }
+                    } else null
+
+                    if (commentaryException != null) {
+                        Toast.makeText(context, "AI DJ Commentary failed: ${commentaryException?.message}", Toast.LENGTH_LONG).show()
+                    }
+
                     exoPlayer.stop()
                     exoPlayer.clearMediaItems()
 
-                    // Add all songs as MediaItems (resolve only the target song eagerly)
+                    // Add all songs and insert startCommentaryItem at startIndex
                     songs.forEachIndexed { index, song ->
+                        if (index == startIndex && startCommentaryItem != null) {
+                            exoPlayer.addMediaItem(startCommentaryItem)
+                        }
+
                         val item = if (index == startIndex) {
                             MediaItem.Builder()
                                 .setUri(fetchedUrl)
@@ -437,7 +486,7 @@ fun MainPlayerScreen(
                         statusMessage = "AI DJ is warming up..."
                         withContext(Dispatchers.IO) {
                             try {
-                                val audioFile = TtsService.generateCommentaryAudio(
+                                val (audioFile, script) = TtsService.generateCommentaryAudio(
                                     context = context,
                                     currentSong = null,
                                     upcomingSongs = listOf("'${song.title}' by ${song.artists.joinToString(", ") { it.name }}")
@@ -449,6 +498,7 @@ fun MainPlayerScreen(
                                         MediaMetadata.Builder()
                                             .setTitle("AI DJ Welcome")
                                             .setArtist("TuneSpark AI DJ")
+                                            .setDescription(script)
                                             .build()
                                     )
                                     .build()

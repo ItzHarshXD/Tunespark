@@ -16,6 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
@@ -45,6 +47,12 @@ fun SearchScreen(
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(100) // Small delay to ensure compose handles state transitions before requesting focus
+        focusRequester.requestFocus()
+    }
 
     // Handle system back press
     BackHandler {
@@ -126,6 +134,7 @@ fun SearchScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 12.dp)
+                .focusRequester(focusRequester)
         )
 
         // Loader indicator
@@ -159,7 +168,7 @@ fun SearchScreen(
                                 focusManager.clearFocus()
                                 onSearchQueryChange(suggestion)
                             }
-                            .padding(vertical = 12.dp, horizontal = 8.dp),
+                            .padding(vertical = 6.dp, horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -175,21 +184,21 @@ fun SearchScreen(
                                 text = suggestion,
                                 color = textColor,
                                 fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Normal
                             )
                         }
                         Text(
                             text = "↗",
                             color = textColor,
                             fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Normal
                         )
                     }
                 }
 
                 // Add a small divider/space between suggestions and main results
                 item {
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                 }
             }
 
@@ -203,7 +212,7 @@ fun SearchScreen(
                                 onPlaySong(song)
                                 onNavigate(AppScreen.RADIO)
                             }
-                            .padding(vertical = 8.dp, horizontal = 8.dp),
+                            .padding(vertical = 6.dp, horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         AsyncImage(
@@ -211,7 +220,7 @@ fun SearchScreen(
                             contentDescription = "Artwork",
                             modifier = Modifier
                                 .size(56.dp)
-                                .clip(RoundedCornerShape(28.dp)) // Fully circular/rounded artwork
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.secondary),
                             contentScale = ContentScale.Crop
                         )
@@ -221,7 +230,7 @@ fun SearchScreen(
                         ) {
                             Text(
                                 text = song.title,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Normal,
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = textColor,
                                 maxLines = 1,

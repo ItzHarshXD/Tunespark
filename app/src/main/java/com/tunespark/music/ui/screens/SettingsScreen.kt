@@ -27,7 +27,10 @@ fun SettingsScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
-        SettingsHeader(title = "Settings", onBack = { onNavigate(AppScreen.HOME) })
+        SettingsHeader(
+            title = "Settings",
+            onBack = { onNavigate(AppScreen.HOME) }
+        )
 
         val settingsItems = listOf(
             "Appearance",
