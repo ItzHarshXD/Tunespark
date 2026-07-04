@@ -37,7 +37,7 @@ fun SettingsScreen(
             "Account",
             "AI and Voice",
             "Commentary",
-            "Notifications",
+            "Player and Audio",
             "Location",
             "Updates"
         )
@@ -56,7 +56,7 @@ fun SettingsScreen(
                             "Account" -> AppScreen.ACCOUNT
                             "AI and Voice" -> AppScreen.AI_VOICE
                             "Commentary" -> AppScreen.COMMENTARY
-                            "Notifications" -> AppScreen.NOTIFICATIONS
+                            "Player and Audio" -> AppScreen.PLAYER_AUDIO
                             "Location" -> AppScreen.LOCATION
                             "Updates" -> AppScreen.UPDATES
                             else -> null

@@ -16,8 +16,11 @@ object SessionManager {
     private const val KEY_ELEVENLABS_KEY = "elevenlabs_api_key"
     private const val KEY_ELEVENLABS_VOICE_ID = "elevenlabs_voice_id"
     private const val KEY_COMMENTARY_FREQUENCY = "commentary_frequency"
+    private const val KEY_COMMENTARY_LENGTH = "commentary_length"
     private const val KEY_ACTIVE_TTS_PROVIDER = "active_tts_provider"
     private const val KEY_THEME = "app_theme"
+    private const val KEY_CROSSFADE = "crossfade_enabled"
+    private const val KEY_CROSSFADE_DURATION = "crossfade_duration"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -123,6 +126,14 @@ object SessionManager {
         getPrefs(context).edit().putFloat(KEY_COMMENTARY_FREQUENCY, frequency).apply()
     }
 
+    fun getCommentaryLength(context: Context): Float {
+        return getPrefs(context).getFloat(KEY_COMMENTARY_LENGTH, 0.5f)
+    }
+
+    fun saveCommentaryLength(context: Context, length: Float) {
+        getPrefs(context).edit().putFloat(KEY_COMMENTARY_LENGTH, length).apply()
+    }
+
     fun getActiveTtsProvider(context: Context): String {
         return getPrefs(context).getString(KEY_ACTIVE_TTS_PROVIDER, "Gemini") ?: "Gemini"
     }
@@ -142,5 +153,21 @@ object SessionManager {
 
     fun saveTheme(context: Context, theme: String) {
         getPrefs(context).edit().putString(KEY_THEME, theme).apply()
+    }
+
+    fun getCrossfadeEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_CROSSFADE, false)
+    }
+
+    fun saveCrossfadeEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_CROSSFADE, enabled).apply()
+    }
+
+    fun getCrossfadeDuration(context: Context): Int {
+        return getPrefs(context).getInt(KEY_CROSSFADE_DURATION, 5)
+    }
+
+    fun saveCrossfadeDuration(context: Context, duration: Int) {
+        getPrefs(context).edit().putInt(KEY_CROSSFADE_DURATION, duration).apply()
     }
 }

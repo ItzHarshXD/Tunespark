@@ -34,8 +34,18 @@ import com.tunespark.music.AppScreen
 import kotlinx.coroutines.delay
 import com.metrolist.lrclib.LrcLib
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
 
 data class LyricLine(val timestampMs: Long, val text: String)
+
+fun formatDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format(java.util.Locale.US, "%d.%02d", minutes, seconds)
+}
 
 fun cleanYouTubeTitle(title: String): String {
     val cleanupPatterns = listOf(
@@ -115,12 +125,14 @@ fun RadioScreen(
     }
 
     var currentPosition by remember { mutableStateOf(0L) }
-    LaunchedEffect(isPlaying, exoPlayer) {
-        if (isPlaying) {
-            while (true) {
-                currentPosition = exoPlayer.currentPosition
-                delay(200)
-            }
+    var duration by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(exoPlayer, currentTrackIndex) {
+        while (true) {
+            currentPosition = exoPlayer.currentPosition
+            val d = exoPlayer.duration
+            duration = if (d == androidx.media3.common.C.TIME_UNSET || d < 0) 0L else d
+            delay(250)
         }
     }
 
@@ -156,7 +168,6 @@ fun RadioScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
                 .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
             // FIX: Changed Arrangement.SpaceBetween → Arrangement.Top
@@ -169,7 +180,7 @@ fun RadioScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 0.dp), // FIX: was only padding(top=8dp); added explicit bottom=0dp for clarity
+                    .padding(top = 12.dp, bottom = 0.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -190,35 +201,68 @@ fun RadioScreen(
                 }
 
                 Row(
-                    modifier = Modifier
-                        .height(56.dp)
-                        .width(160.dp)
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(primaryColor)
-                        .clickable {
-                            if (isPlaying) {
-                                exoPlayer.pause()
-                            } else {
-                                exoPlayer.play()
-                            }
-                        }
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (isPlaying) "⏸" else "▶",
-                        color = onPrimaryColor,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = if (isPlaying) "Pause" else "Play",
-                        color = onPrimaryColor,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    // Play/Pause Button Capsule (Left Half of split capsule)
+                    Box(
+                        modifier = Modifier
+                            .height(56.dp)
+                            .width(80.dp)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 28.dp,
+                                    bottomStart = 28.dp,
+                                    topEnd = 8.dp,
+                                    bottomEnd = 8.dp
+                                )
+                            )
+                            .background(primaryColor)
+                            .clickable {
+                                if (isPlaying) {
+                                    exoPlayer.pause()
+                                } else {
+                                    exoPlayer.play()
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            tint = onPrimaryColor,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    // Skip Next Button Capsule (Right Half of split capsule)
+                    Box(
+                        modifier = Modifier
+                            .height(56.dp)
+                            .width(80.dp)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 8.dp,
+                                    bottomStart = 8.dp,
+                                    topEnd = 28.dp,
+                                    bottomEnd = 28.dp
+                                )
+                            )
+                            .background(primaryColor)
+                            .clickable {
+                                if (exoPlayer.hasNextMediaItem()) {
+                                    exoPlayer.seekToNext()
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SkipNext,
+                            contentDescription = "Skip Next",
+                            tint = onPrimaryColor,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 Box(
@@ -301,6 +345,53 @@ fun RadioScreen(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 3.5. Music Progress Slider and Times
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Slider(
+                    value = currentPosition.toFloat().coerceIn(0f, if (duration > 0) duration.toFloat() else 1f),
+                    onValueChange = { newValue ->
+                        currentPosition = newValue.toLong()
+                        exoPlayer.seekTo(currentPosition)
+                    },
+                    valueRange = 0f..(if (duration > 0) duration.toFloat() else 1f),
+                    colors = SliderDefaults.colors(
+                        activeTrackColor = primaryColor,
+                        inactiveTrackColor = secondaryColor,
+                        thumbColor = primaryColor
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = formatDuration(currentPosition),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = textColor.copy(alpha = 0.6f)
+                    )
+                    Text(
+                        text = formatDuration(duration),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = textColor.copy(alpha = 0.6f)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 4. Tab Selector
             var activeTab by remember { mutableStateOf("lyrics") }
@@ -521,49 +612,6 @@ fun RadioScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 6. Skip Song button
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .border(1.5.dp, primaryColor, RoundedCornerShape(28.dp))
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(backgroundColor)
-                    .clickable {
-                        if (exoPlayer.hasNextMediaItem()) {
-                            exoPlayer.seekToNext()
-                        }
-                    }
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(primaryColor),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "⏭",
-                        color = onPrimaryColor,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Text(
-                    text = "Skip song",
-                    color = textColor,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.width(48.dp))
-            }
         }
     }
 }

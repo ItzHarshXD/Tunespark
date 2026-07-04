@@ -39,17 +39,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.metrolist.innertube.YouTube
-import com.metrolist.innertube.models.Artist
-import com.metrolist.innertube.models.SongItem
-import com.metrolist.innertube.models.PlaylistItem
-import com.metrolist.innertube.models.AlbumItem
-import com.metrolist.innertube.models.ArtistItem
-import com.metrolist.innertube.models.YTItem
+import com.metrolist.innertube.models.*
+import com.metrolist.innertube.models.response.*
 import com.tunespark.music.AppScreen
 import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.ktor.client.call.body
 
 data class LibraryGridItem(
     val id: String,
@@ -176,48 +173,172 @@ fun PlaylistsScreen(
             }
 
             try {
-                val result = YouTube.library(browseId)
-                withContext(Dispatchers.Main) {
-                    isLoadingGrid = false
-                    if (result.isSuccess) {
-                        val libPage = result.getOrNull()
-                        val items = libPage?.items.orEmpty()
+                // Instantiating InnerTube with the signed-in user's cookies
+                val innerTube = com.metrolist.innertube.InnerTube().apply {
+                    cookie = com.metrolist.innertube.YouTube.cookie
+                }
+                
+                val response = innerTube.browse(
+                    client = com.metrolist.innertube.models.YouTubeClient.WEB_REMIX,
+                    browseId = browseId,
+                    setLogin = true
+                ).body<com.metrolist.innertube.models.response.BrowseResponse>()
 
-                        if (items.isEmpty()) {
-                            gridItems = when (selectedTab) {
-                                "Playlists" -> fallbackPlaylists
-                                "Albums" -> fallbackAlbums
-                                else -> fallbackArtists
-                            }
-                        } else {
-                            val fetchedItems = mutableListOf<LibraryGridItem>()
-                            if (selectedTab == "Playlists") {
-                                fetchedItems.add(LibraryGridItem(id = "LM", title = "Liked", subtitle = "Your liked songs", isLiked = true))
-                            }
-                            items.forEach { ytItem ->
-                                when (ytItem) {
-                                    is PlaylistItem -> {
-                                        val titleLower = ytItem.title.lowercase()
-                                        if (titleLower != "liked music" && titleLower != "episodes for later") {
-                                            fetchedItems.add(LibraryGridItem(id = ytItem.id, title = ytItem.title, subtitle = ytItem.songCountText ?: "Songs", thumbnailUrl = ytItem.thumbnail, rawItem = ytItem, authorName = ytItem.author?.name, authorAvatarUrl = ytItem.authorAvatarUrl))
-                                        }
-                                    }
-                                    is AlbumItem -> fetchedItems.add(LibraryGridItem(id = ytItem.id, title = ytItem.title, subtitle = ytItem.artists?.joinToString(", ") { it.name } ?: "Album", thumbnailUrl = ytItem.thumbnail, rawItem = ytItem))
-                                    is ArtistItem -> fetchedItems.add(LibraryGridItem(id = ytItem.id, title = ytItem.title, subtitle = "Artist", thumbnailUrl = ytItem.thumbnail, rawItem = ytItem))
-                                    else -> {}
+                val sectionContents = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents
+                    ?: response.contents?.sectionListRenderer?.contents
+                    ?: response.contents?.twoColumnBrowseResultsRenderer?.secondaryContents?.sectionListRenderer?.contents
+                    ?: response.continuationContents?.sectionListContinuation?.contents
+
+                val fetchedItems = mutableListOf<LibraryGridItem>()
+                if (selectedTab == "Playlists") {
+                    fetchedItems.add(LibraryGridItem(id = "LM", title = "Liked", subtitle = "Your liked songs", isLiked = true))
+                }
+
+                sectionContents?.forEach { content ->
+                    // 1. Check for gridRenderer (common for album/artist detail grid view)
+                    content.gridRenderer?.items?.forEach { gridItem ->
+                        val renderer = gridItem.musicTwoRowItemRenderer
+                        if (renderer != null) {
+                            val isItemAlbum = renderer.navigationEndpoint.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == "MUSIC_PAGE_TYPE_ALBUM" ||
+                                              renderer.navigationEndpoint.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == "MUSIC_PAGE_TYPE_AUDIOBOOK"
+                            val isItemArtist = renderer.navigationEndpoint.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == "MUSIC_PAGE_TYPE_ARTIST" ||
+                                               renderer.navigationEndpoint.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == "MUSIC_PAGE_TYPE_LIBRARY_ARTIST" ||
+                                               renderer.navigationEndpoint.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType == "MUSIC_PAGE_TYPE_USER_CHANNEL"
+
+                            if (selectedTab == "Albums" && isItemAlbum) {
+                                val bId = renderer.navigationEndpoint.browseEndpoint?.browseId
+                                val pId = renderer.thumbnailOverlay?.musicItemThumbnailOverlayRenderer?.content
+                                    ?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchPlaylistEndpoint?.playlistId
+                                    ?: renderer.thumbnailOverlay?.musicItemThumbnailOverlayRenderer?.content
+                                    ?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.playlistId
+                                    ?: renderer.navigationEndpoint.watchPlaylistEndpoint?.playlistId
+                                    ?: renderer.navigationEndpoint.watchEndpoint?.playlistId
+                                    ?: bId?.removePrefix("MPREb_")
+                                if (bId != null && pId != null) {
+                                    val title = renderer.title.runs?.firstOrNull()?.text ?: ""
+                                    val subtitle = renderer.subtitle?.runs?.joinToString("") { it.text } ?: "Album"
+                                    val thumb = renderer.thumbnailRenderer.musicThumbnailRenderer?.getThumbnailUrl()
+                                    val albumItem = AlbumItem(
+                                        browseId = bId,
+                                        playlistId = pId,
+                                        title = title,
+                                        artists = null,
+                                        thumbnail = thumb ?: ""
+                                    )
+                                    fetchedItems.add(LibraryGridItem(id = bId, title = title, subtitle = subtitle, thumbnailUrl = thumb, rawItem = albumItem))
+                                }
+                            } else if (selectedTab == "Artists" && isItemArtist) {
+                                val bId = renderer.navigationEndpoint.browseEndpoint?.browseId
+                                if (bId != null) {
+                                    val title = renderer.title.runs?.firstOrNull()?.text ?: ""
+                                    val thumb = renderer.thumbnailRenderer.musicThumbnailRenderer?.getThumbnailUrl()
+                                    val artistItem = ArtistItem(
+                                        id = bId,
+                                        title = title,
+                                        thumbnail = thumb,
+                                        shuffleEndpoint = null,
+                                        radioEndpoint = null
+                                    )
+                                    fetchedItems.add(LibraryGridItem(id = bId, title = title, subtitle = "Artist", thumbnailUrl = thumb, rawItem = artistItem))
                                 }
                             }
-                            gridItems = fetchedItems
                         }
-                    } else {
+                    }
+
+                    // 2. Check for musicShelfRenderer (common for list views)
+                    content.musicShelfRenderer?.contents?.forEach { shelfContent ->
+                        val renderer = shelfContent.musicResponsiveListItemRenderer
+                        if (renderer != null) {
+                            val pageType = renderer.navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
+                            val flexPageType = renderer.flexColumns.firstOrNull()?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()
+                                ?.navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
+
+                            val isItemAlbum = pageType == "MUSIC_PAGE_TYPE_ALBUM" || pageType == "MUSIC_PAGE_TYPE_AUDIOBOOK" ||
+                                              flexPageType == "MUSIC_PAGE_TYPE_ALBUM" || flexPageType == "MUSIC_PAGE_TYPE_AUDIOBOOK"
+                            val isItemArtist = pageType == "MUSIC_PAGE_TYPE_ARTIST" || pageType == "MUSIC_PAGE_TYPE_LIBRARY_ARTIST" || pageType == "MUSIC_PAGE_TYPE_USER_CHANNEL" ||
+                                               flexPageType == "MUSIC_PAGE_TYPE_ARTIST" || flexPageType == "MUSIC_PAGE_TYPE_LIBRARY_ARTIST" || flexPageType == "MUSIC_PAGE_TYPE_USER_CHANNEL"
+
+                            val bId = renderer.navigationEndpoint?.browseEndpoint?.browseId
+                                ?: renderer.flexColumns.firstOrNull()?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.navigationEndpoint?.browseEndpoint?.browseId
+
+                            if (selectedTab == "Albums" && isItemAlbum && bId != null) {
+                                val pId = renderer.overlay?.musicItemThumbnailOverlayRenderer?.content
+                                    ?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchPlaylistEndpoint?.playlistId
+                                    ?: renderer.overlay?.musicItemThumbnailOverlayRenderer?.content
+                                    ?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.playlistId
+                                    ?: renderer.navigationEndpoint?.watchPlaylistEndpoint?.playlistId
+                                    ?: renderer.navigationEndpoint?.watchEndpoint?.playlistId
+                                    ?: renderer.menu?.menuRenderer?.items?.firstNotNullOfOrNull {
+                                        it.menuNavigationItemRenderer?.navigationEndpoint?.watchPlaylistEndpoint?.playlistId
+                                        ?: it.menuNavigationItemRenderer?.navigationEndpoint?.watchEndpoint?.playlistId
+                                    }
+                                    ?: bId.removePrefix("MPREb_")
+
+                                val title = renderer.flexColumns.firstOrNull()?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.text ?: ""
+                                val subtitle = renderer.flexColumns.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.joinToString("") { it.text } ?: "Album"
+                                val thumb = renderer.thumbnail?.musicThumbnailRenderer?.getThumbnailUrl()
+                                val albumItem = AlbumItem(
+                                    browseId = bId,
+                                    playlistId = pId,
+                                    title = title,
+                                    artists = null,
+                                    thumbnail = thumb ?: ""
+                                )
+                                fetchedItems.add(LibraryGridItem(id = bId, title = title, subtitle = subtitle, thumbnailUrl = thumb, rawItem = albumItem))
+                            } else if (selectedTab == "Artists" && isItemArtist && bId != null) {
+                                val title = renderer.flexColumns.firstOrNull()?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.text ?: ""
+                                val thumb = renderer.thumbnail?.musicThumbnailRenderer?.getThumbnailUrl()
+                                val artistItem = ArtistItem(
+                                    id = bId,
+                                    title = title,
+                                    thumbnail = thumb,
+                                    shuffleEndpoint = null,
+                                    radioEndpoint = null
+                                )
+                                fetchedItems.add(LibraryGridItem(id = bId, title = title, subtitle = "Artist", thumbnailUrl = thumb, rawItem = artistItem))
+                            }
+                        }
+                    }
+                }
+
+                // If selectedTab is Playlists, let's also fetch playlists via YouTube.library as it already works perfectly!
+                if (selectedTab == "Playlists") {
+                    val playlistsResult = YouTube.library(browseId)
+                    if (playlistsResult.isSuccess) {
+                        val libPage = playlistsResult.getOrNull()
+                        libPage?.items?.forEach { ytItem ->
+                            if (ytItem is PlaylistItem) {
+                                val titleLower = ytItem.title.lowercase()
+                                if (titleLower != "liked music" && titleLower != "episodes for later") {
+                                    fetchedItems.add(LibraryGridItem(
+                                        id = ytItem.id,
+                                        title = ytItem.title,
+                                        subtitle = ytItem.songCountText ?: "Songs",
+                                        thumbnailUrl = ytItem.thumbnail,
+                                        rawItem = ytItem,
+                                        authorName = ytItem.author?.name,
+                                        authorAvatarUrl = ytItem.authorAvatarUrl
+                                    ))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    isLoadingGrid = false
+                    if (fetchedItems.isEmpty() || (selectedTab == "Playlists" && fetchedItems.size <= 1)) {
                         gridItems = when (selectedTab) {
                             "Playlists" -> fallbackPlaylists
                             "Albums" -> fallbackAlbums
                             else -> fallbackArtists
                         }
+                    } else {
+                        gridItems = fetchedItems
                     }
                 }
             } catch (e: Exception) {
+                e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     isLoadingGrid = false
                     gridItems = when (selectedTab) {

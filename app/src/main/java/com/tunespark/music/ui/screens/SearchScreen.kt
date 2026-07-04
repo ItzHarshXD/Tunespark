@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,11 +51,10 @@ fun SearchScreen(
     val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        delay(100) // Small delay to ensure compose handles state transitions before requesting focus
+        delay(100)
         focusRequester.requestFocus()
     }
 
-    // Handle system back press
     BackHandler {
         onNavigate(AppScreen.HOME)
     }
@@ -63,7 +63,6 @@ fun SearchScreen(
     var localResults by remember { mutableStateOf<List<SongItem>>(searchResults) }
     var localIsSearching by remember { mutableStateOf(false) }
 
-    // Reactive search and suggestions fetching
     LaunchedEffect(searchQuery) {
         if (searchQuery.isBlank()) {
             suggestions = emptyList()
@@ -72,12 +71,10 @@ fun SearchScreen(
             return@LaunchedEffect
         }
 
-        // Debounce of 300ms to prevent high-frequency api calls
         delay(300)
         localIsSearching = true
 
         try {
-            // Fetch autocomplete suggestions
             val suggestionRes = withContext(Dispatchers.IO) {
                 YouTube.searchSuggestions(searchQuery)
             }
@@ -85,9 +82,11 @@ fun SearchScreen(
                 suggestions = suggestionRes.getOrNull()?.queries.orEmpty()
             }
 
-            // Fetch actual search results
             val resultsRes = withContext(Dispatchers.IO) {
-                YouTube.search(query = searchQuery, filter = YouTube.SearchFilter.FILTER_SONG)
+                YouTube.search(
+                    query = searchQuery,
+                    filter = YouTube.SearchFilter.FILTER_SONG
+                )
             }
             if (resultsRes.isSuccess) {
                 val items = resultsRes.getOrNull()?.items.orEmpty()
@@ -110,17 +109,45 @@ fun SearchScreen(
             .padding(top = 16.dp, start = 16.dp, end = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Pill-Shaped Search Input Field (exactly as shown in screenshot)
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchQueryChange,
-            placeholder = { Text("Search songs, artists, albums...", color = Color.Gray) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search Icon", tint = textColor) },
+            placeholder = {
+                Text(
+                    "Search songs, artists, albums...",
+                    color = Color.Gray
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = "Search Icon",
+                    tint = textColor
+                )
+            },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(
+                        onClick = {
+                            onSearchQueryChange("")
+                            focusRequester.requestFocus()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear search",
+                            tint = textColor
+                        )
+                    }
+                }
+            },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = {
-                focusManager.clearFocus()
-            }),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    focusManager.clearFocus()
+                }
+            ),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = textColor,
                 unfocusedTextColor = textColor,
@@ -137,7 +164,6 @@ fun SearchScreen(
                 .focusRequester(focusRequester)
         )
 
-        // Loader indicator
         if (localIsSearching && localResults.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -158,7 +184,6 @@ fun SearchScreen(
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 1. Suggestions Section (if searchQuery is not empty)
             if (searchQuery.isNotEmpty() && suggestions.isNotEmpty()) {
                 items(suggestions.take(3)) { suggestion ->
                     Row(
@@ -196,13 +221,11 @@ fun SearchScreen(
                     }
                 }
 
-                // Add a small divider/space between suggestions and main results
                 item {
                     Spacer(modifier = Modifier.height(6.dp))
                 }
             }
 
-            // 2. Results Section
             if (localResults.isNotEmpty()) {
                 items(localResults) { song ->
                     Row(

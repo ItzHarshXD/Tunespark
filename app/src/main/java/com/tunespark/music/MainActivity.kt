@@ -107,7 +107,7 @@ enum class AppScreen {
     APPEARANCE,
     AI_VOICE,
     COMMENTARY,
-    NOTIFICATIONS,
+    PLAYER_AUDIO,
     LOCATION,
     UPDATES,
     PLAYLISTS
@@ -682,8 +682,8 @@ fun MainPlayerScreen(
                     onNavigate = { currentScreen = it }
                 )
             }
-            AppScreen.NOTIFICATIONS -> {
-                NotificationsScreen(
+            AppScreen.PLAYER_AUDIO -> {
+                PlayerAndAudioScreen(
                     onNavigate = { currentScreen = it }
                 )
             }

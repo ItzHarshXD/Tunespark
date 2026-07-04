@@ -1,12 +1,17 @@
 package com.tunespark.music.ui.screens
 
+import android.content.Intent
 import android.media.MediaPlayer
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,10 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunespark.music.AppScreen
@@ -38,11 +41,9 @@ fun AiVoiceScreen(
     var geminiApiKey by remember { mutableStateOf(SessionManager.getGeminiApiKey(context)) }
     var elevenLabsApiKey by remember { mutableStateOf(SessionManager.getElevenLabsApiKey(context)) }
     var elevenLabsVoiceId by remember { mutableStateOf(SessionManager.getElevenLabsVoiceId(context)) }
-    var commentaryFrequency by remember { mutableStateOf(SessionManager.getCommentaryFrequency(context)) }
     var isGenerating by remember { mutableStateOf(false) }
     var activePlayer by remember { mutableStateOf<MediaPlayer?>(null) }
 
-    // Clean up MediaPlayer on dispose
     DisposableEffect(Unit) {
         onDispose {
             activePlayer?.release()
@@ -53,6 +54,21 @@ fun AiVoiceScreen(
     val textColor = MaterialTheme.colorScheme.onBackground
     val primaryColor = MaterialTheme.colorScheme.primary
     val onPrimaryColor = MaterialTheme.colorScheme.onPrimary
+    val linkColor = Color(0xFFFF0000)
+
+    fun openUrl(url: String) {
+        try {
+            val formattedUrl = if (url.startsWith("http://") || url.startsWith("https://")) {
+                url
+            } else {
+                "https://$url"
+            }
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(formattedUrl))
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "Unable to open link", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Column(
         modifier = modifier
@@ -61,24 +77,28 @@ fun AiVoiceScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
-        SettingsHeader(title = "AI and Voice", onBack = { onNavigate(AppScreen.SETTINGS) })
+        SettingsHeader(
+            title = "AI and Voice",
+            onBack = { onNavigate(AppScreen.SETTINGS) }
+        )
 
-        // Tabs
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Gemini Tab Button
             Button(
                 onClick = { activeAiTab = "Gemini" },
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
                     .then(
-                        if (activeAiTab != "Gemini") Modifier.border(1.dp, textColor, RoundedCornerShape(24.dp))
-                        else Modifier
+                        if (activeAiTab != "Gemini") {
+                            Modifier.border(1.dp, textColor, RoundedCornerShape(24.dp))
+                        } else {
+                            Modifier
+                        }
                     ),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (activeAiTab == "Gemini") Color(0xFFFF0000) else Color.Transparent,
@@ -89,15 +109,17 @@ fun AiVoiceScreen(
                 Text("Gemini", fontWeight = FontWeight.Bold)
             }
 
-            // ElevenLabs Tab Button
             Button(
                 onClick = { activeAiTab = "ElevenLabs" },
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
                     .then(
-                        if (activeAiTab != "ElevenLabs") Modifier.border(1.dp, textColor, RoundedCornerShape(24.dp))
-                        else Modifier
+                        if (activeAiTab != "ElevenLabs") {
+                            Modifier.border(1.dp, textColor, RoundedCornerShape(24.dp))
+                        } else {
+                            Modifier
+                        }
                     ),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (activeAiTab == "ElevenLabs") Color(0xFFFF0000) else Color.Transparent,
@@ -110,44 +132,55 @@ fun AiVoiceScreen(
         }
 
         if (activeAiTab == "Gemini") {
-            // Gemini Content
-            Text("How to get your free key:", color = textColor, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
-
-            val geminiSteps = listOf(
-                "1. Go to aistudio.google.com/api-keys",
-                "2. Tap “Get API key”",
-                "3. Tap “Create API key”",
-                "4. Copy it and paste it here"
+            Text(
+                text = "How to get your free key:",
+                color = textColor,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
             )
-            geminiSteps.forEach { step ->
-                if (step.contains("aistudio.google.com/api-keys")) {
-                    val urlStart = step.indexOf("aistudio.google.com/api-keys")
-                    Text(
-                        text = buildAnnotatedString {
-                            append(step.substring(0, urlStart))
-                            withStyle(style = SpanStyle(color = Color(0xFFFF0000))) {
-                                append("aistudio.google.com/api-keys")
-                            }
-                        },
-                        color = textColor,
-                        fontSize = 16.sp,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                } else {
-                    Text(text = step, color = textColor, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
-                }
-            }
+
+            LinkStepRow(
+                prefix = "1. Go to ",
+                urlText = "aistudio.google.com/api-keys",
+                urlToOpen = "aistudio.google.com/api-keys",
+                textColor = textColor,
+                linkColor = linkColor,
+                onOpenLink = ::openUrl
+            )
+
+            Text(
+                text = "2. Tap “Get API key”",
+                color = textColor,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Text(
+                text = "3. Tap “Create API key”",
+                color = textColor,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Text(
+                text = "4. Copy it and paste it here",
+                color = textColor,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Text Field / Paste Box
             OutlinedTextField(
                 value = geminiApiKey,
                 onValueChange = {
                     geminiApiKey = it
                     SessionManager.saveGeminiApiKey(context, it)
                 },
-                placeholder = { Text("Paste your Gemini API key here", color = Color.Gray) },
+                placeholder = {
+                    Text("Paste your Gemini API key here", color = Color.Gray)
+                },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -159,28 +192,40 @@ fun AiVoiceScreen(
                     focusedTextColor = textColor
                 ),
                 trailingIcon = {
-                    IconButton(onClick = {
-                        clipboardManager.getText()?.text?.let { text ->
-                            geminiApiKey = text
-                            SessionManager.saveGeminiApiKey(context, text)
-                            Toast.makeText(context, "API Key Pasted", Toast.LENGTH_SHORT).show()
+                    IconButton(
+                        onClick = {
+                            clipboardManager.getText()?.text?.let { text ->
+                                val trimmed = text.trim()
+                                geminiApiKey = trimmed
+                                SessionManager.saveGeminiApiKey(context, trimmed)
+                                Toast.makeText(context, "API Key pasted", Toast.LENGTH_SHORT).show()
+                            }
                         }
-                    }) {
-                        Text("📋", fontSize = 20.sp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentPaste,
+                            contentDescription = "Paste Gemini API key",
+                            tint = textColor
+                        )
                     }
                 }
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // A little check box on the Gemini tab for TTS service
-            var isGeminiTts by remember { mutableStateOf(SessionManager.getActiveTtsProvider(context) == "Gemini") }
+            var isGeminiTts by remember {
+                mutableStateOf(SessionManager.getActiveTtsProvider(context) == "Gemini")
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
                         isGeminiTts = !isGeminiTts
-                        SessionManager.saveActiveTtsProvider(context, if (isGeminiTts) "Gemini" else "ElevenLabs")
+                        SessionManager.saveActiveTtsProvider(
+                            context,
+                            if (isGeminiTts) "Gemini" else "ElevenLabs"
+                        )
                     }
                     .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -189,7 +234,10 @@ fun AiVoiceScreen(
                     checked = isGeminiTts,
                     onCheckedChange = { checked ->
                         isGeminiTts = checked
-                        SessionManager.saveActiveTtsProvider(context, if (checked) "Gemini" else "ElevenLabs")
+                        SessionManager.saveActiveTtsProvider(
+                            context,
+                            if (checked) "Gemini" else "ElevenLabs"
+                        )
                     },
                     colors = CheckboxDefaults.colors(
                         checkedColor = Color(0xFFFF0000),
@@ -197,7 +245,9 @@ fun AiVoiceScreen(
                         checkmarkColor = Color.White
                     )
                 )
+
                 Spacer(modifier = Modifier.width(8.dp))
+
                 Text(
                     text = "Use Gemini for TTS (otherwise ElevenLabs will be used)",
                     color = textColor,
@@ -206,44 +256,55 @@ fun AiVoiceScreen(
                 )
             }
         } else {
-            // ElevenLabs Content
-            Text("How to get your free key:", color = textColor, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
-
-            val elevenSteps = listOf(
-                "1. Go to elevenlabs.io/app/developers/api-keys",
-                "2. Sign in or create an account",
-                "3. Create or copy your API key",
-                "4. Paste it here"
+            Text(
+                text = "How to get your free key:",
+                color = textColor,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
             )
-            elevenSteps.forEach { step ->
-                if (step.contains("elevenlabs.io/app/developers/api-keys")) {
-                    val urlStart = step.indexOf("elevenlabs.io/app/developers/api-keys")
-                    Text(
-                        text = buildAnnotatedString {
-                            append(step.substring(0, urlStart))
-                            withStyle(style = SpanStyle(color = Color(0xFFFF0000))) {
-                                append("elevenlabs.io/app/developers/api-keys")
-                            }
-                        },
-                        color = textColor,
-                        fontSize = 16.sp,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                } else {
-                    Text(text = step, color = textColor, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
-                }
-            }
+
+            LinkStepRow(
+                prefix = "1. Go to ",
+                urlText = "elevenlabs.io/app/developers/api-keys",
+                urlToOpen = "elevenlabs.io/app/developers/api-keys",
+                textColor = textColor,
+                linkColor = linkColor,
+                onOpenLink = ::openUrl
+            )
+
+            Text(
+                text = "2. Sign in or create an account",
+                color = textColor,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Text(
+                text = "3. Create or copy your API key",
+                color = textColor,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Text(
+                text = "4. Paste it here",
+                color = textColor,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Text Field / Paste Box
             OutlinedTextField(
                 value = elevenLabsApiKey,
                 onValueChange = {
                     elevenLabsApiKey = it
                     SessionManager.saveElevenLabsApiKey(context, it)
                 },
-                placeholder = { Text("Paste your ElevenLabs API key here", color = Color.Gray) },
+                placeholder = {
+                    Text("Paste your ElevenLabs API key here", color = Color.Gray)
+                },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -255,29 +316,39 @@ fun AiVoiceScreen(
                     focusedTextColor = textColor
                 ),
                 trailingIcon = {
-                    IconButton(onClick = {
-                        clipboardManager.getText()?.text?.let { text ->
-                            val trimmed = text.trim()
-                            elevenLabsApiKey = trimmed
-                            SessionManager.saveElevenLabsApiKey(context, trimmed)
-                            Toast.makeText(context, "API Key Pasted", Toast.LENGTH_SHORT).show()
+                    IconButton(
+                        onClick = {
+                            clipboardManager.getText()?.text?.let { text ->
+                                val trimmed = text.trim()
+                                elevenLabsApiKey = trimmed
+                                SessionManager.saveElevenLabsApiKey(context, trimmed)
+                                Toast.makeText(context, "API Key pasted", Toast.LENGTH_SHORT).show()
+                            }
                         }
-                    }) {
-                        Text("📋", fontSize = 20.sp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentPaste,
+                            contentDescription = "Paste ElevenLabs API key",
+                            tint = textColor
+                        )
                     }
                 }
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Voice ID Input Box
             OutlinedTextField(
                 value = elevenLabsVoiceId,
                 onValueChange = {
                     elevenLabsVoiceId = it
                     SessionManager.saveElevenLabsVoiceId(context, it)
                 },
-                placeholder = { Text("Enter Voice ID (e.g. EXAVITQu4vr4xnSDxMaL)", color = Color.Gray) },
+                placeholder = {
+                    Text(
+                        "Enter Voice ID (e.g. EXAVITQu4vr4xnSDxMaL)",
+                        color = Color.Gray
+                    )
+                },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -288,13 +359,14 @@ fun AiVoiceScreen(
                     unfocusedTextColor = textColor,
                     focusedTextColor = textColor
                 ),
-                label = { Text("Voice ID", color = textColor) }
+                label = {
+                    Text("Voice ID", color = textColor)
+                }
             )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Preview voice button
         Button(
             onClick = {
                 val currentKey = if (activeAiTab == "Gemini") geminiApiKey else elevenLabsApiKey
@@ -302,6 +374,7 @@ fun AiVoiceScreen(
                     Toast.makeText(context, "Please enter an API Key first", Toast.LENGTH_LONG).show()
                     return@Button
                 }
+
                 isGenerating = true
                 scope.launch {
                     try {
@@ -309,7 +382,12 @@ fun AiVoiceScreen(
                         val file = if (activeAiTab == "Gemini") {
                             TtsService.generateGeminiTts(context, currentKey, previewText)
                         } else {
-                            TtsService.generateElevenLabsTts(context, currentKey, previewText, elevenLabsVoiceId)
+                            TtsService.generateElevenLabsTts(
+                                context,
+                                currentKey,
+                                previewText,
+                                elevenLabsVoiceId
+                            )
                         }
 
                         activePlayer?.release()
@@ -347,23 +425,57 @@ fun AiVoiceScreen(
                 color = if (isGenerating) Color.White else onPrimaryColor
             )
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Commentary Frequency Slider
-        Text("Commentary Frequency", color = textColor, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
-        Slider(
-            value = commentaryFrequency,
-            onValueChange = {
-                commentaryFrequency = it
-                SessionManager.saveCommentaryFrequency(context, it)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(
-                thumbColor = Color(0xFFFF0000),
-                activeTrackColor = Color(0xFFFF0000),
-                inactiveTrackColor = Color.Gray
+@Composable
+private fun LinkStepRow(
+    prefix: String,
+    urlText: String,
+    urlToOpen: String,
+    textColor: Color,
+    linkColor: Color,
+    onOpenLink: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .clickable { onOpenLink(urlToOpen) },
+            verticalAlignment = Alignment.Top
+        ) {
+            Text(
+                text = prefix,
+                color = textColor,
+                fontSize = 16.sp
             )
-        )
+
+            Text(
+                text = urlText,
+                color = linkColor,
+                fontSize = 16.sp,
+                textDecoration = TextDecoration.Underline,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        IconButton(
+            onClick = { onOpenLink(urlToOpen) },
+            modifier = Modifier.size(24.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = "Open link",
+                tint = linkColor,
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }

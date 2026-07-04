@@ -27,7 +27,7 @@ Key files and packages:
     - `AppearanceScreen.kt`: Styled theme selections (Light, Dark, System).
     - `AiVoiceScreen.kt`: Controls and API keys configuration for Gemini / ElevenLabs backends.
     - `CommentaryScreen.kt`: Customize dynamic list switches like weather updates, song intros, etc.
-    - `NotificationsScreen.kt`: Setting to turn on/off app notifications.
+    - `PlayerAndAudioScreen.kt`: Settings screen for configuring player and audio parameters (currently placeholder).
     - `LocationScreen.kt`: Manages auto/manual GPS coordinates fetching for localized updates.
     - `UpdatesScreen.kt`: Shows current version (v1.24.2) and update check actions.
     - `SettingsHeader.kt`: A shared, beautiful back-navigated top-bar widget used across configurations.
@@ -87,7 +87,7 @@ TuneSpark has been structured into 12 distinct screens for clear separation of c
    - Features a premium, scrollable, styled lyrics block leveraging the integrated `:lrclib` module with microsecond-accurate timestamp parsing. Renders time-synced auto-scrolling using a centered `LazyListState` list, featuring Spotify-style progressive fading (highlighting the currently active spoken line and fading neighboring lines). Hoists lyrics loading in the parent scope for zero-latency in-memory background caching during navigation.
    - Features a capsule Skip button at the very bottom with a white background, black border, a solid black circle on the left containing a skip next icon, and "Skip song" text centered.
 4. **Settings Screen**:
-   - Offers customization options: *Appearance*, *Account*, *AI and Voice*, *Commentary*, *Notifications*, *Location*, and *Updates*.
+   - Offers customization options: *Appearance*, *Account*, *AI and Voice*, *Commentary*, *Player and Audio*, *Location*, and *Updates*.
    - Stylized dark/black background layout with a custom red circular back button.
 5. **Account Screen**:
    - The functional screen selected from Settings. Displays account details.
@@ -98,8 +98,8 @@ TuneSpark has been structured into 12 distinct screens for clear separation of c
    - Contains toggleable tabs for both "Gemini" and "ElevenLabs" options, instruction steps on how to obtain API keys, custom key input field with clipboard icon, customizable ElevenLabs Voice ID input box, a "Preview voice" action button, and a red commentary frequency slider.
 8. **Commentary Screen**:
    - Dynamic list of option switches ("Weather updates", "Session opener", "Song intro", etc.) with stylized check circle toggle states.
-9. **Notifications Screen**:
-   - Simple setting view to disable or toggle notifications.
+9. **Player and Audio Screen**:
+   - Dummy setting screen placeholder for future player and audio configurations.
 10. **Location Screen**:
     - Manage auto/manual location settings with active GPS switches, current coordinate display, and a dedicated GPS crosshair action button.
 11. **Updates Screen**:

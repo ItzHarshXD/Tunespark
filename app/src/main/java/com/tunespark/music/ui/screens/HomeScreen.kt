@@ -1,7 +1,6 @@
 package com.tunespark.music.ui.screens
 
 import android.content.Context
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,6 +37,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     currentSongTitle: String,
@@ -54,8 +54,6 @@ fun HomeScreen(
     var weatherInfo by remember { mutableStateOf<WeatherInfo?>(null) }
     var isWeatherLoading by remember { mutableStateOf(false) }
     var weatherError by remember { mutableStateOf<String?>(null) }
-
-    // Dynamic Clock State
     var timeString by remember { mutableStateOf("12:00") }
 
     LaunchedEffect(Unit) {
@@ -70,8 +68,14 @@ fun HomeScreen(
     }
 
     LaunchedEffect(Unit) {
-        val sharedPrefs = context.getSharedPreferences("tunespark_location_prefs", Context.MODE_PRIVATE)
-        val locationDisplay = sharedPrefs.getString("location_display", "San Francisco, CA (37.7749, -122.4194)") ?: "San Francisco, CA (37.7749, -122.4194)"
+        val sharedPrefs = context.getSharedPreferences(
+            "tunespark_location_prefs",
+            Context.MODE_PRIVATE
+        )
+        val locationDisplay = sharedPrefs.getString(
+            "location_display",
+            "San Francisco, CA (37.7749, -122.4194)"
+        ) ?: "San Francisco, CA (37.7749, -122.4194)"
 
         isWeatherLoading = true
         weatherError = null
@@ -79,11 +83,8 @@ fun HomeScreen(
             val info = withContext(Dispatchers.IO) {
                 WeatherService.fetchWeather(locationDisplay)
             }
-            if (info != null) {
-                weatherInfo = info
-            } else {
-                weatherError = "Failed to fetch weather data"
-            }
+            weatherInfo = info
+            if (info == null) weatherError = "Failed to fetch weather data"
         } catch (e: Exception) {
             weatherError = "Error loading weather"
         } finally {
@@ -95,381 +96,450 @@ fun HomeScreen(
     val textColor = MaterialTheme.colorScheme.onBackground
     val primaryColor = MaterialTheme.colorScheme.primary
     val onPrimaryColor = MaterialTheme.colorScheme.onPrimary
+    val isTrackLoaded = currentSongTitle != "No Track Loaded"
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(backgroundColor)
-            .padding(16.dp)
-    ) {
-        // Top Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "Tunespark",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Normal,
-                fontFamily = BitcountSingleFontFamily,
-                color = textColor
-            )
-            IconButton(
-                onClick = { onNavigate(AppScreen.SETTINGS) },
-                modifier = Modifier
-                    .size(40.dp)
-                    .border(1.dp, textColor, RoundedCornerShape(8.dp))
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    tint = textColor,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-
-        // Center Content Column
-        // FIX 1: Changed Arrangement.SpaceBetween → Arrangement.Top to eliminate the huge middle gap
-        // FIX 2: Increased bottom padding from 72.dp → 84.dp so content never overlaps the bottom bar
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 56.dp, bottom = 84.dp),
-            verticalArrangement = Arrangement.Top,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Upper section: Large Clock and Weather Info
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = timeString,
-                    fontSize = 84.sp,
-                    fontWeight = FontWeight.W900,
-                    color = textColor,
-                    fontFamily = FontFamily.SansSerif,
-                    textAlign = TextAlign.Center
-                )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.padding(top = 8.dp)
-                ) {
-                    Text(
-                        text = weatherInfo?.emoji ?: "☁️",
-                        fontSize = 38.sp,
-                        modifier = Modifier.padding(end = 12.dp)
-                    )
-                    Column {
-                        Text(
-                            text = "${weatherInfo?.temperature?.toInt() ?: 35}°C",
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textColor
-                        )
-                        Text(
-                            text = weatherInfo?.description ?: "Cloudy",
-                            fontSize = 14.sp,
-                            color = Color.Gray
-                        )
-                    }
-                }
-            }
-
-            // FIX 3: Added Spacer here — replaces the implicit SpaceBetween gap with a clean fixed gap
-            Spacer(modifier = Modifier.height(40.dp))
-
-            // Middle section depends on play state
-            if (currentSongTitle != "No Track Loaded") {
-                // SONG IS PLAYING
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Circular Play/Pause Toggle Button
-                    Box(
-                        modifier = Modifier
-                            .size(96.dp)
-                            .clip(CircleShape)
-                            .background(primaryColor)
-                            .clickable { onPlayPauseToggle() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (isPlaying) "⏸" else "▶",
-                            fontSize = 32.sp,
-                            color = onPrimaryColor
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(32.dp))
-
-                    EqualizerWaveform()
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // Stop Radio pill button
-                    Button(
-                        onClick = { onPlayPauseToggle() },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = primaryColor,
-                            contentColor = onPrimaryColor
-                        ),
-                        shape = RoundedCornerShape(28.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                    ) {
-                        Text("Stop Radio", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            } else {
-                // SONG IS NOT PLAYING (Idle state)
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.Start
-                ) {
-                    Text(
-                        text = "Good Evening",
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = textColor
-                    )
-                    Text(
-                        text = "Harsh",
-                        fontSize = 22.sp,
-                        color = textColor,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
-                    )
-
-                    // Horizontal mood tags
-                    val tags = listOf("Chill", "Feel good", "Commute", "Party")
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 24.dp)
-                    ) {
-                        items(tags) { tag ->
-                            Box(
-                                modifier = Modifier
-                                    .border(1.dp, textColor, RoundedCornerShape(20.dp))
-                                    .padding(horizontal = 16.getDpOrPx(), vertical = 8.getDpOrPx())
-                            ) {
-                                Text(text = tag, color = textColor, fontSize = 14.sp)
-                            }
-                        }
-                    }
-
-                    // Start Radio pill button
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .border(1.5.dp, textColor, RoundedCornerShape(28.dp))
-                            .clickable {
-                                onNavigate(AppScreen.RADIO)
-                                onShufflePlay()
-                            },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(4.dp)
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(primaryColor),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Start",
-                                tint = onPrimaryColor,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Text(
-                            text = "Start Radio",
-                            color = textColor,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f),
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.width(48.dp))
-                    }
-                }
-            }
-        }
-
-        // Bottom Bar
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = backgroundColor,
+        contentWindowInsets = WindowInsets.safeDrawing
+    ) { innerPadding ->
         Box(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 12.dp)
-                .fillMaxWidth()
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp)
         ) {
-            if (currentSongTitle != "No Track Loaded") {
-                // Bottom bar when playing
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 8.dp, bottom = 12.dp)
+            ) {
+                // Header
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Box(
+                    Text(
+                        text = "Tunespark",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Normal,
+                        fontFamily = BitcountSingleFontFamily,
+                        color = textColor
+                    )
+
+                    IconButton(
+                        onClick = { onNavigate(AppScreen.SETTINGS) },
                         modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .background(primaryColor)
-                            .clickable { onNavigate(AppScreen.SEARCH) },
-                        contentAlignment = Alignment.Center
+                            .size(44.dp)
+                            .border(1.dp, textColor.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = onPrimaryColor,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
-                    // Mini-Player Card
-                    Row(
-                        modifier = Modifier
-                            .height(56.dp)
-                            .weight(1f)
-                            .padding(horizontal = 12.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(primaryColor)
-                            .clickable { onNavigate(AppScreen.RADIO) }
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (!currentSongArtwork.isNullOrEmpty()) {
-                            AsyncImage(
-                                model = currentSongArtwork,
-                                contentDescription = "Artwork",
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.DarkGray),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("🎵", fontSize = 18.sp)
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = currentSongTitle,
-                                color = onPrimaryColor,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = currentSongArtist,
-                                color = onPrimaryColor.copy(alpha = 0.6f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .background(primaryColor)
-                            .clickable { onNavigate(AppScreen.PLAYLISTS) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.List,
-                            contentDescription = "Playlist",
-                            tint = onPrimaryColor,
-                            modifier = Modifier.size(24.dp)
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = textColor,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
-            } else {
-                // Bottom bar when NOT playing
-                Row(
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Hero block
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .height(56.dp)
-                            .weight(1f)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(primaryColor)
-                            .clickable { onNavigate(AppScreen.SEARCH) },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = onPrimaryColor,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Search",
-                            color = onPrimaryColor,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Text(
+                        text = timeString,
+                        fontSize = 68.sp,
+                        lineHeight = 68.sp,
+                        fontWeight = FontWeight.Black,
+                        color = textColor,
+                        fontFamily = FontFamily.SansSerif,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
-                        modifier = Modifier
-                            .height(56.dp)
-                            .weight(1f)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(primaryColor)
-                            .clickable { onNavigate(AppScreen.PLAYLISTS) },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.List,
-                            contentDescription = "Playlist",
-                            tint = onPrimaryColor,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Playlist",
-                            color = onPrimaryColor,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
+                            text = weatherInfo?.emoji ?: "☁️",
+                            fontSize = 30.sp,
+                            modifier = Modifier.padding(end = 10.dp)
                         )
+
+                        Column(
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "${weatherInfo?.temperature?.toInt() ?: 35}°C",
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textColor
+                            )
+                            Text(
+                                text = weatherInfo?.description ?: "Cloudy",
+                                fontSize = 13.sp,
+                                color = textColor.copy(alpha = 0.55f)
+                            )
+                        }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                if (isTrackLoaded) {
+                    PlayingContent(
+                        currentSongTitle = currentSongTitle,
+                        currentSongArtist = currentSongArtist,
+                        onPlayPauseToggle = onPlayPauseToggle,
+                        isPlaying = isPlaying,
+                        primaryColor = primaryColor,
+                        onPrimaryColor = onPrimaryColor
+                    )
+                } else {
+                    IdleContent(
+                        textColor = textColor,
+                        primaryColor = primaryColor,
+                        onPrimaryColor = onPrimaryColor,
+                        onStartRadio = {
+                            onNavigate(AppScreen.RADIO)
+                            onShufflePlay()
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                BottomDock(
+                    isTrackLoaded = isTrackLoaded,
+                    currentSongTitle = currentSongTitle,
+                    currentSongArtist = currentSongArtist,
+                    currentSongArtwork = currentSongArtwork,
+                    primaryColor = primaryColor,
+                    onPrimaryColor = onPrimaryColor,
+                    onNavigate = onNavigate
+                )
             }
         }
     }
 }
 
-private fun Int.getDpOrPx(): androidx.compose.ui.unit.Dp = this.dp
+@Composable
+private fun IdleContent(
+    textColor: Color,
+    primaryColor: Color,
+    onPrimaryColor: Color,
+    onStartRadio: () -> Unit
+) {
+    val tags = listOf("Chill", "Feel good", "Commute", "Party")
+
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "Good Evening",
+            fontSize = 40.sp,
+            lineHeight = 44.sp,
+            fontWeight = FontWeight.Bold,
+            color = textColor
+        )
+
+        Text(
+            text = "Harsh",
+            fontSize = 21.sp,
+            color = textColor.copy(alpha = 0.85f),
+            modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+        )
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(end = 8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(tags) { tag ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .border(
+                            1.dp,
+                            textColor.copy(alpha = 0.7f),
+                            RoundedCornerShape(20.dp)
+                        )
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = tag,
+                        color = textColor,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(58.dp)
+                .clip(RoundedCornerShape(30.dp))
+                .border(1.5.dp, textColor.copy(alpha = 0.8f), RoundedCornerShape(30.dp))
+                .clickable { onStartRadio() }
+                .padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(primaryColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Start",
+                    tint = onPrimaryColor,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Text(
+                text = "Start Radio",
+                color = textColor,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.width(46.dp))
+        }
+    }
+}
+
+@Composable
+private fun PlayingContent(
+    currentSongTitle: String,
+    currentSongArtist: String,
+    onPlayPauseToggle: () -> Unit,
+    isPlaying: Boolean,
+    primaryColor: Color,
+    onPrimaryColor: Color
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(92.dp)
+                .clip(CircleShape)
+                .background(primaryColor)
+                .clickable { onPlayPauseToggle() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (isPlaying) "⏸" else "▶",
+                fontSize = 30.sp,
+                color = onPrimaryColor
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        EqualizerWaveform()
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Button(
+            onClick = { onPlayPauseToggle() },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = primaryColor,
+                contentColor = onPrimaryColor
+            ),
+            shape = RoundedCornerShape(28.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+        ) {
+            Text("Stop Radio", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun BottomDock(
+    isTrackLoaded: Boolean,
+    currentSongTitle: String,
+    currentSongArtist: String,
+    currentSongArtwork: String?,
+    primaryColor: Color,
+    onPrimaryColor: Color,
+    onNavigate: (AppScreen) -> Unit
+) {
+    if (isTrackLoaded) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CircularDockButton(
+                icon = Icons.Default.Search,
+                contentDescription = "Search",
+                primaryColor = primaryColor,
+                onPrimaryColor = onPrimaryColor
+            ) { onNavigate(AppScreen.SEARCH) }
+
+            Row(
+                modifier = Modifier
+                    .height(56.dp)
+                    .weight(1f)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(primaryColor)
+                    .clickable { onNavigate(AppScreen.RADIO) }
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!currentSongArtwork.isNullOrEmpty()) {
+                    AsyncImage(
+                        model = currentSongArtwork,
+                        contentDescription = "Artwork",
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color.DarkGray),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("🎵", fontSize = 18.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = currentSongTitle,
+                        color = onPrimaryColor,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = currentSongArtist,
+                        color = onPrimaryColor.copy(alpha = 0.65f),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            CircularDockButton(
+                icon = Icons.Default.List,
+                contentDescription = "Playlist",
+                primaryColor = primaryColor,
+                onPrimaryColor = onPrimaryColor
+            ) { onNavigate(AppScreen.PLAYLISTS) }
+        }
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            BottomActionButton(
+                label = "Search",
+                icon = Icons.Default.Search,
+                primaryColor = primaryColor,
+                onPrimaryColor = onPrimaryColor,
+                modifier = Modifier.weight(1f)
+            ) {
+                onNavigate(AppScreen.SEARCH)
+            }
+
+            BottomActionButton(
+                label = "Playlist",
+                icon = Icons.Default.List,
+                primaryColor = primaryColor,
+                onPrimaryColor = onPrimaryColor,
+                modifier = Modifier.weight(1f)
+            ) {
+                onNavigate(AppScreen.PLAYLISTS)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BottomActionButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    primaryColor: Color,
+    onPrimaryColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = modifier
+            .height(56.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(primaryColor)
+            .clickable { onClick() },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = onPrimaryColor,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = label,
+            color = onPrimaryColor,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun CircularDockButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    primaryColor: Color,
+    onPrimaryColor: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(primaryColor)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = onPrimaryColor,
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}
 
 @Composable
 fun EqualizerWaveform() {
@@ -477,10 +547,11 @@ fun EqualizerWaveform() {
         1, 1, 2, 1, 3, 1, 4, 1, 5, 1, 3, 1, 2, 1, 2, 1, 2, 1, 5, 1, 4, 1, 2, 1, 3, 1, 2, 1, 1
     )
     val primaryColor = MaterialTheme.colorScheme.primary
+
     Row(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.Bottom,
-        modifier = Modifier.padding(vertical = 16.dp)
+        modifier = Modifier.padding(vertical = 12.dp)
     ) {
         dotHeights.forEach { height ->
             Column(

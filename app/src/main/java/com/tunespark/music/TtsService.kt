@@ -281,7 +281,8 @@ object TtsService {
     suspend fun generateCommentaryScript(
         apiKey: String,
         currentSong: String?,
-        upcomingSongs: List<String>
+        upcomingSongs: List<String>,
+        commentaryLength: Float
     ): String = withContext(Dispatchers.IO) {
         val cleanApiKey = apiKey.trim()
         val modelName = findWorkingTextModel(cleanApiKey)
@@ -295,8 +296,14 @@ object TtsService {
             if (upcomingSongs.isNotEmpty()) {
                 append("Coming up next, you are transitioning to these songs: ${upcomingSongs.joinToString(", ")}.\n")
             }
-            append("Generate a brief, engaging radio host transition or commentary script (1 to 2 sentences, maximum 25-30 words). ")
-            append("Make it flow naturally, mention the transition, and keep it extremely snappy and professional. ")
+            
+            val lengthInstructions = when {
+                commentaryLength < 0.33f -> "Generate a very brief and concise radio host transition or commentary script. Keep it to exactly 1 short sentence, maximum 15-20 words. Keep it extremely quick and snappy."
+                commentaryLength < 0.66f -> "Generate a standard, engaging radio host transition or commentary script. Keep it to 1 to 2 sentences, maximum 25-30 words. Make it flow naturally, mention the transition, and keep it extremely snappy and professional."
+                else -> "Generate a detailed, deeply engaging, and longer radio host commentary or backstory script. Keep it to 3 to 4 sentences, around 50-70 words. Include interesting radio banter, describe the artists or songs, and provide a comprehensive and rich transition."
+            }
+            append(lengthInstructions).append("\n")
+            
             append("Output ONLY the spoken text. Do not include any actions, stage directions, sound effects, introductory greetings, markdown, or quotation marks.")
         }.toString()
 
@@ -346,6 +353,7 @@ object TtsService {
         val geminiKey = SessionManager.getGeminiApiKey(context)
         val elevenLabsKey = SessionManager.getElevenLabsApiKey(context)
         val voiceId = SessionManager.getElevenLabsVoiceId(context)
+        val commentaryLength = SessionManager.getCommentaryLength(context)
 
         if (geminiKey.isBlank()) {
             throw Exception("Gemini API key is required to generate AI commentary script.")
@@ -355,7 +363,7 @@ object TtsService {
         for (attempt in 1..3) {
             try {
                 // 1. Generate the script using Gemini 3.1
-                val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs)
+                val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs, commentaryLength)
                 android.util.Log.d("TtsService", "Generated script (Attempt $attempt): $script")
 
                 // 2. Synthesize using the active TTS provider
