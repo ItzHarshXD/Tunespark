@@ -1,10 +1,5 @@
 package com.tunespark.music.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,8 +10,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunespark.music.AppScreen
 import com.tunespark.music.SessionManager
-import kotlin.math.roundToInt
 
 @Composable
 fun PlayerAndAudioScreen(
@@ -39,16 +31,12 @@ fun PlayerAndAudioScreen(
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    var crossfadeEnabled by remember {
-        mutableStateOf(SessionManager.getCrossfadeEnabled(context))
-    }
-    var crossfadeDuration by remember {
-        mutableStateOf(SessionManager.getCrossfadeDuration(context))
+    var keepScreenOn by remember {
+        mutableStateOf(SessionManager.getKeepScreenOn(context))
     }
 
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
-    val primaryColor = MaterialTheme.colorScheme.primary
 
     Column(
         modifier = modifier
@@ -70,9 +58,9 @@ fun PlayerAndAudioScreen(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .clickable {
-                    val newValue = !crossfadeEnabled
-                    crossfadeEnabled = newValue
-                    SessionManager.saveCrossfadeEnabled(context, newValue)
+                    val newValue = !keepScreenOn
+                    keepScreenOn = newValue
+                    SessionManager.saveKeepScreenOn(context, newValue)
                 }
                 .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -80,7 +68,7 @@ fun PlayerAndAudioScreen(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Crossfade",
+                    text = "Keep screen ON when expanded",
                     color = textColor,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
@@ -89,7 +77,7 @@ fun PlayerAndAudioScreen(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "Fades out the current song as the next one fades in.",
+                    text = "The screen will remain awake when the Radio player screen is opened.",
                     color = Color.Gray,
                     fontSize = 14.sp
                 )
@@ -97,65 +85,21 @@ fun PlayerAndAudioScreen(
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            SimpleCrossfadeSwitch(
-                checked = crossfadeEnabled,
+            SimpleKeepScreenOnSwitch(
+                checked = keepScreenOn,
                 onCheckedChange = {
-                    crossfadeEnabled = it
-                    SessionManager.saveCrossfadeEnabled(context, it)
+                    keepScreenOn = it
+                    SessionManager.saveKeepScreenOn(context, it)
                 },
                 backgroundColor = backgroundColor,
                 textColor = textColor
             )
         }
-
-        AnimatedVisibility(
-            visible = crossfadeEnabled,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 24.dp)
-            ) {
-                Text(
-                    text = "Crossfade Duration",
-                    color = textColor,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-
-                Text(
-                    text = "Duration: $crossfadeDuration seconds",
-                    color = Color.Gray,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                Slider(
-                    value = crossfadeDuration.toFloat(),
-                    onValueChange = {
-                        val roundedValue = it.roundToInt()
-                        crossfadeDuration = roundedValue
-                        SessionManager.saveCrossfadeDuration(context, roundedValue)
-                    },
-                    valueRange = 1f..15f,
-                    steps = 13,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = primaryColor,
-                        activeTrackColor = primaryColor,
-                        inactiveTrackColor = Color.Gray
-                    )
-                )
-            }
-        }
     }
 }
 
 @Composable
-private fun SimpleCrossfadeSwitch(
+private fun SimpleKeepScreenOnSwitch(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     backgroundColor: Color,

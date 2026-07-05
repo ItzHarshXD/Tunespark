@@ -1,9 +1,12 @@
 package com.tunespark.music.ui.screens
 
-import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.audiofx.Visualizer
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,18 +24,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
 import kotlinx.coroutines.delay
-import com.metrolist.lrclib.LrcLib
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -124,6 +127,31 @@ fun RadioScreen(
         onNavigate(AppScreen.HOME)
     }
 
+    val context = LocalContext.current
+    val keepScreenOnSetting = remember(context) { com.tunespark.music.SessionManager.getKeepScreenOn(context) }
+
+    DisposableEffect(keepScreenOnSetting) {
+        var window: android.view.Window? = null
+        var ctx = context
+        while (ctx is android.content.ContextWrapper) {
+            if (ctx is android.app.Activity) {
+                window = ctx.window
+                break
+            }
+            ctx = ctx.baseContext
+        }
+
+        if (window != null && keepScreenOnSetting) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+
+        onDispose {
+            if (window != null && keepScreenOnSetting) {
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+    }
+
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
 
@@ -131,7 +159,7 @@ fun RadioScreen(
         while (true) {
             currentPosition = exoPlayer.currentPosition
             val d = exoPlayer.duration
-            duration = if (d == androidx.media3.common.C.TIME_UNSET || d < 0) 0L else d
+            duration = if (d == C.TIME_UNSET || d < 0) 0L else d
             delay(250)
         }
     }
@@ -170,10 +198,6 @@ fun RadioScreen(
                 .fillMaxSize()
                 .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            // FIX: Changed Arrangement.SpaceBetween → Arrangement.Top
-            // SpaceBetween was distributing extra space between every child (including Spacers),
-            // creating large unpredictable gaps — especially visible below the top bar.
-            // Explicit Spacers below now own all the vertical rhythm.
             verticalArrangement = Arrangement.Top
         ) {
             // 1. Top Bar
@@ -204,7 +228,6 @@ fun RadioScreen(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Play/Pause Button Capsule (Left Half of split capsule)
                     Box(
                         modifier = Modifier
                             .height(56.dp)
@@ -235,7 +258,6 @@ fun RadioScreen(
                         )
                     }
 
-                    // Skip Next Button Capsule (Right Half of split capsule)
                     Box(
                         modifier = Modifier
                             .height(56.dp)
@@ -287,7 +309,7 @@ fun RadioScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 2. Dot-Matrix Sound Visualizer
+            // 2. Real Audio Visualizer
             RadioEqualizerWaveform(exoPlayer = exoPlayer, isPlaying = isPlaying)
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -368,7 +390,7 @@ fun RadioScreen(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
-                
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -611,29 +633,94 @@ fun RadioScreen(
                     }
                 }
             }
-
         }
     }
 }
 
 @Composable
 fun RadioEqualizerWaveform(exoPlayer: Player, isPlaying: Boolean) {
-    val baseHeights = listOf(
-        1, 1, 2, 3, 4, 3, 2, 1, 1, 1, 4, 5, 4, 1, 1, 2, 3, 2, 1, 1, 1
-    )
+    val context = LocalContext.current
+    val barCount = 21
 
-    var currentPosition by remember { mutableStateOf(0L) }
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
 
-    if (isPlaying) {
-        LaunchedEffect(Unit) {
-            while (true) {
-                currentPosition = exoPlayer.currentPosition
-                delay(25)
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted -> hasPermission = granted }
+
+    LaunchedEffect(Unit) {
+        if (!hasPermission) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    var barHeights by remember { mutableStateOf(FloatArray(barCount) { 1f }) }
+    var visualizer by remember { mutableStateOf<Visualizer?>(null) }
+    val sessionId = (exoPlayer as? androidx.media3.exoplayer.ExoPlayer)?.audioSessionId ?: C.AUDIO_SESSION_ID_UNSET
+
+    DisposableEffect(hasPermission, sessionId) {
+        var viz: Visualizer? = null
+
+        if (hasPermission && sessionId != C.AUDIO_SESSION_ID_UNSET) {
+            try {
+                viz = Visualizer(sessionId).apply {
+                    captureSize = Visualizer.getCaptureSizeRange()[1]
+                    setDataCaptureListener(
+                        object : Visualizer.OnDataCaptureListener {
+                            override fun onWaveFormDataCapture(
+                                v: Visualizer?, waveform: ByteArray?, samplingRate: Int
+                            ) {
+                                waveform ?: return
+                                val chunkSize = (waveform.size / barCount).coerceAtLeast(1)
+                                val newHeights = FloatArray(barCount)
+                                for (i in 0 until barCount) {
+                                    var sum = 0f
+                                    var count = 0
+                                    for (j in 0 until chunkSize) {
+                                        val idx = i * chunkSize + j
+                                        if (idx < waveform.size) {
+                                            val sample = (waveform[idx].toInt() and 0xFF) - 128
+                                            sum += kotlin.math.abs(sample)
+                                            count++
+                                        }
+                                    }
+                                    val avg = if (count > 0) sum / count else 0f
+                                    newHeights[i] = (1f + (avg / 128f) * 5f).coerceIn(1f, 6f)
+                                }
+                                barHeights = newHeights
+                            }
+
+                            override fun onFftDataCapture(
+                                v: Visualizer?, fft: ByteArray?, samplingRate: Int
+                            ) { /* unused */ }
+                        },
+                        Visualizer.getMaxCaptureRate() / 2,
+                        true,
+                        false
+                    )
+                }
+                visualizer = viz
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
-    } else {
-        LaunchedEffect(Unit) {
-            currentPosition = 0L
+
+        onDispose {
+            viz?.enabled = false
+            viz?.release()
+        }
+    }
+
+    LaunchedEffect(isPlaying, visualizer) {
+        visualizer?.enabled = isPlaying
+        if (!isPlaying) {
+            barHeights = FloatArray(barCount) { 1f }
         }
     }
 
@@ -646,32 +733,8 @@ fun RadioEqualizerWaveform(exoPlayer: Player, isPlaying: Boolean) {
             .height(80.dp)
             .padding(vertical = 12.dp)
     ) {
-        baseHeights.forEachIndexed { index, baseHeight ->
-            val height = if (isPlaying && currentPosition > 0) {
-                val wave = when {
-                    index < 7 -> {
-                        val bassPeriod = 500.0
-                        val phase = (currentPosition % bassPeriod) / bassPeriod
-                        val beatAttack = if (phase < 0.15) phase / 0.15 else 1.0 - ((phase - 0.15) / 0.85)
-                        val extraNoise = kotlin.math.sin(currentPosition / 50.0 + index) * 0.5
-                        baseHeight + (beatAttack * 3.5 + extraNoise).toInt()
-                    }
-                    index in 7..14 -> {
-                        val midWave1 = kotlin.math.sin(currentPosition / 80.0 + index * 0.5) * 1.5
-                        val midWave2 = kotlin.math.cos(currentPosition / 150.0 - index * 0.3) * 1.0
-                        baseHeight + (midWave1 + midWave2).toInt()
-                    }
-                    else -> {
-                        val trebleWave = kotlin.math.sin(currentPosition / 30.0 + index * 1.2) * 2.0
-                        val randomSparkle = if ((currentPosition + index * 10) % 200 < 50) 1.5 else -0.5
-                        baseHeight + (trebleWave + randomSparkle).toInt()
-                    }
-                }
-                wave.coerceIn(1, 6)
-            } else {
-                baseHeight
-            }
-
+        barHeights.forEach { mag ->
+            val height = mag.toInt().coerceIn(1, 6)
             Column(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally

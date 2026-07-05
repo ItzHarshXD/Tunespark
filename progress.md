@@ -27,7 +27,7 @@ Key files and packages:
     - `AppearanceScreen.kt`: Styled theme selections (Light, Dark, System).
     - `AiVoiceScreen.kt`: Controls and API keys configuration for Gemini / ElevenLabs backends.
     - `CommentaryScreen.kt`: Customize dynamic list switches like weather updates, song intros, etc.
-    - `PlayerAndAudioScreen.kt`: Settings screen for configuring player and audio parameters (currently placeholder).
+    - `PlayerAndAudioScreen.kt`: Settings screen for configuring player and audio parameters (such as "Keep screen ON when expanded").
     - `LocationScreen.kt`: Manages auto/manual GPS coordinates fetching for localized updates.
     - `UpdatesScreen.kt`: Shows current version (v1.24.2) and update check actions.
     - `SettingsHeader.kt`: A shared, beautiful back-navigated top-bar widget used across configurations.

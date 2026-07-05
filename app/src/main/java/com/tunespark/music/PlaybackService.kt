@@ -22,24 +22,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.pow
 
 class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var lastSeededVideoId: String? = null
     private val seedingVideoIds = mutableSetOf<String>()
-    private var isGeneratingCommentary = false
 
     private var playlistSongsPlayedSinceCommentary = 0
     private var lastCommentaryCheckedVideoId: String? = null
-
-    private var fadePlayer: ExoPlayer? = null
-    private var lastCrossfadeTriggeredMediaId: String? = null
-
-    // FIX: Guard flag â€” prevents polling loop re-entry while a crossfade job is active
-    @Volatile
-    private var isCrossfadeActive = false
 
     fun resetPlaylistCounter() {
         playlistSongsPlayedSinceCommentary = 0
@@ -79,28 +70,14 @@ class PlaybackService : MediaSessionService() {
             setAudioAttributes(audioAttributes, true)
         }
 
-        fadePlayer = ExoPlayer.Builder(this).build().apply {
-            setAudioAttributes(audioAttributes, false)
-        }
-
         exoPlayer.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (mediaItem == null) return
-                // FIX: Only reset the crossfade trigger lock if we are NOT mid-sequence.
-                // This prevents Case 2's internal seekToNextMediaItem() from resetting the lock
-                // and causing a re-trigger of the commentary sequence.
-                if (!isCrossfadeActive) {
-                    lastCrossfadeTriggeredMediaId = null
-                }
-                // FIX: Don't run seeding side-effects while a commentary sequence is active,
-                // as Case 2 calls seekToNextMediaItem internally.
-                if (!isCrossfadeActive) {
-                    handleCurrentMediaItem(exoPlayer, mediaItem)
-                }
+                handleCurrentMediaItem(exoPlayer, mediaItem)
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY && !isCrossfadeActive) {
+                if (playbackState == Player.STATE_READY) {
                     exoPlayer.currentMediaItem?.let { handleCurrentMediaItem(exoPlayer, it) }
                 }
             }
@@ -116,268 +93,6 @@ class PlaybackService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, exoPlayer)
             .setCallback(CustomSessionCallback())
             .build()
-
-        // Unified Crossfade Engine Polling Loop
-        serviceScope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(50)
-                try {
-                    val crossfadeEnabled = SessionManager.getCrossfadeEnabled(this@PlaybackService)
-                    if (!crossfadeEnabled) {
-                        if (exoPlayer.volume != 1.0f) exoPlayer.volume = 1.0f
-                        continue
-                    }
-
-                    // FIX: Skip the entire polling check while a crossfade job is running.
-                    // This is the primary guard against re-entry, double-triggering, and
-                    // volume state corruption from concurrent jobs.
-                    if (isCrossfadeActive) continue
-
-                    if (exoPlayer.isPlaying) {
-                        val currentItem = exoPlayer.currentMediaItem
-                        if (currentItem != null && currentItem.mediaId != lastCrossfadeTriggeredMediaId) {
-                            val duration = exoPlayer.duration
-                            val position = exoPlayer.currentPosition
-                            val crossfadeDurationSec = SessionManager.getCrossfadeDuration(this@PlaybackService)
-                            val D = crossfadeDurationSec * 1000L
-
-                            if (duration > 0 && (duration - position) <= D) {
-                                val nextIndex = exoPlayer.currentMediaItemIndex + 1
-                                if (nextIndex < exoPlayer.mediaItemCount) {
-                                    val nextItem = exoPlayer.getMediaItemAt(nextIndex)
-
-                                    // Lock BEFORE any async work to prevent race condition
-                                    lastCrossfadeTriggeredMediaId = currentItem.mediaId
-                                    isCrossfadeActive = true
-
-                                    val isNextCommentary = nextItem.mediaId.startsWith("commentary_")
-                                    if (isNextCommentary) {
-                                        executeCommentarySequence(exoPlayer, currentItem, nextItem, D)
-                                    } else {
-                                        if (!isUnresolvedMediaItem(nextItem)) {
-                                            executeTrackCrossfade(exoPlayer, currentItem, nextItem, D)
-                                        } else {
-                                            // Not ready yet â€” release lock and retry next poll
-                                            lastCrossfadeTriggeredMediaId = null
-                                            isCrossfadeActive = false
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e(PLAYBACK_SERVICE_TAG, "Error in crossfade loop: ${e.message}", e)
-                    isCrossfadeActive = false
-                }
-            }
-        }
-    }
-
-    private var crossfadeJob: kotlinx.coroutines.Job? = null
-
-    /**
-     * CASE 3 â€” Normal Song-to-Song Crossfade.
-     *
-     * FIX: Corrected operation order. The mainPlayer now seeks to the next song and warms up
-     * its audio pipeline FIRST (at volume 0). Only then is song1's tail loaded onto fadePlayer.
-     * This eliminates the brief silence gap that was caused by the old order where mainPlayer
-     * was cut off while fadePlayer was still buffering.
-     */
-    private fun executeTrackCrossfade(
-        mainPlayer: ExoPlayer,
-        song1: MediaItem,
-        song2: MediaItem,
-        durationMs: Long
-    ) {
-        crossfadeJob?.cancel()
-        crossfadeJob = serviceScope.launch {
-            try {
-                val currentPos = mainPlayer.currentPosition
-
-                // Step 1: Immediately jump mainPlayer to Song 2 at volume 0 so its audio
-                // pipeline starts warming up. No silence will be heard since volume is 0.
-                mainPlayer.seekToNextMediaItem()
-                mainPlayer.volume = 0f
-                mainPlayer.play()
-
-                // Step 2: Load Song 1's tail onto fadePlayer at the exact position,
-                // so it continues seamlessly from where mainPlayer left off.
-                fadePlayer?.setMediaItem(song1)
-                fadePlayer?.prepare()
-                fadePlayer?.seekTo(currentPos)
-                fadePlayer?.volume = 1.0f
-                fadePlayer?.play()
-
-                // Wait for fadePlayer to be ready before starting the volume sweep
-                while (fadePlayer?.playbackState == Player.STATE_BUFFERING) {
-                    kotlinx.coroutines.delay(10)
-                }
-
-                // Step 3: Parallel linear crossfade
-                val totalSteps = durationMs / 50L
-                for (i in 0..totalSteps) {
-                    val progress = i.toFloat() / totalSteps.toFloat()
-                    fadePlayer?.volume = 1.0f - progress
-                    mainPlayer.volume = progress
-                    kotlinx.coroutines.delay(50)
-                }
-
-                fadePlayer?.stop()
-                fadePlayer?.clearMediaItems()
-                mainPlayer.volume = 1.0f
-            } finally {
-                // FIX: Always release the active guard in a finally block so that
-                // a cancellation mid-animation never permanently locks the engine.
-                isCrossfadeActive = false
-                mainPlayer.volume = 1.0f
-                fadePlayer?.stop()
-                fadePlayer?.clearMediaItems()
-                // After crossfade completes, run the normal seeding/prefetch logic
-                // that was blocked during the fade.
-                mainPlayer.currentMediaItem?.let { handleCurrentMediaItem(mainPlayer, it) }
-            }
-        }
-    }
-
-    /**
-     * CASE 1 & 2 â€” Commentary Sequence.
-     *
-     * Commentary always plays on fadePlayer at full, constant volume (1.0f).
-     * The mainPlayer (song) is ducked below it.
-     *
-     * CASE 1 (Short â‰¤ 13s): Music ducks to 0.15 background floor while voice plays.
-     * CASE 2 (Long > 13s):  Music fades out fully, next song is advanced silently
-     *                        in the background, then fades back in as commentary ends.
-     *
-     * FIX: getMediaDurationMs is moved to Dispatchers.IO (was blocking main thread).
-     * FIX: isShortCommentary threshold raised to 13s and guarded against 0L return.
-     * FIX: Duck-in curve corrected to convex recovery (was concave â€” sounded unnatural).
-     * FIX: mainPlayer.volume is set BEFORE .play() in Case 2 resume to prevent volume flash.
-     * FIX: isCrossfadeActive released in finally block to handle cancellation safely.
-     */
-    private fun executeCommentarySequence(
-        mainPlayer: ExoPlayer,
-        currentSong: MediaItem,
-        commentaryItem: MediaItem,
-        D: Long
-    ) {
-        crossfadeJob?.cancel()
-        crossfadeJob = serviceScope.launch {
-            try {
-                val commUri = commentaryItem.localConfiguration?.uri?.toString()
-
-                // FIX: Retrieve duration on IO thread â€” MediaMetadataRetriever is blocking I/O
-                val commentaryDuration = withContext(Dispatchers.IO) {
-                    getMediaDurationMs(commUri)
-                }
-
-                // FIX: Guard against getMediaDurationMs returning 0L on failure.
-                // If we can't determine duration, default to Case 1 (safe duck behavior).
-                // FIX: Raised threshold to 13s to match the diagram's Case 1/2 boundary.
-                val isShortCommentary = commentaryDuration <= 0L || commentaryDuration <= 13000L
-
-                val duckOutDuration = 600L   // Time to duck music down (ms)
-                val duckInDuration = 1000L   // Time to bring music back up (ms)
-
-                // Commentary always plays at FULL volume on the background player.
-                // It never fades â€” the music ducks around it.
-                fadePlayer?.setMediaItem(commentaryItem)
-                fadePlayer?.prepare()
-                fadePlayer?.volume = 1.0f
-                fadePlayer?.play()
-
-                // Wait for commentary to be ready before starting duck
-                while (fadePlayer?.playbackState == Player.STATE_BUFFERING) {
-                    kotlinx.coroutines.delay(10)
-                }
-
-                // Track whether we've already advanced the queue in Case 2
-                var hasAdvancedQueue = false
-
-                while (fadePlayer?.isPlaying == true) {
-                    val commPos = fadePlayer?.currentPosition ?: 0L
-
-                    if (isShortCommentary) {
-                        // ================================================
-                        // CASE 1: Short Commentary â€” Music ducks to 0.15f
-                        // ================================================
-                        when {
-                            commPos < duckOutDuration -> {
-                                // Exponential duck-out: fast at end (0â†’1 â†’ volume 1â†’0.15)
-                                val progress = commPos.toFloat() / duckOutDuration.toFloat()
-                                mainPlayer.volume = 1.0f - (0.85f * progress.pow(3f))
-                            }
-                            commPos < (commentaryDuration - duckInDuration) -> {
-                                // Hold at background floor
-                                mainPlayer.volume = 0.15f
-                            }
-                            else -> {
-                                // FIX: Corrected convex duck-in curve.
-                                // Old: 0.15 + (0.85 * progress^3) â€” starts slow, jumps at end (wrong)
-                                // New: 0.15 + (0.85 * (1-(1-p)^3)) â€” rises quickly at first, eases in (natural)
-                                val remaining = commentaryDuration - commPos
-                                val progress = 1.0f - (remaining.toFloat() / duckInDuration.toFloat())
-                                mainPlayer.volume = 0.15f + (0.85f * (1f - (1f - progress).pow(3f)))
-                            }
-                        }
-                    } else {
-                        // ====================================================================
-                        // CASE 2: Long Commentary â€” Music fades fully out, next song advanced
-                        // ====================================================================
-                        when {
-                            commPos < D -> {
-                                // Exponential fade-out to silence
-                                val progress = commPos.toFloat() / D.toFloat()
-                                mainPlayer.volume = (1.0f - progress).pow(3f)
-                            }
-                            commPos < (commentaryDuration - D) -> {
-                                // Silence zone â€” advance the queue behind the curtain once
-                                mainPlayer.volume = 0f
-                                if (!hasAdvancedQueue && mainPlayer.currentMediaItem?.mediaId == currentSong.mediaId) {
-                                    hasAdvancedQueue = true
-                                    mainPlayer.seekToNextMediaItem()
-                                    // FIX: Set volume to 0 BEFORE pausing to prevent any volume flash
-                                    mainPlayer.volume = 0f
-                                    mainPlayer.pause()
-                                }
-                            }
-                            else -> {
-                                // Fade-in zone: convex swell back to full volume
-                                val remaining = commentaryDuration - commPos
-                                val progress = 1.0f - (remaining.toFloat() / D.toFloat())
-                                val newVol = 1.0f - (1.0f - progress).pow(3f)
-
-                                if (!mainPlayer.isPlaying) {
-                                    // FIX: Set volume BEFORE calling play() to prevent a 1-frame full-volume flash
-                                    mainPlayer.volume = newVol
-                                    mainPlayer.play()
-                                } else {
-                                    mainPlayer.volume = newVol
-                                }
-                            }
-                        }
-                    }
-
-                    kotlinx.coroutines.delay(30)
-                }
-
-                // Commentary finished â€” restore music to full volume
-                mainPlayer.volume = 1.0f
-                if (!mainPlayer.isPlaying) mainPlayer.play()
-
-            } finally {
-                // FIX: Always clean up in finally so cancellation mid-sequence
-                // never leaves the engine locked or volume in a broken state.
-                fadePlayer?.stop()
-                fadePlayer?.clearMediaItems()
-                mainPlayer.volume = 1.0f
-                if (!mainPlayer.isPlaying) mainPlayer.play()
-                isCrossfadeActive = false
-                // Resume normal seeding/prefetch that was paused during the sequence
-                mainPlayer.currentMediaItem?.let { handleCurrentMediaItem(mainPlayer, it) }
-            }
-        }
     }
 
     private fun handleCurrentMediaItem(exoPlayer: ExoPlayer, mediaItem: MediaItem) {
@@ -783,30 +498,8 @@ class PlaybackService : MediaSessionService() {
         super.onTaskRemoved(rootIntent)
     }
 
-    // FIX: This must only ever be called from Dispatchers.IO â€” it performs blocking I/O.
-    private fun getMediaDurationMs(uriString: String?): Long {
-        if (uriString == null) return 0L
-        val retriever = android.media.MediaMetadataRetriever()
-        return try {
-            if (uriString.startsWith("file://")) {
-                retriever.setDataSource(uriString.substring(7))
-            } else {
-                retriever.setDataSource(uriString, HashMap())
-            }
-            val time = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
-            time?.toLong() ?: 0L
-        } catch (e: Exception) {
-            android.util.Log.e(PLAYBACK_SERVICE_TAG, "Error retrieving media duration: ${e.message}", e)
-            0L
-        } finally {
-            try { retriever.release() } catch (ex: Exception) {}
-        }
-    }
-
     override fun onDestroy() {
         serviceScope.cancel()
-        fadePlayer?.release()
-        fadePlayer = null
         mediaSession?.run {
             player.release()
             release()

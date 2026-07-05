@@ -19,8 +19,7 @@ object SessionManager {
     private const val KEY_COMMENTARY_LENGTH = "commentary_length"
     private const val KEY_ACTIVE_TTS_PROVIDER = "active_tts_provider"
     private const val KEY_THEME = "app_theme"
-    private const val KEY_CROSSFADE = "crossfade_enabled"
-    private const val KEY_CROSSFADE_DURATION = "crossfade_duration"
+    private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -155,19 +154,11 @@ object SessionManager {
         getPrefs(context).edit().putString(KEY_THEME, theme).apply()
     }
 
-    fun getCrossfadeEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_CROSSFADE, false)
+    fun getKeepScreenOn(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_KEEP_SCREEN_ON, true)
     }
 
-    fun saveCrossfadeEnabled(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_CROSSFADE, enabled).apply()
-    }
-
-    fun getCrossfadeDuration(context: Context): Int {
-        return getPrefs(context).getInt(KEY_CROSSFADE_DURATION, 5)
-    }
-
-    fun saveCrossfadeDuration(context: Context, duration: Int) {
-        getPrefs(context).edit().putInt(KEY_CROSSFADE_DURATION, duration).apply()
+    fun saveKeepScreenOn(context: Context, keepOn: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_KEEP_SCREEN_ON, keepOn).apply()
     }
 }
