@@ -80,8 +80,8 @@ TuneSpark has been structured into 12 distinct screens for clear separation of c
    - A dedicated premium audio player view completely distinct from the Home screen, designed to perfectly match the user's provided target design.
    - Features a custom top header bar containing:
      - Left: A solid black circle Back button with a white back arrow to return the user to the Home screen without stopping playback.
-     - Center: A solid black Play/Pause capsule button showing current state (e.g. "⏸ Pause" or "▶ Play") in bold white text.
-     - Right: A solid red circle Close button with a white "X" to immediately stop playback and return to the Home screen.
+     - Center: A Row of split Play/Pause and Skip buttons styled as rounded capsule halves that beautifully and independently elongate their outer curved edges with bouncy spring physics and premium haptics when tapped.
+     - Right: A solid red circle Close button with a white "X" that features a confirmation expansion animation (expanding into a beautiful "Stop" capsule upon initial click with safety timeout and haptic feedback) as a second re-input to prevent accidental triggers.
    - Features a central, prominent dot-matrix Equalizer Waveform visualizer located below the top bar and above the song details, which uses physics-simulated bass, mid, and treble components to dance accurately on the song's real-time beats. Stabilized with fixed layout height constraints to prevent content-shaking jitter.
    - Features a Song details section with rounded square artwork on the left, and bold title & artist details on the right.
    - Features a premium, scrollable, styled lyrics block leveraging the integrated `:lrclib` module with microsecond-accurate timestamp parsing. Renders time-synced auto-scrolling using a centered `LazyListState` list, featuring Spotify-style progressive fading (highlighting the currently active spoken line and fading neighboring lines). Hoists lyrics loading in the parent scope for zero-latency in-memory background caching during navigation.

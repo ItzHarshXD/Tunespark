@@ -1,8 +1,11 @@
 package com.tunespark.music.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.media.audiofx.Visualizer
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,10 +39,18 @@ import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
+import android.view.SoundEffectConstants
+import android.view.HapticFeedbackConstants
 
 data class LyricLine(val timestampMs: Long, val text: String)
 
@@ -155,6 +166,21 @@ fun RadioScreen(
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
 
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val view = LocalView.current
+
+    val playPauseExtraWidth = remember { Animatable(0f) }
+    val skipExtraWidth = remember { Animatable(0f) }
+    var isStopExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isStopExpanded) {
+        if (isStopExpanded) {
+            delay(4000)
+            isStopExpanded = false
+        }
+    }
+
     LaunchedEffect(exoPlayer, currentTrackIndex) {
         while (true) {
             currentPosition = exoPlayer.currentPosition
@@ -187,12 +213,31 @@ fun RadioScreen(
     val secondaryColor = MaterialTheme.colorScheme.secondary
     val onSecondaryColor = MaterialTheme.colorScheme.onSecondary
 
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(backgroundColor)
             .padding(horizontal = 24.dp, vertical = 0.dp)
     ) {
+        // Transparent overlay to catch clicks anywhere outside the top bar when the Stop button is expanded
+        if (isStopExpanded) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 68.dp) // Starts below top bar (12.dp top padding + 56.dp height)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        isStopExpanded = false
+                    }
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -201,19 +246,25 @@ fun RadioScreen(
             verticalArrangement = Arrangement.Top
         ) {
             // 1. Top Bar
-            Row(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 0.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(top = 12.dp, bottom = 0.dp)
             ) {
+                val parentWidth = maxWidth
+
+                // Back Button (Left Aligned)
                 Box(
                     modifier = Modifier
+                        .align(Alignment.CenterStart)
                         .size(56.dp)
                         .clip(CircleShape)
                         .background(primaryColor)
-                        .clickable { onNavigate(AppScreen.HOME) },
+                        .clickable {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onNavigate(AppScreen.HOME) // Always takes user to HOME
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -224,86 +275,189 @@ fun RadioScreen(
                     )
                 }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Play/Pause & Skip buttons (Center Aligned, Hides when stop button expands)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = !isStopExpanded,
+                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                    modifier = Modifier.align(Alignment.Center)
                 ) {
                     Box(
                         modifier = Modifier
                             .height(56.dp)
-                            .width(80.dp)
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 28.dp,
-                                    bottomStart = 28.dp,
-                                    topEnd = 8.dp,
-                                    bottomEnd = 8.dp
-                                )
-                            )
-                            .background(primaryColor)
-                            .clickable {
-                                if (isPlaying) {
-                                    exoPlayer.pause()
-                                } else {
-                                    exoPlayer.play()
-                                }
-                            },
-                        contentAlignment = Alignment.Center
+                            .width(240.dp)
                     ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
-                            tint = onPrimaryColor,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                        // Left half (Play/Pause)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(119.dp)
+                                .align(Alignment.CenterStart)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .height(56.dp)
+                                    .width(80.dp + playPauseExtraWidth.value.coerceAtLeast(0f).dp)
+                                    .align(Alignment.CenterEnd)
+                                    .clip(
+                                        RoundedCornerShape(
+                                            topStart = 28.dp,
+                                            bottomStart = 28.dp,
+                                            topEnd = 8.dp,
+                                            bottomEnd = 8.dp
+                                        )
+                                    )
+                                    .background(primaryColor)
+                                    .clickable {
+                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        scope.launch {
+                                            playPauseExtraWidth.snapTo(0f)
+                                            playPauseExtraWidth.animateTo(
+                                                targetValue = 10f, // Premium subtle peak elongation
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                            playPauseExtraWidth.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            )
+                                        }
+                                        if (isPlaying) {
+                                            exoPlayer.pause()
+                                        } else {
+                                            exoPlayer.play()
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (isPlaying) "Pause" else "Play",
+                                    tint = onPrimaryColor,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
 
-                    Box(
-                        modifier = Modifier
-                            .height(56.dp)
-                            .width(80.dp)
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 8.dp,
-                                    bottomStart = 8.dp,
-                                    topEnd = 28.dp,
-                                    bottomEnd = 28.dp
+                        // Right half (Skip)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(119.dp)
+                                .align(Alignment.CenterEnd)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .height(56.dp)
+                                    .width(80.dp + skipExtraWidth.value.coerceAtLeast(0f).dp)
+                                    .align(Alignment.CenterStart)
+                                    .clip(
+                                        RoundedCornerShape(
+                                            topStart = 8.dp,
+                                            bottomStart = 8.dp,
+                                            topEnd = 28.dp,
+                                            bottomEnd = 28.dp
+                                        )
+                                    )
+                                    .background(primaryColor)
+                                    .clickable {
+                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        scope.launch {
+                                            skipExtraWidth.snapTo(0f)
+                                            skipExtraWidth.animateTo(
+                                                targetValue = 10f, // Premium subtle peak elongation
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                            skipExtraWidth.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            )
+                                        }
+                                        if (exoPlayer.hasNextMediaItem()) {
+                                            exoPlayer.seekToNext()
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SkipNext,
+                                    contentDescription = "Skip Next",
+                                    tint = onPrimaryColor,
+                                    modifier = Modifier.size(24.dp)
                                 )
-                            )
-                            .background(primaryColor)
-                            .clickable {
-                                if (exoPlayer.hasNextMediaItem()) {
-                                    exoPlayer.seekToNext()
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SkipNext,
-                            contentDescription = "Skip Next",
-                            tint = onPrimaryColor,
-                            modifier = Modifier.size(24.dp)
-                        )
+                            }
+                        }
                     }
                 }
 
+                // Stop Button (Right Aligned, Expands on first click)
+                val stopButtonWidth by animateDpAsState(
+                    targetValue = if (isStopExpanded) parentWidth - 68.dp else 56.dp,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "StopButtonWidth"
+                )
+
                 Box(
                     modifier = Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
+                        .align(Alignment.CenterEnd)
+                        .height(56.dp)
+                        .width(stopButtonWidth)
+                        .clip(RoundedCornerShape(28.dp))
                         .background(Color(0xFFFF3B30))
                         .clickable {
-                            exoPlayer.stop()
-                            onNavigate(AppScreen.HOME)
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            if (!isStopExpanded) {
+                                isStopExpanded = true
+                            } else {
+                                exoPlayer.stop()
+                                onNavigate(AppScreen.HOME)
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Stop",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Stop",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = isStopExpanded,
+                            enter = fadeIn() + expandHorizontally(),
+                            exit = fadeOut() + shrinkHorizontally()
+                        ) {
+                            Row {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Stop",
+                                    color = Color.White,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
