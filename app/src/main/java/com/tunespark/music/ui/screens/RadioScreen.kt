@@ -1,14 +1,10 @@
 package com.tunespark.music.ui.screens
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.media.AudioManager
-import android.media.audiofx.Visualizer
+import com.tunespark.music.VisualizerData
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -32,7 +28,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -419,7 +414,7 @@ fun RadioScreen(
                         .height(56.dp)
                         .width(stopButtonWidth)
                         .clip(RoundedCornerShape(28.dp))
-                        .background(Color(0xFFFF3B30))
+                        .background(Color(0xFFFF0000))
                         .clickable {
                             audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -461,18 +456,18 @@ fun RadioScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // 2. Real Audio Visualizer
-            RadioEqualizerWaveform(exoPlayer = exoPlayer, isPlaying = isPlaying)
+            RadioEqualizerWaveform(isPlaying = isPlaying)
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // 3. Current Song Details Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 0.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
@@ -711,25 +706,6 @@ fun RadioScreen(
                                 .padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (isCurrent) {
-                                Text(
-                                    text = "▶",
-                                    color = textColor,
-                                    fontSize = 14.sp,
-                                    modifier = Modifier.width(24.dp),
-                                    textAlign = TextAlign.Center
-                                )
-                            } else {
-                                Text(
-                                    text = "${index + 1}",
-                                    color = textColor.copy(alpha = 0.6f),
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.width(24.dp),
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(8.dp))
 
                             Box(
                                 modifier = Modifier
@@ -792,89 +768,71 @@ fun RadioScreen(
 }
 
 @Composable
-fun RadioEqualizerWaveform(exoPlayer: Player, isPlaying: Boolean) {
-    val context = LocalContext.current
+fun RadioEqualizerWaveform(isPlaying: Boolean) {
     val barCount = 21
+    val maxDots = 7
+    val bandLevels by VisualizerData.bandLevels.collectAsState()
 
-    var hasPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context, Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
+    var peaks by remember { mutableStateOf(FloatArray(barCount) { 0f }) }
+    var fallVelocity by remember { mutableStateOf(FloatArray(barCount) { 0f }) }
+    var sensitivity by remember { mutableStateOf(1f) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted -> hasPermission = granted }
+    val gravity = 0.025f
+    val smoothingStrength = 2f
 
-    LaunchedEffect(Unit) {
-        if (!hasPermission) {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    val centerBias = remember {
+        FloatArray(barCount) { i ->
+            val center = (barCount - 1) / 2f
+            val distanceRatio = kotlin.math.abs(i - center) / center
+            val bias = kotlin.math.cos(distanceRatio * (Math.PI / 2)).toFloat()
+            0.92f + 0.08f * bias
         }
     }
 
-    var barHeights by remember { mutableStateOf(FloatArray(barCount) { 1f }) }
-    var visualizer by remember { mutableStateOf<Visualizer?>(null) }
-    val sessionId = (exoPlayer as? androidx.media3.exoplayer.ExoPlayer)?.audioSessionId ?: C.AUDIO_SESSION_ID_UNSET
+    LaunchedEffect(bandLevels, isPlaying) {
+        if (isPlaying) {
+            val frameMax = bandLevels.maxOrNull() ?: 0f
 
-    DisposableEffect(hasPermission, sessionId) {
-        var viz: Visualizer? = null
-
-        if (hasPermission && sessionId != C.AUDIO_SESSION_ID_UNSET) {
-            try {
-                viz = Visualizer(sessionId).apply {
-                    captureSize = Visualizer.getCaptureSizeRange()[1]
-                    setDataCaptureListener(
-                        object : Visualizer.OnDataCaptureListener {
-                            override fun onWaveFormDataCapture(
-                                v: Visualizer?, waveform: ByteArray?, samplingRate: Int
-                            ) {
-                                waveform ?: return
-                                val chunkSize = (waveform.size / barCount).coerceAtLeast(1)
-                                val newHeights = FloatArray(barCount)
-                                for (i in 0 until barCount) {
-                                    var sum = 0f
-                                    var count = 0
-                                    for (j in 0 until chunkSize) {
-                                        val idx = i * chunkSize + j
-                                        if (idx < waveform.size) {
-                                            val sample = (waveform[idx].toInt() and 0xFF) - 128
-                                            sum += kotlin.math.abs(sample)
-                                            count++
-                                        }
-                                    }
-                                    val avg = if (count > 0) sum / count else 0f
-                                    newHeights[i] = (1f + (avg / 128f) * 5f).coerceIn(1f, 6f)
-                                }
-                                barHeights = newHeights
-                            }
-
-                            override fun onFftDataCapture(
-                                v: Visualizer?, fft: ByteArray?, samplingRate: Int
-                            ) { /* unused */ }
-                        },
-                        Visualizer.getMaxCaptureRate() / 2,
-                        true,
-                        false
-                    )
-                }
-                visualizer = viz
-            } catch (e: Exception) {
-                e.printStackTrace()
+            if (frameMax * sensitivity > 0.96f) {
+                sensitivity = (sensitivity - 0.010f).coerceAtLeast(0.45f)
+            } else if (frameMax * sensitivity < 0.38f) {
+                sensitivity = (sensitivity + 0.006f).coerceAtMost(2.8f)
             }
-        }
 
-        onDispose {
-            viz?.enabled = false
-            viz?.release()
-        }
-    }
+            val rawTargets = FloatArray(barCount)
+            for (i in 0 until barCount) {
+                val raw = bandLevels.getOrElse(i) { 0f }.coerceIn(0f, 1f)
 
-    LaunchedEffect(isPlaying, visualizer) {
-        visualizer?.enabled = isPlaying
-        if (!isPlaying) {
-            barHeights = FloatArray(barCount) { 1f }
+                val expanded = Math.pow(raw.toDouble(), 0.58).toFloat()
+
+                val withSensitivity = (expanded * sensitivity).coerceIn(0f, 1f)
+
+                rawTargets[i] = withSensitivity * maxDots
+            }
+
+            val smoothed = applyMonstercatSmoothing(rawTargets, strength = smoothingStrength)
+
+            val shaped = FloatArray(barCount) { i ->
+                (smoothed[i] * centerBias[i]).coerceIn(0f, maxDots.toFloat())
+            }
+
+            val newPeaks = FloatArray(barCount)
+            val newVelocity = fallVelocity.copyOf()
+
+            for (i in shaped.indices) {
+                val yValue = shaped[i]
+
+                if (yValue >= peaks[i]) {
+                    newPeaks[i] = yValue
+                    newVelocity[i] = 0f
+                } else {
+                    newVelocity[i] += gravity
+                    newPeaks[i] = (peaks[i] - newVelocity[i]).coerceAtLeast(0f)
+                }
+            }
+
+            peaks = newPeaks
+            fallVelocity = newVelocity
         }
     }
 
@@ -884,11 +842,12 @@ fun RadioEqualizerWaveform(exoPlayer: Player, isPlaying: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.Bottom,
         modifier = Modifier
-            .height(80.dp)
+            .height(86.dp)
             .padding(vertical = 12.dp)
     ) {
-        barHeights.forEach { mag ->
-            val height = mag.toInt().coerceIn(1, 6)
+        peaks.forEach { mag ->
+            val height = kotlin.math.round(mag).toInt().coerceIn(1, maxDots)
+
             Column(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -905,3 +864,53 @@ fun RadioEqualizerWaveform(exoPlayer: Player, isPlaying: Boolean) {
         }
     }
 }
+
+fun applyMonstercatSmoothing(values: FloatArray, strength: Float = 1.65f): FloatArray {
+    val result = values.copyOf()
+
+    for (i in result.indices) {
+        for (j in result.indices) {
+            if (i != j) {
+                val distance = kotlin.math.abs(i - j)
+                val allowed = result[i] / Math.pow(strength.toDouble(), distance.toDouble()).toFloat()
+                if (result[j] < allowed) {
+                    result[j] = allowed
+                }
+            }
+        }
+    }
+
+    return result
+}
+
+
+// These are the best knobs for tuning it further:
+
+// gravity
+// Higher = faster, livelier drop.
+// Lower = smoother, floatier decay.
+
+// smoothingStrength
+// Lower = wider connected wave.
+// Higher = more separated bars.
+
+// maxDots
+// 6 = tighter, cleaner.
+// 7 = best balance.
+// 8+ = more expressive but less compact.
+
+// centerBias
+// Stronger bias = more centered crest.
+// Lower bias = more natural spectrum shape.
+
+// Autosens thresholds
+// Controls how aggressively quiet or loud tracks get corrected.
+
+// FFT band mapping
+// You can remap bins to emphasize bass, mids, or vocals differently.
+
+// First-bin dampening
+// Useful if the left-most columns still dominate too much.
+
+// Row spacing / dot size / column spacing
+// Purely visual but changes the perceived feel a lot.

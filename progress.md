@@ -62,6 +62,15 @@ Key files:
 - `innertube/src/main/kotlin/com/metrolist/innertube/pages/NewPipe.kt`
   - Utility wrapper for stream/cipher handling.
 
+
+### 3. Live Visualizer Refinement & Finalization
+- **Radio Screen Visualizer Upgrade**: The dot-matrix Equalizer Waveform in the Radio screen has now been significantly refined to feel much more alive, musical, and premium. Instead of behaving like a flat or fake animated waveform, it now reacts more naturally to the actual character of the playing song through a tuned visual response model inspired by lively CAVA-style visualizer motion.
+- **Improved Motion Behavior**: The final visualizer behavior now combines instant peak rise, gravity-based falloff, autosensitivity balancing, and Monstercat-style neighbor smoothing. This allows the bars/dots to rise quickly on strong beats, fall with a more natural weighted decay, and still feel visually connected rather than jittery or random.
+- **Shape and Balance Tuning**: The waveform was further tuned to avoid awkward concave shaping and over-dominant edge columns. A softer center bias was introduced to preserve a balanced premium silhouette while still allowing the real audio energy to drive the visual output.
+- **Low-End / First-Column Correction**: Special refinement was also made for the earliest FFT bands so the first column no longer appears permanently over-inflated. This resolved the classic low-frequency/DC-bin issue that was making the left-most visualizer bar look unnaturally full.
+- **Compact Premium Dot Layout**: The final visualizer presentation was also tightened visually by reducing the effective vertical dot rows to a compact 6-7 level look. This keeps the player UI elegant and less noisy while still preserving strong expressive movement.
+- **Result**: The Radio player now contains a much more polished, lively, compact, and premium-looking dotted audio visualizer that better matches the intended product feel and serves as one of the strongest visual identity elements inside TuneSpark's playback experience.
+
 ---
 
 ## Screen Architecture

@@ -57,4 +57,5 @@ dependencies {
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.json)
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.github.wendykierp:JTransforms:3.1")
 }
