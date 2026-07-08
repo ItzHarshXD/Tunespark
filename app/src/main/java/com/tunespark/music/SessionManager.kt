@@ -20,6 +20,7 @@ object SessionManager {
     private const val KEY_ACTIVE_TTS_PROVIDER = "active_tts_provider"
     private const val KEY_THEME = "app_theme"
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
+    private const val KEY_SHOW_VISUALIZER = "show_visualizer"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -160,5 +161,13 @@ object SessionManager {
 
     fun saveKeepScreenOn(context: Context, keepOn: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_KEEP_SCREEN_ON, keepOn).apply()
+    }
+
+    fun getShowVisualizer(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_SHOW_VISUALIZER, true)
+    }
+
+    fun saveShowVisualizer(context: Context, show: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_SHOW_VISUALIZER, show).apply()
     }
 }

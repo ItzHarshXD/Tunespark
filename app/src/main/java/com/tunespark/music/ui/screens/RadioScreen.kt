@@ -135,6 +135,7 @@ fun RadioScreen(
 
     val context = LocalContext.current
     val keepScreenOnSetting = remember(context) { com.tunespark.music.SessionManager.getKeepScreenOn(context) }
+    val showVisualizerSetting = remember(context) { com.tunespark.music.SessionManager.getShowVisualizer(context) }
 
     DisposableEffect(keepScreenOnSetting) {
         var window: android.view.Window? = null
@@ -160,6 +161,7 @@ fun RadioScreen(
 
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
+    var activeTab by remember { mutableStateOf("lyrics") }
 
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -235,8 +237,7 @@ fun RadioScreen(
 
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .navigationBarsPadding(),
+                .fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top
         ) {
@@ -256,7 +257,7 @@ fun RadioScreen(
                         .clip(CircleShape)
                         .background(primaryColor)
                         .clickable {
-                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK)
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             onNavigate(AppScreen.HOME) // Always takes user to HOME
                         },
@@ -456,12 +457,25 @@ fun RadioScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            val shouldShowVisualizer = showVisualizerSetting && activeTab != "queue"
 
-            // 2. Real Audio Visualizer
-            RadioEqualizerWaveform(isPlaying = isPlaying)
+            AnimatedVisibility(
+                visible = shouldShowVisualizer,
+                enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
+                exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut()
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    RadioEqualizerWaveform(isPlaying = isPlaying)
+                }
+            }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            val spacerHeight by animateDpAsState(
+                targetValue = if (shouldShowVisualizer) 10.dp else 20.dp,
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                label = "VisualizerSpacerHeight"
+            )
+            Spacer(modifier = Modifier.height(spacerHeight))
 
             // 3. Current Song Details Row
             Row(
@@ -565,8 +579,6 @@ fun RadioScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // 4. Tab Selector
-            var activeTab by remember { mutableStateOf("lyrics") }
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -580,7 +592,11 @@ fun RadioScreen(
                         .height(40.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
-                        .clickable { activeTab = "lyrics" }
+                        .clickable {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            activeTab = "lyrics"
+                        }
                         .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -597,7 +613,11 @@ fun RadioScreen(
                         .height(40.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (activeTab == "queue") primaryColor else secondaryColor)
-                        .clickable { activeTab = "queue" }
+                        .clickable {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            activeTab = "queue"
+                        }
                         .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.Center
                 ) {
