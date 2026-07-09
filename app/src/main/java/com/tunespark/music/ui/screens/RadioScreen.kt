@@ -37,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -44,8 +45,12 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
 import android.view.SoundEffectConstants
 import android.view.HapticFeedbackConstants
+import kotlin.math.pow
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.animation.core.animateDpAsState
 
 data class LyricLine(val timestampMs: Long, val text: String)
 
@@ -644,9 +649,57 @@ fun RadioScreen(
                 } else {
                     val listState = rememberLazyListState()
 
+                    val isPlaybackDone = remember(exoPlayer.playbackState, isPlaying, currentPosition, duration) {
+                        exoPlayer.playbackState == Player.STATE_ENDED || (!isPlaying && currentPosition >= duration - 1000 && duration > 0)
+                    }
+
+                    LaunchedEffect(isPlaybackDone) {
+                        if (isPlaybackDone) {
+                            listState.animateScrollToItem(0)
+                        }
+                    }
+
                     LaunchedEffect(activeLyricIndex) {
                         if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
-                            listState.animateScrollToItem(activeLyricIndex)
+                            val targetOffset = -10
+                            val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                            if (initialVisibleItem == null) {
+                                // If the item is not visible at all (e.g. initial load or far seek click),
+                                // snap to it instantly so there's no jarring jump, then it's in view for tracking
+                                listState.scrollToItem(activeLyricIndex, targetOffset)
+                            } else {
+                                // If the item is already visible, perform a buttery-smooth chase scroll.
+                                // It runs inside a scroll session and continuously calculates the item's live offset
+                                // during expansion/shrinks, guaranteeing 0% overshoot or bounciness glitches.
+                                listState.scroll {
+                                    var lastValue = 0f
+                                    animate(
+                                        initialValue = 0f,
+                                        targetValue = 1f,
+                                        animationSpec = tween(
+                                            durationMillis = 600,
+                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                        )
+                                    ) { currentValue, _ ->
+                                        val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                                        if (visibleItem != null) {
+                                            val currentOffset = visibleItem.offset
+                                            val remainingDelta = currentOffset - targetOffset
+
+                                            val denominator = 1f - lastValue
+                                            val stepFraction = if (denominator > 0.001f) {
+                                                (currentValue - lastValue) / denominator
+                                            } else {
+                                                1f
+                                            }
+                                            val scrollAmount = remainingDelta * stepFraction
+
+                                            scrollBy(scrollAmount)
+                                            lastValue = currentValue
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -654,48 +707,131 @@ fun RadioScreen(
                         state = listState,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f)
-                            .padding(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                            .weight(1f),
+                        contentPadding = PaddingValues(top = 24.dp, bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         itemsIndexed(lyricsLines) { index, line ->
-                            val isPlaceholder = lyricsLines.size == 1 && (line.text.startsWith("No lyrics") || line.text.startsWith("Could not") || line.text.startsWith("No track"))
+                            val isPlaceholder = lyricsLines.size == 1 &&
+                                    (line.text.startsWith("No lyrics") ||
+                                            line.text.startsWith("Could not") ||
+                                            line.text.startsWith("No track"))
+
                             val isActive = index == activeLyricIndex
 
-                            val lineTextColor = when {
-                                isPlaceholder -> textColor.copy(alpha = 0.5f)
-                                isActive -> textColor
+                            val targetAlpha = when {
+                                isPlaceholder -> 0.5f
+                                isActive -> 1f
                                 activeLyricIndex == -1 -> {
                                     when {
-                                        index < 2 -> textColor
-                                        index in 2..4 -> textColor.copy(alpha = 0.8f)
-                                        index in 5..7 -> textColor.copy(alpha = 0.6f)
-                                        index in 8..10 -> textColor.copy(alpha = 0.4f)
-                                        else -> textColor.copy(alpha = 0.3f)
+                                        index < 2 -> 1f
+                                        index in 2..4 -> 0.9f
+                                        index in 5..7 -> 0.75f
+                                        index in 8..10 -> 0.6f
+                                        else -> 0.45f
                                     }
                                 }
                                 else -> {
                                     val distance = kotlin.math.abs(index - activeLyricIndex)
                                     when {
-                                        distance == 1 -> textColor.copy(alpha = 0.7f)
-                                        distance == 2 -> textColor.copy(alpha = 0.5f)
-                                        distance == 3 -> textColor.copy(alpha = 0.35f)
-                                        else -> textColor.copy(alpha = 0.2f)
+                                        distance == 1 -> 0.85f
+                                        distance == 2 -> 0.7f
+                                        distance == 3 -> 0.55f
+                                        else -> 0.4f
                                     }
                                 }
                             }
-                            val fontWeight = if (isActive || (activeLyricIndex == -1 && index < 5 && !isPlaceholder)) FontWeight.Medium else FontWeight.Normal
-                            val fontSize = if (isActive || (activeLyricIndex == -1 && index < 5 && !isPlaceholder)) 22.sp else 18.sp
 
-                            Text(
-                                text = line.text,
-                                color = lineTextColor,
-                                fontSize = fontSize,
-                                fontWeight = fontWeight,
-                                lineHeight = 28.sp,
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = if (isPlaceholder) TextAlign.Center else TextAlign.Start
+                            val animatedAlpha by animateFloatAsState(
+                                targetValue = targetAlpha,
+                                animationSpec = tween(
+                                    durationMillis = 350,
+                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                ),
+                                label = "LyricAlpha"
                             )
+
+                            val activeFraction by animateFloatAsState(
+                                targetValue = if (isActive || (activeLyricIndex == -1 && index < 2 && !isPlaceholder)) 1f else 0f,
+                                animationSpec = tween(
+                                    durationMillis = 350,
+                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                ),
+                                label = "LyricScale"
+                            )
+
+                            val fontSize = (21f + 5f * activeFraction).sp
+                            val lineHeight = (30f + 6f * activeFraction).sp
+                            val fontWeight = FontWeight.Bold
+
+                            val widthFraction by animateFloatAsState(
+                                targetValue = when {
+                                    isPlaceholder -> 1f
+                                    isActive -> 1f
+                                    activeLyricIndex == -1 && index < 2 -> 1f
+                                    else -> 0.78f
+                                },
+                                animationSpec = tween(
+                                    durationMillis = 350,
+                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                ),
+                                label = "LyricWidth"
+                            )
+
+                            val verticalPadding by animateDpAsState(
+                                targetValue = when {
+                                    isPlaceholder -> 0.dp
+                                    isActive -> 10.dp
+                                    activeLyricIndex == -1 && index < 2 -> 10.dp
+                                    else -> 0.dp
+                                },
+                                animationSpec = tween(
+                                    durationMillis = 350,
+                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                ),
+                                label = "LyricPadding"
+                            )
+
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text(
+                                    text = line.text,
+                                    color = textColor.copy(alpha = animatedAlpha),
+                                    fontSize = fontSize,
+                                    fontWeight = fontWeight,
+                                    lineHeight = lineHeight,
+                                    style = LocalTextStyle.current.copy(
+                                        lineHeightStyle = LineHeightStyle(
+                                            alignment = LineHeightStyle.Alignment.Center,
+                                            trim = LineHeightStyle.Trim.None
+                                        )
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth(widthFraction)
+                                        .padding(vertical = verticalPadding)
+                                        .then(
+                                            if (!isPlaceholder && line.timestampMs >= 0) {
+                                                Modifier.clickable {
+                                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                    exoPlayer.seekTo(line.timestampMs)
+                                                    currentPosition = line.timestampMs
+                                                }
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
+                                    textAlign = if (isPlaceholder) TextAlign.Center else TextAlign.Start
+                                )
+                            }
+                        }
+
+                        if (lyricsLines.size > 1) {
+                            item {
+                                Spacer(modifier = Modifier.fillParentMaxHeight(0.85f))
+                            }
                         }
                     }
                 }
@@ -797,15 +933,18 @@ fun RadioEqualizerWaveform(isPlaying: Boolean) {
     var fallVelocity by remember { mutableStateOf(FloatArray(barCount) { 0f }) }
     var sensitivity by remember { mutableStateOf(1f) }
 
-    val gravity = 0.025f
-    val smoothingStrength = 2f
+    // Tuned values
+    val gravity = 0.020f
+    val smoothingStrength = 1.60f
 
     val centerBias = remember {
         FloatArray(barCount) { i ->
             val center = (barCount - 1) / 2f
             val distanceRatio = kotlin.math.abs(i - center) / center
             val bias = kotlin.math.cos(distanceRatio * (Math.PI / 2)).toFloat()
-            0.92f + 0.08f * bias
+
+            // Slight, natural center emphasis
+            0.94f + 0.06f * bias
         }
     }
 
@@ -820,20 +959,26 @@ fun RadioEqualizerWaveform(isPlaying: Boolean) {
             }
 
             val rawTargets = FloatArray(barCount)
+
             for (i in 0 until barCount) {
                 val raw = bandLevels.getOrElse(i) { 0f }.coerceIn(0f, 1f)
 
                 val expanded = Math.pow(raw.toDouble(), 0.58).toFloat()
 
-                val withSensitivity = (expanded * sensitivity).coerceIn(0f, 1f)
+                val withSensitivity =
+                    (expanded * sensitivity).coerceIn(0f, 1f)
 
                 rawTargets[i] = withSensitivity * maxDots
             }
 
-            val smoothed = applyMonstercatSmoothing(rawTargets, strength = smoothingStrength)
+            val smoothed = applyMonstercatSmoothing(
+                rawTargets,
+                strength = smoothingStrength
+            )
 
             val shaped = FloatArray(barCount) { i ->
-                (smoothed[i] * centerBias[i]).coerceIn(0f, maxDots.toFloat())
+                (smoothed[i] * centerBias[i])
+                    .coerceIn(0f, maxDots.toFloat())
             }
 
             val newPeaks = FloatArray(barCount)
@@ -847,7 +992,8 @@ fun RadioEqualizerWaveform(isPlaying: Boolean) {
                     newVelocity[i] = 0f
                 } else {
                     newVelocity[i] += gravity
-                    newPeaks[i] = (peaks[i] - newVelocity[i]).coerceAtLeast(0f)
+                    newPeaks[i] =
+                        (peaks[i] - newVelocity[i]).coerceAtLeast(0f)
                 }
             }
 
@@ -885,14 +1031,24 @@ fun RadioEqualizerWaveform(isPlaying: Boolean) {
     }
 }
 
-fun applyMonstercatSmoothing(values: FloatArray, strength: Float = 1.65f): FloatArray {
+fun applyMonstercatSmoothing(
+    values: FloatArray,
+    strength: Float = 1.60f
+): FloatArray {
     val result = values.copyOf()
 
     for (i in result.indices) {
         for (j in result.indices) {
             if (i != j) {
                 val distance = kotlin.math.abs(i - j)
-                val allowed = result[i] / Math.pow(strength.toDouble(), distance.toDouble()).toFloat()
+
+                val allowed =
+                    result[i] /
+                            Math.pow(
+                                strength.toDouble(),
+                                distance.toDouble()
+                            ).toFloat()
+
                 if (result[j] < allowed) {
                     result[j] = allowed
                 }
@@ -902,7 +1058,6 @@ fun applyMonstercatSmoothing(values: FloatArray, strength: Float = 1.65f): Float
 
     return result
 }
-
 
 // These are the best knobs for tuning it further:
 
