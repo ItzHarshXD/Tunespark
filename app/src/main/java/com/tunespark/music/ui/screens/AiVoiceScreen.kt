@@ -1,8 +1,11 @@
 package com.tunespark.music.ui.screens
 
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
+import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -34,6 +38,11 @@ fun AiVoiceScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val audioManager = remember {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
 
@@ -89,7 +98,11 @@ fun AiVoiceScreen(
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Button(
-                onClick = { activeAiTab = "Gemini" },
+                onClick = {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    activeAiTab = "Gemini"
+                },
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
@@ -110,7 +123,11 @@ fun AiVoiceScreen(
             }
 
             Button(
-                onClick = { activeAiTab = "ElevenLabs" },
+                onClick = {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    activeAiTab = "ElevenLabs"
+                },
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
@@ -194,6 +211,8 @@ fun AiVoiceScreen(
                 trailingIcon = {
                     IconButton(
                         onClick = {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             clipboardManager.getText()?.text?.let { text ->
                                 val trimmed = text.trim()
                                 geminiApiKey = trimmed
@@ -221,6 +240,8 @@ fun AiVoiceScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         isGeminiTts = !isGeminiTts
                         SessionManager.saveActiveTtsProvider(
                             context,
@@ -233,6 +254,8 @@ fun AiVoiceScreen(
                 Checkbox(
                     checked = isGeminiTts,
                     onCheckedChange = { checked ->
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         isGeminiTts = checked
                         SessionManager.saveActiveTtsProvider(
                             context,
@@ -318,6 +341,8 @@ fun AiVoiceScreen(
                 trailingIcon = {
                     IconButton(
                         onClick = {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             clipboardManager.getText()?.text?.let { text ->
                                 val trimmed = text.trim()
                                 elevenLabsApiKey = trimmed
@@ -369,6 +394,8 @@ fun AiVoiceScreen(
 
         Button(
             onClick = {
+                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 val currentKey = if (activeAiTab == "Gemini") geminiApiKey else elevenLabsApiKey
                 if (currentKey.isBlank()) {
                     Toast.makeText(context, "Please enter an API Key first", Toast.LENGTH_LONG).show()
@@ -437,6 +464,12 @@ private fun LinkStepRow(
     linkColor: Color,
     onOpenLink: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val audioManager = remember {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -446,7 +479,11 @@ private fun LinkStepRow(
         Row(
             modifier = Modifier
                 .weight(1f)
-                .clickable { onOpenLink(urlToOpen) },
+                .clickable {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onOpenLink(urlToOpen)
+                },
             verticalAlignment = Alignment.Top
         ) {
             Text(
@@ -467,7 +504,11 @@ private fun LinkStepRow(
         Spacer(modifier = Modifier.width(8.dp))
 
         IconButton(
-            onClick = { onOpenLink(urlToOpen) },
+            onClick = {
+                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onOpenLink(urlToOpen)
+            },
             modifier = Modifier.size(24.dp)
         ) {
             Icon(

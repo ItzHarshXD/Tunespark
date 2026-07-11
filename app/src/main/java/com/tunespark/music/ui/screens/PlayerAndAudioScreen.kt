@@ -1,5 +1,8 @@
 package com.tunespark.music.ui.screens
 
+import android.content.Context
+import android.media.AudioManager
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,6 +33,11 @@ fun PlayerAndAudioScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val audioManager = remember {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+
     val scrollState = rememberScrollState()
 
     var keepScreenOn by remember {
@@ -62,6 +71,8 @@ fun PlayerAndAudioScreen(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .clickable {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     val newValue = !keepScreenOn
                     keepScreenOn = newValue
                     SessionManager.saveKeepScreenOn(context, newValue)
@@ -92,6 +103,8 @@ fun PlayerAndAudioScreen(
             SimpleToggleSwitch(
                 checked = keepScreenOn,
                 onCheckedChange = {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     keepScreenOn = it
                     SessionManager.saveKeepScreenOn(context, it)
                 },
@@ -107,6 +120,8 @@ fun PlayerAndAudioScreen(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .clickable {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     val newValue = !showVisualizer
                     showVisualizer = newValue
                     SessionManager.saveShowVisualizer(context, newValue)
@@ -137,6 +152,8 @@ fun PlayerAndAudioScreen(
             SimpleToggleSwitch(
                 checked = showVisualizer,
                 onCheckedChange = {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     showVisualizer = it
                     SessionManager.saveShowVisualizer(context, it)
                 },
@@ -154,6 +171,12 @@ private fun SimpleToggleSwitch(
     backgroundColor: Color,
     textColor: Color
 ) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val audioManager = remember {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+
     val trackWidth = 52.dp
     val trackHeight = 32.dp
 
@@ -177,7 +200,11 @@ private fun SimpleToggleSwitch(
                 color = textColor,
                 shape = RoundedCornerShape(100)
             )
-            .clickable { onCheckedChange(!checked) },
+            .clickable { 
+                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onCheckedChange(!checked) 
+            },
         contentAlignment = Alignment.CenterStart
     ) {
         Box(

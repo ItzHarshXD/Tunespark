@@ -67,11 +67,19 @@ fun HomeScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        val sharedPrefs = context.getSharedPreferences(
+    val sharedPrefs = remember {
+        context.getSharedPreferences(
             "tunespark_location_prefs",
             Context.MODE_PRIVATE
         )
+    }
+    val locationEnabled = sharedPrefs.getBoolean("location_enabled", false)
+
+    LaunchedEffect(Unit) {
+        if (!locationEnabled) {
+            weatherInfo = null
+            return@LaunchedEffect
+        }
         val locationDisplay = sharedPrefs.getString(
             "location_display",
             "San Francisco, CA (37.7749, -122.4194)"
@@ -162,32 +170,34 @@ fun HomeScreen(
                         textAlign = TextAlign.Center
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    if (locationEnabled) {
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = weatherInfo?.emoji ?: "☁️",
-                            fontSize = 30.sp,
-                            modifier = Modifier.padding(end = 10.dp)
-                        )
-
-                        Column(
-                            horizontalAlignment = Alignment.Start
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = "${weatherInfo?.temperature?.toInt() ?: 35}°C",
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor
+                                text = weatherInfo?.emoji ?: "☁️",
+                                fontSize = 30.sp,
+                                modifier = Modifier.padding(end = 10.dp)
                             )
-                            Text(
-                                text = weatherInfo?.description ?: "Cloudy",
-                                fontSize = 13.sp,
-                                color = textColor.copy(alpha = 0.55f)
-                            )
+
+                            Column(
+                                horizontalAlignment = Alignment.Start
+                            ) {
+                                Text(
+                                    text = "${weatherInfo?.temperature?.toInt() ?: 35}°C",
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textColor
+                                )
+                                Text(
+                                    text = weatherInfo?.description ?: "Cloudy",
+                                    fontSize = 13.sp,
+                                    color = textColor.copy(alpha = 0.55f)
+                                )
+                            }
                         }
                     }
                 }

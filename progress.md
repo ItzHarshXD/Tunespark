@@ -108,9 +108,15 @@ TuneSpark has been structured into 12 distinct screens for clear separation of c
 8. **Commentary Screen**:
    - Dynamic list of option switches ("Weather updates", "Session opener", "Song intro", etc.) with stylized check circle toggle states.
 9. **Player and Audio Screen**:
-   - Dummy setting screen placeholder for future player and audio configurations.
+    - Controls configuration settings like keeping the screen on and enabling/disabling the real-time beat visualizer.
+    - Employs animated toggle switches equipped with premium audio-click and physical keyboard-tap haptics.
 10. **Location Screen**:
-    - Manage auto/manual location settings with active GPS switches, current coordinate display, and a dedicated GPS crosshair action button.
+    - Features a dynamic root "Enable Location" switch (styled after the custom Player and Audio screen toggle) which completely hides downstream controls when toggled off.
+    - When enabled, it displays an "Automatic Location" toggle (defaulting to off).
+    - If "Automatic Location" is off (manual state), a preset cities dropdown list is shown along with input text fields for manually setting City/State, Latitude, and Longitude.
+    - When "Automatic Location" is on (automatic state), the screen automatically fetches GPS coordinates, hiding manual controls and displaying the current location alongside live weather forecast data.
+    - Employs native vector Material icons instead of raw emojis for UI control buttons.
+    - Toggling location off completely removes the weather forecast dashboard from the Home Screen.
 11. **Updates Screen**:
     - Displays current app version (v1.24.2) and hosts interactive dummy "Check for updates" buttons.
 12. **Playlists Screen**:

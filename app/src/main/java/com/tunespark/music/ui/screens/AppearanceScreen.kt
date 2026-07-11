@@ -1,5 +1,8 @@
 package com.tunespark.music.ui.screens
 
+import android.content.Context
+import android.media.AudioManager
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,11 +13,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -27,6 +33,12 @@ fun AppearanceScreen(
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val audioManager = remember {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
 
@@ -61,7 +73,11 @@ fun AppearanceScreen(
                 modifier = Modifier.weight(1f),
                 themeName = "Light",
                 isSelected = currentTheme == "Light",
-                onClick = { onThemeChange("Light") }
+                onClick = { 
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onThemeChange("Light") 
+                }
             ) {
                 Box(
                     modifier = Modifier
@@ -75,7 +91,11 @@ fun AppearanceScreen(
                 modifier = Modifier.weight(1f),
                 themeName = "Dark",
                 isSelected = currentTheme == "Dark",
-                onClick = { onThemeChange("Dark") }
+                onClick = { 
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onThemeChange("Dark") 
+                }
             ) {
                 Box(
                     modifier = Modifier
@@ -89,7 +109,11 @@ fun AppearanceScreen(
                 modifier = Modifier.weight(1f),
                 themeName = "System",
                 isSelected = currentTheme == "System",
-                onClick = { onThemeChange("System") }
+                onClick = { 
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onThemeChange("System") 
+                }
             ) {
                 Box(
                     modifier = Modifier
