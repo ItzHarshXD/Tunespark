@@ -22,8 +22,13 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import android.content.Context
+import android.media.AudioManager
+import android.view.HapticFeedbackConstants
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,7 +76,24 @@ fun PlaylistsScreen(
     val textColor = MaterialTheme.colorScheme.onBackground
     val primaryColor = MaterialTheme.colorScheme.primary
 
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val view = LocalView.current
+
+    val playSoundAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
     var selectedTab by remember { mutableStateOf("Playlists") }
+
+    // Sorting parameters
+    var sortBy by remember { mutableStateOf("Date added") }
+    var sortAscending by remember { mutableStateOf(false) } // False -> descending (↓), True -> ascending (↑)
+    var sortMenuExpanded by remember { mutableStateOf(false) }
+
+    // Search parameters
+    var isSearchActive by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
 
     var activePlaylistId by remember { mutableStateOf<String?>(null) }
     var activePlaylistName by remember { mutableStateOf("") }
@@ -86,7 +108,11 @@ fun PlaylistsScreen(
     var isSongsLoading by remember { mutableStateOf(false) }
 
     BackHandler {
-        if (activePlaylistId != null) {
+        playSoundAndHaptic()
+        if (isSearchActive) {
+            isSearchActive = false
+            searchQuery = ""
+        } else if (activePlaylistId != null) {
             activePlaylistId = null
             playlistSongs = emptyList()
         } else {
@@ -408,6 +434,50 @@ fun PlaylistsScreen(
     }
 
 
+    // Filter and sorting derived states
+    val filteredGridItems = remember(gridItems, searchQuery) {
+        if (searchQuery.isBlank()) gridItems
+        else gridItems.filter {
+            it.title.contains(searchQuery, ignoreCase = true) ||
+            it.subtitle.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
+    val sortedGridItems = remember(filteredGridItems, sortBy, sortAscending) {
+        val likedItem = filteredGridItems.firstOrNull { it.isLiked }
+        val restOfItems = filteredGridItems.filter { !it.isLiked }
+
+        val sortedRest = when (sortBy) {
+            "Name" -> restOfItems.sortedBy { it.title.lowercase() }
+            "Date updated" -> restOfItems.sortedBy { it.id }
+            else -> restOfItems // Date added (original list order)
+        }
+
+        val fullySorted = if (likedItem != null) {
+            listOf(likedItem) + if (sortAscending) sortedRest else sortedRest.reversed()
+        } else {
+            if (sortAscending) sortedRest else sortedRest.reversed()
+        }
+        fullySorted
+    }
+
+    val filteredSongs = remember(playlistSongs, searchQuery) {
+        if (searchQuery.isBlank()) playlistSongs
+        else playlistSongs.filter {
+            it.title.contains(searchQuery, ignoreCase = true) ||
+            it.artists.any { artist -> artist.name.contains(searchQuery, ignoreCase = true) }
+        }
+    }
+
+    val sortedSongs = remember(filteredSongs, sortBy, sortAscending) {
+        val sorted = when (sortBy) {
+            "Name" -> filteredSongs.sortedBy { it.title.lowercase() }
+            "Date updated" -> filteredSongs.sortedBy { it.id }
+            else -> filteredSongs // Date added (as fetched)
+        }
+        if (sortAscending) sorted else sorted.reversed()
+    }
+
 //    for individual playlist
     if (activePlaylistId != null) {
         Box(
@@ -419,37 +489,115 @@ fun PlaylistsScreen(
                 modifier = Modifier
                     .fillMaxSize()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            activePlaylistId = null
-                            playlistSongs = emptyList()
-                        },
+                if (isSearchActive) {
+                    Row(
                         modifier = Modifier
-                            .size(44.dp)
-                            .background(textColor, CircleShape)
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back",
-                            tint = backgroundColor,
-                            modifier = Modifier.size(20.dp)
+                        IconButton(
+                            onClick = {
+                                playSoundAndHaptic()
+                                isSearchActive = false
+                                searchQuery = ""
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(textColor, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = backgroundColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Search songs...", color = textColor.copy(alpha = 0.5f)) },
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = textColor,
+                                unfocusedIndicatorColor = textColor.copy(alpha = 0.5f),
+                                focusedTextColor = textColor,
+                                unfocusedTextColor = textColor
+                            ),
+                            modifier = Modifier.weight(1f)
                         )
+
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    playSoundAndHaptic()
+                                    searchQuery = ""
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Clear,
+                                    contentDescription = "Clear",
+                                    tint = textColor
+                                )
+                            }
+                        }
                     }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                playSoundAndHaptic()
+                                activePlaylistId = null
+                                playlistSongs = emptyList()
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(textColor, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = backgroundColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
 
-                    Spacer(modifier = Modifier.width(16.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
 
-                    Text(
-                        text = "Playlist View",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = textColor
-                    )
+                        Text(
+                            text = "Playlist View",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor
+                        )
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        IconButton(
+                            onClick = {
+                                playSoundAndHaptic()
+                                isSearchActive = true
+                            },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = textColor,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
                 }
 
                 LazyColumn(
@@ -537,7 +685,7 @@ fun PlaylistsScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
 
                                 Text(
-                                    text = "By $authorName • ${playlistSongs.size} songs",
+                                    text = "By $authorName • ${sortedSongs.size} songs",
                                     fontSize = 14.sp,
                                     color = Color.Gray,
                                     textAlign = TextAlign.Center
@@ -552,8 +700,9 @@ fun PlaylistsScreen(
                             ) {
                                 Button(
                                     onClick = {
-                                        if (playlistSongs.isNotEmpty()) {
-                                            onPlayPlaylist(activePlaylistName, playlistSongs, 0)
+                                        playSoundAndHaptic()
+                                        if (sortedSongs.isNotEmpty()) {
+                                            onPlayPlaylist(activePlaylistName, sortedSongs, 0)
                                             onNavigate(AppScreen.RADIO)
                                         }
                                     },
@@ -573,8 +722,9 @@ fun PlaylistsScreen(
 
                                 Button(
                                     onClick = {
-                                        if (playlistSongs.isNotEmpty()) {
-                                            val shuffled = playlistSongs.shuffled()
+                                        playSoundAndHaptic()
+                                        if (sortedSongs.isNotEmpty()) {
+                                            val shuffled = sortedSongs.shuffled()
                                             onPlayPlaylist(activePlaylistName, shuffled, 0)
                                             onNavigate(AppScreen.RADIO)
                                         }
@@ -609,7 +759,7 @@ fun PlaylistsScreen(
                                 CircularProgressIndicator(color = textColor)
                             }
                         }
-                    } else if (playlistSongs.isEmpty()) {
+                    } else if (sortedSongs.isEmpty()) {
                         item {
                             Text(
                                 text = "No songs found in this playlist.",
@@ -621,13 +771,14 @@ fun PlaylistsScreen(
                             )
                         }
                     } else {
-                        itemsIndexed(playlistSongs) { index, song ->
+                        itemsIndexed(sortedSongs) { index, song ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        onPlayPlaylist(activePlaylistName, playlistSongs, index)
+                                        playSoundAndHaptic()
+                                        onPlayPlaylist(activePlaylistName, sortedSongs, index)
                                         onNavigate(AppScreen.RADIO)
                                     }
                                     .padding(vertical = 10.dp, horizontal = 4.dp)
@@ -686,48 +837,114 @@ fun PlaylistsScreen(
                 .background(backgroundColor)
                 .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 0.dp)
         ) {
-            // Tabs
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(top = 4.dp, bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf("Playlists", "Albums", "Artists").forEach { tab ->
-                    val isSelected = tab == selectedTab
-                    Box(
-                        modifier = Modifier
-                            .height(40.dp)
-                            .border(width = 1.5.dp, color = textColor, shape = RoundedCornerShape(20.dp))
-                            .background(color = if (isSelected) textColor else Color.Transparent, shape = RoundedCornerShape(20.dp))
-                            .clickable { selectedTab = tab }
-                            .padding(horizontal = 24.dp),
-                        contentAlignment = Alignment.Center
+            if (isSearchActive) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            playSoundAndHaptic()
+                            isSearchActive = false
+                            searchQuery = ""
+                        },
+                        modifier = Modifier.size(40.dp)
                     ) {
-                        Text(text = tab, color = if (isSelected) backgroundColor else textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", tint = textColor)
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    TextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search playlists...", color = textColor.copy(alpha = 0.5f)) },
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = textColor,
+                            unfocusedIndicatorColor = textColor.copy(alpha = 0.5f),
+                            focusedTextColor = textColor,
+                            unfocusedTextColor = textColor
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(
+                            onClick = {
+                                playSoundAndHaptic()
+                                searchQuery = ""
+                            }
+                        ) {
+                            Icon(imageVector = Icons.Default.Clear, contentDescription = "Clear", tint = textColor)
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Box {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable {
+                                    playSoundAndHaptic()
+                                    sortMenuExpanded = true
+                                }
+                            ) {
+                                Text(text = sortBy, color = textColor, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (sortAscending) "↑" else "↓",
+                                color = textColor,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable {
+                                        playSoundAndHaptic()
+                                        sortAscending = !sortAscending
+                                    }
+                                    .padding(horizontal = 4.dp)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = sortMenuExpanded,
+                            onDismissRequest = { sortMenuExpanded = false },
+                            modifier = Modifier.background(backgroundColor).border(1.dp, textColor.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                        ) {
+                            listOf("Date added", "Name", "Date updated").forEach { param ->
+                                DropdownMenuItem(
+                                    text = { Text(param, color = textColor, fontWeight = if (sortBy == param) FontWeight.Bold else FontWeight.Normal) },
+                                    onClick = {
+                                        playSoundAndHaptic()
+                                        sortBy = param
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    IconButton(
+                        onClick = {
+                            playSoundAndHaptic()
+                            isSearchActive = true
+                        },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = textColor, modifier = Modifier.size(24.dp))
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { }) {
-                    Text(text = "Date added", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "↓", color = textColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                }
-                IconButton(onClick = { onNavigate(AppScreen.SEARCH) }, modifier = Modifier.size(24.dp)) {
-                    Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = textColor, modifier = Modifier.size(24.dp))
-                }
-            }
-
-            if (isLoadingGrid && gridItems.isEmpty()) {
+            if (isLoadingGrid && sortedGridItems.isEmpty()) {
                 Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = textColor)
                 }
@@ -738,10 +955,11 @@ fun PlaylistsScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(gridItems) { item ->
+                    items(sortedGridItems) { item ->
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.fillMaxWidth().clickable {
+                                playSoundAndHaptic()
                                 activePlaylistId = item.id
                                 activePlaylistName = item.title
                                 activePlaylistThumbnail = item.thumbnailUrl

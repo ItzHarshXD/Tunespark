@@ -120,10 +120,10 @@ TuneSpark has been structured into 12 distinct screens for clear separation of c
 11. **Updates Screen**:
     - Displays current app version (v1.24.2) and hosts interactive dummy "Check for updates" buttons.
 12. **Playlists Screen**:
-    - Designed precisely to match reference layouts for both Light and Dark themes.
-    - Displays top capsule pill tabs ("Playlists", "Albums", "Artists"), "Date added ↓" sorting options, and a search icon.
-    - Features a clean 3-column grid of playlist items. The "Liked" playlist features a prominent red card with a white heart outline icon, while other playlists are rendered with rounded squares using adaptive backgrounds (solid black in Light theme and solid white in Dark theme).
-    - Selecting any playlist instantly loads its complete song collection into the background media service, sets `isPlaylistMode` to true, and launches the player view.
+   - Designed precisely to match reference layouts for both Light and Dark themes.
+   - Displays "Date added ↓" sorting options, and a search icon (the top tabs bar was removed as playlists are showing up properly and switching is unnecessary).
+   - Features a clean 3-column grid of playlist items. The "Liked" playlist features a prominent red card with a white heart outline icon, while other playlists are rendered with rounded squares using adaptive backgrounds (solid black in Light theme and solid white in Dark theme).
+   - Selecting any playlist instantly loads its complete song collection into the background media service, sets `isPlaylistMode` to true, and launches the player view.
 
 ---
 
@@ -293,9 +293,9 @@ We have successfully refined and completed the premium user experience across al
 
 ### 1. Spacing, Alignment, & Padding Refinements
 - **Home Screen Alignment**: Adjusted the vertical center content column's top padding from `80.dp` to `56.dp` and bottom padding from `100.dp` to `72.dp`. This brings elements closer to the status bar and bottom bars, reclaiming visual balance and eliminating excessive blank spaces.
-- **Playlist Screen Alignment**: Reduced the top margins inside the detailed playlist view's `LazyColumn` header space from `16.dp` to `0.dp`, aligning content cleanly below the status bar bounds. Adjusted the main grid Column top padding and row vertical spacing to keep the pill navigation tabs snug and perfectly balanced.
+- **Playlist Screen Alignment**: Reduced the top margins inside the detailed playlist view's `LazyColumn` header space from `16.dp` to `0.dp`, aligning content cleanly below the status bar bounds. Adjusted the main grid Column top padding and row vertical spacing to keep the layout snug and perfectly balanced.
 - **Radio Screen Alignment**: Replaced double-padding on the outer container Box of the Radio screen from `vertical = 16.dp` to `vertical = 0.dp`. The system safe-insets (`statusBarsPadding()` and `navigationBarsPadding()`) are now strictly leveraged, allowing player controls and lyrics sections to beautifully fit the display heights without clipping or awkward gaps.
 
 ### 2. Universal Button Size & Style Harmonization
 - **Standardized Capsule Action Buttons**: Main action buttons (e.g., *Stop Radio*, *Start Radio*, *Skip song*) have been standardized to exactly `56.dp` height with perfect capsule corner shapes (`RoundedCornerShape(28.dp)`) and unified border weights (`1.5.dp`).
-- **Standardized Tab Navigation Pill Buttons**: Tab navigation pill elements (e.g., *Playlists/Albums/Artists* on Playlists screen, and *Lyrics/Up Next* on Radio screen) are now standardized to a crisp `40.dp` height and a rounded capsule corner shape (`RoundedCornerShape(20.dp)`), featuring perfectly center-aligned content instead of variable padding values, establishing flawless, high-fidelity UI consistency universally.
+- **Standardized Tab Navigation Pill Buttons**: Tab navigation pill elements (e.g., *Lyrics/Up Next* on Radio screen) are now standardized to a crisp `40.dp` height and a rounded capsule corner shape (`RoundedCornerShape(20.dp)`), featuring perfectly center-aligned content instead of variable padding values, establishing flawless, high-fidelity UI consistency universally.
