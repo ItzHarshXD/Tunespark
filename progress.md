@@ -81,7 +81,7 @@ TuneSpark has been structured into 12 distinct screens for clear separation of c
    - A highly polished, light-themed system dashboard featuring a real-time system clock and localized weather info.
    - Implements two dynamic layouts tailored to the active audio state:
      - **Active Playback Mode**: Displays a large circular play/pause controller, an elegant vector-dot equalizer waveform, a "Stop Radio" action button, and a modern compact bottom mini-player alongside search/playlist controls.
-     - **Inactive Mode**: Displays a personalized greeting ("Good Evening, Harsh"), horizontal scrollable tags (Chill, Feel good, Commute, Party), and an outlined "Start Radio" quick-play card, next to search/playlist pill triggers at the bottom.
+     - **Inactive Mode**: Displays a personalized greeting ("Good Evening, Harsh"), horizontal scrollable tags (Chill, Feel good, Commute, Party), and an outlined "Start Radio" quick-play card, next to a premium 5-page horizontal-scrolling 3x3 Speed Dial grid (populated dynamically with 45 tracks based on user library/listening history when signed in, or curated global hit charts and trending fallback searches when signed out, styled with high-end bottom vertical artwork gradients and custom active-page indicators, and immediately launching song playback with direct radio queue seeding and transition to the Radio screen when clicked).
 2. **Search Screen**:
    - Dedicated search layout. Users enter queries, trigger YouTube Music searches, and select a track.
    - Selecting a track immediately triggers playback and transitions to the Radio screen.
@@ -299,3 +299,9 @@ We have successfully refined and completed the premium user experience across al
 ### 2. Universal Button Size & Style Harmonization
 - **Standardized Capsule Action Buttons**: Main action buttons (e.g., *Stop Radio*, *Start Radio*, *Skip song*) have been standardized to exactly `56.dp` height with perfect capsule corner shapes (`RoundedCornerShape(28.dp)`) and unified border weights (`1.5.dp`).
 - **Standardized Tab Navigation Pill Buttons**: Tab navigation pill elements (e.g., *Lyrics/Up Next* on Radio screen) are now standardized to a crisp `40.dp` height and a rounded capsule corner shape (`RoundedCornerShape(20.dp)`), featuring perfectly center-aligned content instead of variable padding values, establishing flawless, high-fidelity UI consistency universally.
+
+### 3. Premium Page-Based 3x3 Speed Dial Integration
+- **Dynamic 45-Song Custom Recommendation Engine**: Built-in dynamic data resolution that automatically checks the user's login status. If authenticated, it grabs actual user data from `libraryRecentActivity()`, `home()` personalized recommendations, andLiked songs (`playlist("LM")`). If anonymous, it fetches curated global/regional hits from charts and trending hits fallback searches. It runs supplementary query loops dynamically to guarantee a pool of exactly 45 unique songs.
+- **HorizontalPager with pageSpacing**: Developed a beautiful HorizontalPager structure dividing the 45 tracks into 5 tabs of 3x3 grids. Applied `pageSpacing = 16.dp` to introduce an elegant, native transition gap as users swipe between pages/tabs.
+- **Eager Playback & Screen Transition**: Integrated a click callback where tapping any card instantly starts playing that specific song, seeds a tailored radio queue, and transitions the active view cleanly to the Radio Screen (`AppScreen.RADIO`).
+- **Pulsing Shimmer Skeletons**: Provided a premium infinite-loop shimmer skeleton loading view for the 3x3 grids to handle low-bandwidth and initial API call delays seamlessly.

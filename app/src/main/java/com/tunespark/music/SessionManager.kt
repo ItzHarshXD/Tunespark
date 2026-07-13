@@ -21,6 +21,7 @@ object SessionManager {
     private const val KEY_THEME = "app_theme"
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_SHOW_VISUALIZER = "show_visualizer"
+    private const val KEY_COMMENTARY_ENABLED = "commentary_enabled"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -118,6 +119,15 @@ object SessionManager {
         getPrefs(context).edit().putString(KEY_ELEVENLABS_VOICE_ID, voiceId).apply()
     }
 
+    fun isCommentaryEnabled(context: Context): Boolean {
+        if (getGeminiApiKey(context).isBlank()) return false
+        return getPrefs(context).getBoolean(KEY_COMMENTARY_ENABLED, true)
+    }
+
+    fun saveCommentaryEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_COMMENTARY_ENABLED, enabled).apply()
+    }
+
     fun getCommentaryFrequency(context: Context): Float {
         return getPrefs(context).getFloat(KEY_COMMENTARY_FREQUENCY, 0.5f)
     }
@@ -135,6 +145,7 @@ object SessionManager {
     }
 
     fun getActiveTtsProvider(context: Context): String {
+        if (getElevenLabsApiKey(context).isBlank()) return "Gemini"
         return getPrefs(context).getString(KEY_ACTIVE_TTS_PROVIDER, "Gemini") ?: "Gemini"
     }
 

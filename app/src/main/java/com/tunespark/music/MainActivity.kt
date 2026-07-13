@@ -379,7 +379,7 @@ fun MainPlayerScreen(
                 try {
                     var commentaryException: Exception? = null
                     val geminiKey = SessionManager.getGeminiApiKey(context)
-                    val startCommentaryItem = if (geminiKey.isNotBlank()) {
+                    val startCommentaryItem = if (geminiKey.isNotBlank() && SessionManager.isCommentaryEnabled(context)) {
                         statusMessage = "AI DJ is warming up..."
                         withContext(Dispatchers.IO) {
                             try {
@@ -482,7 +482,7 @@ fun MainPlayerScreen(
                 try {
                     // Generate introductory start commentary if Gemini key is present
                     val geminiKey = SessionManager.getGeminiApiKey(context)
-                    val startCommentaryItem = if (geminiKey.isNotBlank()) {
+                    val startCommentaryItem = if (geminiKey.isNotBlank() && SessionManager.isCommentaryEnabled(context)) {
                         statusMessage = "AI DJ is warming up..."
                         withContext(Dispatchers.IO) {
                             try {
@@ -616,7 +616,8 @@ fun MainPlayerScreen(
                     },
                     isShuffling = isShuffling,
                     onNavigate = { currentScreen = it },
-                    onShufflePlay = shufflePlay
+                    onShufflePlay = shufflePlay,
+                    onPlaySong = { playSong(it) }
                 )
             }
             AppScreen.SETTINGS -> {

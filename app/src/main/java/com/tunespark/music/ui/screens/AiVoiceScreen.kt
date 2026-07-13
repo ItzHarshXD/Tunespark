@@ -235,6 +235,7 @@ fun AiVoiceScreen(
             var isGeminiTts by remember {
                 mutableStateOf(SessionManager.getActiveTtsProvider(context) == "Gemini")
             }
+            val isGeminiTtsActual = isGeminiTts || elevenLabsApiKey.isBlank()
 
             Row(
                 modifier = Modifier
@@ -242,25 +243,33 @@ fun AiVoiceScreen(
                     .clickable {
                         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        isGeminiTts = !isGeminiTts
-                        SessionManager.saveActiveTtsProvider(
-                            context,
-                            if (isGeminiTts) "Gemini" else "ElevenLabs"
-                        )
+                        if (elevenLabsApiKey.isBlank()) {
+                            Toast.makeText(context, "Input ElevenLabs API key first to use it for TTS!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            isGeminiTts = !isGeminiTts
+                            SessionManager.saveActiveTtsProvider(
+                                context,
+                                if (isGeminiTts) "Gemini" else "ElevenLabs"
+                            )
+                        }
                     }
                     .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Checkbox(
-                    checked = isGeminiTts,
+                    checked = isGeminiTtsActual,
                     onCheckedChange = { checked ->
                         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        isGeminiTts = checked
-                        SessionManager.saveActiveTtsProvider(
-                            context,
-                            if (checked) "Gemini" else "ElevenLabs"
-                        )
+                        if (elevenLabsApiKey.isBlank()) {
+                            Toast.makeText(context, "Input ElevenLabs API key first to use it for TTS!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            isGeminiTts = checked
+                            SessionManager.saveActiveTtsProvider(
+                                context,
+                                if (checked) "Gemini" else "ElevenLabs"
+                            )
+                        }
                     },
                     colors = CheckboxDefaults.colors(
                         checkedColor = Color(0xFFFF0000),

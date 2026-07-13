@@ -141,6 +141,10 @@ class PlaybackService : MediaSessionService() {
         if (videoId == lastCommentaryCheckedVideoId) return
         lastCommentaryCheckedVideoId = videoId
 
+        if (!SessionManager.isCommentaryEnabled(this)) {
+            return
+        }
+
         val geminiKey = SessionManager.getGeminiApiKey(this)
         if (geminiKey.isBlank()) {
             android.util.Log.w(PLAYBACK_SERVICE_TAG, "checkAndInsertPlaylistCommentary: Gemini API Key is blank! Skipping commentary.")
@@ -312,7 +316,8 @@ class PlaybackService : MediaSessionService() {
         if (videoId == lastSeededVideoId) return
         if (!seedingVideoIds.add(videoId)) return
 
-        val N = SessionManager.getCommentaryBlockSize(this)
+        val commentaryEnabled = SessionManager.isCommentaryEnabled(this)
+        val N = if (commentaryEnabled) SessionManager.getCommentaryBlockSize(this) else 50
 
         var totalSongsCount = 0
         for (i in 0 until exoPlayer.mediaItemCount) {
@@ -330,7 +335,8 @@ class PlaybackService : MediaSessionService() {
             if (!isCommentaryMediaItem(item)) upcomingSongsCount++
         }
 
-        if (upcomingSongsCount >= 2) {
+        val refillThreshold = if (commentaryEnabled) 2 else MIN_UPCOMING_ITEMS_BEFORE_REFILL
+        if (upcomingSongsCount >= refillThreshold) {
             seedingVideoIds.remove(videoId)
             return
         }
@@ -385,7 +391,23 @@ class PlaybackService : MediaSessionService() {
                         .toSet()
                 }
 
-                var filteredRecs = nextRecommendations
+                val accumulatedSongs = mutableListOf<SongItem>()
+                accumulatedSongs.addAll(nextRecommendations.filterIsInstance<SongItem>())
+
+                if (!commentaryEnabled && accumulatedSongs.size < 50) {
+                    var attempts = 0
+                    while (accumulatedSongs.size < 50 && attempts < 3) {
+                        attempts++
+                        val lastSongId = accumulatedSongs.lastOrNull()?.id ?: videoId
+                        val extraResult = YouTube.next(WatchEndpoint(videoId = lastSongId))
+                        val extraRecs = extraResult.getOrNull()?.items?.filterIsInstance<SongItem>() ?: emptyList()
+                        val uniqueExtra = extraRecs.filter { item -> item.id !in accumulatedSongs.map { it.id } && item.id !in existingVideoIds }
+                        if (uniqueExtra.isEmpty()) break
+                        accumulatedSongs.addAll(uniqueExtra)
+                    }
+                }
+
+                var filteredRecs = accumulatedSongs
                     .filter { it.id !in existingVideoIds }
                     .take(itemsNeeded)
 
@@ -397,7 +419,7 @@ class PlaybackService : MediaSessionService() {
 
                 if (filteredRecs.isNotEmpty()) {
                     val finalSongsToAppend = filteredRecs.take(itemsNeeded)
-                    val commentaryItem = if (isFirstStart) null else createCommentaryItem(exoPlayer, finalSongsToAppend)
+                    val commentaryItem = if (!commentaryEnabled || isFirstStart) null else createCommentaryItem(exoPlayer, finalSongsToAppend)
 
                     withContext(Dispatchers.Main) {
                         if (exoPlayer.currentMediaItem?.mediaId == videoId) {

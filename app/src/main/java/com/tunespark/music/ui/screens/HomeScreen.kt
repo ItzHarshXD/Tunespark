@@ -1,6 +1,8 @@
 package com.tunespark.music.ui.screens
 
 import android.content.Context
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,6 +11,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
@@ -20,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -33,6 +40,9 @@ import com.tunespark.music.AppScreen
 import com.tunespark.music.WeatherInfo
 import com.tunespark.music.WeatherService
 import com.tunespark.music.ui.theme.BitcountSingleFontFamily
+import com.metrolist.innertube.YouTube
+import com.metrolist.innertube.models.SongItem
+import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -48,6 +58,7 @@ fun HomeScreen(
     isShuffling: Boolean,
     onNavigate: (AppScreen) -> Unit,
     onShufflePlay: () -> Unit,
+    onPlaySong: (SongItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -55,6 +66,11 @@ fun HomeScreen(
     var isWeatherLoading by remember { mutableStateOf(false) }
     var weatherError by remember { mutableStateOf<String?>(null) }
     var timeString by remember { mutableStateOf("12:00") }
+
+    // Speed Dial state
+    var speedDialSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
+    var isSpeedDialLoading by remember { mutableStateOf(false) }
+    val userSignedIn = remember(context) { SessionManager.isUserSignedIn(context) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -100,6 +116,93 @@ fun HomeScreen(
         }
     }
 
+    LaunchedEffect(userSignedIn) {
+        isSpeedDialLoading = true
+        speedDialSongs = emptyList()
+        withContext(Dispatchers.IO) {
+            try {
+                val songs = mutableListOf<SongItem>()
+                if (userSignedIn) {
+                    // Try to load user's actual recent activity
+                    val recentResult = YouTube.libraryRecentActivity()
+                    if (recentResult.isSuccess) {
+                        val recentSongs = recentResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                        songs.addAll(recentSongs)
+                    }
+                    
+                    // Supplement with user's Home recommended feeds (Listen again, Quick picks, etc.)
+                    val homeResult = YouTube.home()
+                    if (homeResult.isSuccess) {
+                        val homeSections = homeResult.getOrNull()?.sections.orEmpty()
+                        val homeSongs = homeSections.flatMap { section ->
+                            section.items.filterIsInstance<SongItem>()
+                        }
+                        songs.addAll(homeSongs)
+                    }
+                    
+                    // Fallback to liked playlist LM songs if we are short on tracks
+                    if (songs.distinctBy { it.id }.size < 45) {
+                        val likedPlaylistResult = YouTube.playlist("LM")
+                        if (likedPlaylistResult.isSuccess) {
+                            val likedSongs = likedPlaylistResult.getOrNull()?.songs.orEmpty()
+                            songs.addAll(likedSongs)
+                        }
+                    }
+                } else {
+                    // Unsigned-in flows: grab charts and public home recommendations
+                    val homeResult = YouTube.home()
+                    if (homeResult.isSuccess) {
+                        val homeSongs = homeResult.getOrNull()?.sections.orEmpty().flatMap { section ->
+                            section.items.filterIsInstance<SongItem>()
+                        }
+                        songs.addAll(homeSongs)
+                    }
+                    if (songs.distinctBy { it.id }.size < 45) {
+                        val chartsResult = YouTube.getChartsPage()
+                        if (chartsResult.isSuccess) {
+                            val chartSongs = chartsResult.getOrNull()?.sections.orEmpty().flatMap { section ->
+                                section.items.filterIsInstance<SongItem>()
+                            }
+                            songs.addAll(chartSongs)
+                        }
+                    }
+                }
+
+                // Keep querying extra sources until we hit at least 45 unique songs (to perfectly fill 5 tabs of 3x3 grids)
+                val queries = listOf(
+                    "popular trending music hits",
+                    "billboard hot 100",
+                    "top global songs",
+                    "latest release hit songs",
+                    "chill music mix",
+                    "lofi hip hop beats"
+                )
+                var queryIndex = 0
+                while (songs.distinctBy { it.id }.size < 45 && queryIndex < queries.size) {
+                    val queryTerm = queries[queryIndex]
+                    val searchResult = YouTube.search(queryTerm, YouTube.SearchFilter.FILTER_SONG)
+                    if (searchResult.isSuccess) {
+                        val searchSongs = searchResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                        songs.addAll(searchSongs)
+                    }
+                    queryIndex++
+                }
+
+                // Extract max 45 tracks (up to 5 pages of 3x3 grids)
+                val finalSongs = songs.distinctBy { it.id }.take(45)
+                withContext(Dispatchers.Main) {
+                    speedDialSongs = finalSongs
+                    isSpeedDialLoading = false
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    isSpeedDialLoading = false
+                }
+            }
+        }
+    }
+
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -122,110 +225,123 @@ fun HomeScreen(
                     .fillMaxSize()
                     .padding(top = 8.dp, bottom = 12.dp)
             ) {
-                // Header
-                Row(
+                // Scrollable container for everything except BottomDock
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
                 ) {
-                    Text(
-                        text = "Tunespark",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Normal,
-                        fontFamily = BitcountSingleFontFamily,
-                        color = textColor
-                    )
-
-                    IconButton(
-                        onClick = { onNavigate(AppScreen.SETTINGS) },
+                    // Header
+                    Row(
                         modifier = Modifier
-                            .size(44.dp)
-                            .border(1.dp, textColor.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Settings",
-                            tint = textColor,
-                            modifier = Modifier.size(22.dp)
+                        Text(
+                            text = "Tunespark",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Normal,
+                            fontFamily = BitcountSingleFontFamily,
+                            color = textColor
+                        )
+
+                        IconButton(
+                            onClick = { onNavigate(AppScreen.SETTINGS) },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .border(1.dp, textColor.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = textColor,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Hero block
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = timeString,
+                            fontSize = 68.sp,
+                            lineHeight = 68.sp,
+                            fontWeight = FontWeight.Black,
+                            color = textColor,
+                            fontFamily = FontFamily.SansSerif,
+                            textAlign = TextAlign.Center
+                        )
+
+                        if (locationEnabled) {
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = weatherInfo?.emoji ?: "☁️",
+                                    fontSize = 30.sp,
+                                    modifier = Modifier.padding(end = 10.dp)
+                                )
+
+                                Column(
+                                    horizontalAlignment = Alignment.Start
+                                ) {
+                                    Text(
+                                        text = "${weatherInfo?.temperature?.toInt() ?: 35}°C",
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = textColor
+                                    )
+                                    Text(
+                                        text = weatherInfo?.description ?: "Cloudy",
+                                        fontSize = 13.sp,
+                                        color = textColor.copy(alpha = 0.55f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    if (isTrackLoaded) {
+                        PlayingContent(
+                            currentSongTitle = currentSongTitle,
+                            currentSongArtist = currentSongArtist,
+                            onPlayPauseToggle = onPlayPauseToggle,
+                            isPlaying = isPlaying,
+                            primaryColor = primaryColor,
+                            onPrimaryColor = onPrimaryColor
+                        )
+                    } else {
+                        IdleContent(
+                            textColor = textColor,
+                            primaryColor = primaryColor,
+                            onPrimaryColor = onPrimaryColor,
+                            speedDialSongs = speedDialSongs,
+                            isSpeedDialLoading = isSpeedDialLoading,
+                            onPlaySong = { song ->
+                                onPlaySong(song)
+                                onNavigate(AppScreen.RADIO)
+                            },
+                            onStartRadio = {
+                                onNavigate(AppScreen.RADIO)
+                                onShufflePlay()
+                            }
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Hero block
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = timeString,
-                        fontSize = 68.sp,
-                        lineHeight = 68.sp,
-                        fontWeight = FontWeight.Black,
-                        color = textColor,
-                        fontFamily = FontFamily.SansSerif,
-                        textAlign = TextAlign.Center
-                    )
-
-                    if (locationEnabled) {
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = weatherInfo?.emoji ?: "☁️",
-                                fontSize = 30.sp,
-                                modifier = Modifier.padding(end = 10.dp)
-                            )
-
-                            Column(
-                                horizontalAlignment = Alignment.Start
-                            ) {
-                                Text(
-                                    text = "${weatherInfo?.temperature?.toInt() ?: 35}°C",
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textColor
-                                )
-                                Text(
-                                    text = weatherInfo?.description ?: "Cloudy",
-                                    fontSize = 13.sp,
-                                    color = textColor.copy(alpha = 0.55f)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                if (isTrackLoaded) {
-                    PlayingContent(
-                        currentSongTitle = currentSongTitle,
-                        currentSongArtist = currentSongArtist,
-                        onPlayPauseToggle = onPlayPauseToggle,
-                        isPlaying = isPlaying,
-                        primaryColor = primaryColor,
-                        onPrimaryColor = onPrimaryColor
-                    )
-                } else {
-                    IdleContent(
-                        textColor = textColor,
-                        primaryColor = primaryColor,
-                        onPrimaryColor = onPrimaryColor,
-                        onStartRadio = {
-                            onNavigate(AppScreen.RADIO)
-                            onShufflePlay()
-                        }
-                    )
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 BottomDock(
                     isTrackLoaded = isTrackLoaded,
@@ -246,6 +362,9 @@ private fun IdleContent(
     textColor: Color,
     primaryColor: Color,
     onPrimaryColor: Color,
+    speedDialSongs: List<SongItem>,
+    isSpeedDialLoading: Boolean,
+    onPlaySong: (SongItem) -> Unit,
     onStartRadio: () -> Unit
 ) {
     val tags = listOf("Chill", "Feel good", "Commute", "Party")
@@ -330,6 +449,170 @@ private fun IdleContent(
             )
 
             Spacer(modifier = Modifier.width(46.dp))
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        SpeedDialView(
+            songs = speedDialSongs,
+            isLoading = isSpeedDialLoading,
+            textColor = textColor,
+            primaryColor = primaryColor,
+            onPlaySong = onPlaySong
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun SpeedDialView(
+    songs: List<SongItem>,
+    isLoading: Boolean,
+    textColor: Color,
+    primaryColor: Color,
+    onPlaySong: (SongItem) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "Speed dial",
+            color = primaryColor,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        if (isLoading || songs.isEmpty()) {
+            SpeedDialSkeleton()
+        } else {
+            val pages = remember(songs) { songs.chunked(9) }
+            val pagerState = rememberPagerState(pageCount = { pages.size })
+
+            HorizontalPager(
+                state = pagerState,
+                pageSpacing = 16.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(350.dp)
+            ) { pageIndex ->
+                val pageSongs = pages[pageIndex]
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    for (rowIndex in 0..2) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            for (colIndex in 0..2) {
+                                val songIndex = rowIndex * 3 + colIndex
+                                if (songIndex < pageSongs.size) {
+                                    val song = pageSongs[songIndex]
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .aspectRatio(1f)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { onPlaySong(song) }
+                                    ) {
+                                        AsyncImage(
+                                            model = song.thumbnail,
+                                            contentDescription = song.title,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(
+                                                    Brush.verticalGradient(
+                                                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f)),
+                                                        startY = 50f
+                                                    )
+                                                )
+                                        )
+
+                                        Text(
+                                            text = song.title,
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .padding(8.dp)
+                                        )
+                                    }
+                                } else {
+                                    Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Pager Dots Indicator
+            if (pages.size > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    repeat(pages.size) { index ->
+                        val isSelected = pagerState.currentPage == index
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 4.dp)
+                                .size(if (isSelected) 8.dp else 6.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) primaryColor else textColor.copy(alpha = 0.35f))
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SpeedDialSkeleton() {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        repeat(3) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                repeat(3) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Gray.copy(alpha = alpha))
+                    )
+                }
+            }
         }
     }
 }
