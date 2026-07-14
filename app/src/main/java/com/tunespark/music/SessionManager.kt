@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.AccountInfo
+import com.metrolist.innertube.models.SongItem
+import com.metrolist.innertube.models.Artist
+import org.json.JSONArray
+import org.json.JSONObject
 
 object SessionManager {
     private const val PREF_NAME = "tunespark_session_prefs"
@@ -22,6 +26,7 @@ object SessionManager {
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_SHOW_VISUALIZER = "show_visualizer"
     private const val KEY_COMMENTARY_ENABLED = "commentary_enabled"
+    private const val KEY_LOCAL_HISTORY = "local_listening_history"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -93,6 +98,93 @@ object SessionManager {
     fun clearSession(context: Context) {
         getPrefs(context).edit().clear().apply()
         YouTube.cookie = null
+    }
+
+    /**
+     * Adds a song to local listening history.
+     */
+    fun addSongToHistory(context: Context, song: SongItem) {
+        val prefs = getPrefs(context)
+        val historyStr = prefs.getString(KEY_LOCAL_HISTORY, "[]") ?: "[]"
+        try {
+            val jsonArray = JSONArray(historyStr)
+            
+            // Remove existing duplicate of this song to move it to the top/recent position
+            val newArray = JSONArray()
+            
+            // Add the new song at the top/index 0
+            val newSongJson = JSONObject().apply {
+                put("id", song.id)
+                put("title", song.title)
+                put("thumbnail", song.thumbnail)
+                val artistsArray = JSONArray()
+                song.artists.forEach { artist ->
+                    artistsArray.put(JSONObject().apply {
+                        put("name", artist.name)
+                        put("id", artist.id ?: "")
+                    })
+                }
+                put("artists", artistsArray)
+            }
+            newArray.put(newSongJson)
+            
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+                if (item.getString("id") != song.id) {
+                    newArray.put(item)
+                }
+            }
+            
+            // Limit local history size to 50 songs to prevent SharedPreferences from growing too large
+            val finalArray = JSONArray()
+            val limit = Math.min(newArray.length(), 50)
+            for (i in 0 until limit) {
+                finalArray.put(newArray.get(i))
+            }
+            
+            prefs.edit().putString(KEY_LOCAL_HISTORY, finalArray.toString()).apply()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Retrieves the local listening history.
+     */
+    fun getLocalHistory(context: Context): List<SongItem> {
+        val prefs = getPrefs(context)
+        val historyStr = prefs.getString(KEY_LOCAL_HISTORY, "[]") ?: "[]"
+        val songsList = mutableListOf<SongItem>()
+        try {
+            val jsonArray = JSONArray(historyStr)
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+                val id = item.getString("id")
+                val title = item.getString("title")
+                val thumbnail = item.getString("thumbnail")
+                
+                val artistsList = mutableListOf<Artist>()
+                val artistsArray = item.getJSONArray("artists")
+                for (j in 0 until artistsArray.length()) {
+                    val artistObj = artistsArray.getJSONObject(j)
+                    val artistName = artistObj.getString("name")
+                    val artistId = artistObj.optString("id").ifBlank { null }
+                    artistsList.add(Artist(name = artistName, id = artistId))
+                }
+                
+                songsList.add(
+                    SongItem(
+                        id = id,
+                        title = title,
+                        artists = artistsList,
+                        thumbnail = thumbnail
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return songsList
     }
 
     fun getGeminiApiKey(context: Context): String {

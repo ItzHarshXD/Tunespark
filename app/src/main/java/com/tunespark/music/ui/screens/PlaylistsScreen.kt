@@ -23,9 +23,12 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import android.content.Context
+import android.widget.Toast
 import android.media.AudioManager
 import android.view.HapticFeedbackConstants
 import androidx.compose.ui.platform.LocalView
@@ -66,6 +69,15 @@ data class LibraryGridItem(
 
 @Composable
 fun PlaylistsScreen(
+    initialPlaylistId: String? = null,
+    initialPlaylistName: String? = null,
+    initialPlaylistThumbnail: String? = null,
+    initialPlaylistSongCountText: String? = null,
+    initialPlaylistIsLiked: Boolean = false,
+    initialPlaylistRawItem: YTItem? = null,
+    initialPlaylistAuthorName: String? = null,
+    initialPlaylistAuthorAvatarUrl: String? = null,
+    initialPlaylistSongs: List<SongItem> = emptyList(),
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
@@ -87,24 +99,24 @@ fun PlaylistsScreen(
     var selectedTab by remember { mutableStateOf("Playlists") }
 
     // Sorting parameters
-    var sortBy by remember { mutableStateOf("Date added") }
-    var sortAscending by remember { mutableStateOf(false) } // False -> descending (↓), True -> ascending (↑)
+    var sortBy by rememberSaveable { mutableStateOf("Date added") }
+    var sortAscending by rememberSaveable { mutableStateOf(false) } // False -> descending (↓), True -> ascending (↑)
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
     // Search parameters
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
-    var activePlaylistId by remember { mutableStateOf<String?>(null) }
-    var activePlaylistName by remember { mutableStateOf("") }
-    var activePlaylistThumbnail by remember { mutableStateOf<String?>(null) }
-    var activePlaylistSongCountText by remember { mutableStateOf("") }
-    var activePlaylistIsLiked by remember { mutableStateOf(false) }
-    var activePlaylistRawItem by remember { mutableStateOf<YTItem?>(null) }
-    var activePlaylistAuthorName by remember { mutableStateOf<String?>(null) }
-    var activePlaylistAuthorAvatarUrl by remember { mutableStateOf<String?>(null) }
+    var activePlaylistId by remember { mutableStateOf(initialPlaylistId) }
+    var activePlaylistName by remember { mutableStateOf(initialPlaylistName ?: "") }
+    var activePlaylistThumbnail by remember { mutableStateOf(initialPlaylistThumbnail) }
+    var activePlaylistSongCountText by remember { mutableStateOf(initialPlaylistSongCountText ?: "") }
+    var activePlaylistIsLiked by remember { mutableStateOf(initialPlaylistIsLiked) }
+    var activePlaylistRawItem by remember { mutableStateOf(initialPlaylistRawItem) }
+    var activePlaylistAuthorName by remember { mutableStateOf(initialPlaylistAuthorName) }
+    var activePlaylistAuthorAvatarUrl by remember { mutableStateOf(initialPlaylistAuthorAvatarUrl) }
 
-    var playlistSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
+    var playlistSongs by remember { mutableStateOf(initialPlaylistSongs) }
     var isSongsLoading by remember { mutableStateOf(false) }
 
     BackHandler {
@@ -379,6 +391,12 @@ fun PlaylistsScreen(
 
     LaunchedEffect(activePlaylistId) {
         val playlistId = activePlaylistId ?: return@LaunchedEffect
+        
+        // If we already have the songs from the initial playlist, don't clear or reload them
+        if (playlistId == initialPlaylistId && playlistSongs.isNotEmpty()) {
+            return@LaunchedEffect
+        }
+        
         isSongsLoading = true
         playlistSongs = emptyList()
 
@@ -693,7 +711,7 @@ fun PlaylistsScreen(
                             }
 
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp)
@@ -715,9 +733,9 @@ fun PlaylistsScreen(
                                         .weight(1f)
                                         .height(48.dp)
                                 ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(20.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Play", fontWeight = FontWeight.Bold)
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Play", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 }
 
                                 Button(
@@ -739,8 +757,39 @@ fun PlaylistsScreen(
                                         .height(48.dp)
                                 ) {
                                     Icon(Icons.Default.Refresh, contentDescription = "Shuffle", modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Shuffle", fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Shuffle", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+
+                                val currentActiveId = activePlaylistId
+                                if (currentActiveId != null && currentActiveId != "LM" && !activePlaylistIsLiked) {
+                                    Button(
+                                        onClick = {
+                                            playSoundAndHaptic()
+                                            coroutineScope.launch {
+                                                val result = withContext(Dispatchers.IO) {
+                                                    YouTube.likePlaylist(currentActiveId, true)
+                                                }
+                                                if (result.isSuccess) {
+                                                    Toast.makeText(context, "Saved '$activePlaylistName' to library!", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    Toast.makeText(context, "Failed to save playlist to library.", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(24.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color.Gray.copy(alpha = 0.2f),
+                                            contentColor = textColor
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                    ) {
+                                        Icon(Icons.Default.PlaylistAdd, contentDescription = "Save", modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Save", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
                                 }
                             }
 

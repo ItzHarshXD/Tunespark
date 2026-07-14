@@ -130,6 +130,7 @@ fun RadioScreen(
     hasPreviousTrack: Boolean,
     hasNextTrack: Boolean,
     onNavigate: (AppScreen) -> Unit,
+    onStopRadio: () -> Unit,
     lyricsLines: List<LyricLine>,
     isLyricsLoading: Boolean,
     modifier: Modifier = Modifier
@@ -427,8 +428,7 @@ fun RadioScreen(
                             if (!isStopExpanded) {
                                 isStopExpanded = true
                             } else {
-                                exoPlayer.stop()
-                                onNavigate(AppScreen.HOME)
+                                onStopRadio()
                             }
                         },
                     contentAlignment = Alignment.Center

@@ -22,6 +22,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
+import com.metrolist.innertube.models.Artist
 import com.tunespark.music.ui.theme.TunesparkTheme
 import com.tunespark.music.ui.screens.*
 import com.tunespark.music.ui.screens.LyricLine
@@ -126,6 +127,17 @@ fun MainPlayerScreen(
 
     var currentScreen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
     var accountInfo by remember { mutableStateOf<com.metrolist.innertube.models.AccountInfo?>(SessionManager.getCachedAccountInfo(context)) }
+
+    // State variables for initial playlist navigation to Playlists screen
+    var initialPlaylistId by remember { mutableStateOf<String?>(null) }
+    var initialPlaylistName by remember { mutableStateOf("") }
+    var initialPlaylistThumbnail by remember { mutableStateOf<String?>(null) }
+    var initialPlaylistSongCountText by remember { mutableStateOf("") }
+    var initialPlaylistIsLiked by remember { mutableStateOf(false) }
+    var initialPlaylistRawItem by remember { mutableStateOf<com.metrolist.innertube.models.YTItem?>(null) }
+    var initialPlaylistAuthorName by remember { mutableStateOf<String?>(null) }
+    var initialPlaylistAuthorAvatarUrl by remember { mutableStateOf<String?>(null) }
+    var initialPlaylistSongs by remember { mutableStateOf<List<com.metrolist.innertube.models.SongItem>>(emptyList()) }
     var isLoadingProfile by remember { mutableStateOf(false) }
     var profileError by remember { mutableStateOf<String?>(null) }
 
@@ -296,6 +308,30 @@ fun MainPlayerScreen(
                 currentSongTitle = mediaMetadata.title?.toString() ?: "No Track Loaded"
                 currentSongArtist = mediaMetadata.artist?.toString() ?: ""
                 currentSongArtwork = mediaMetadata.artworkUri?.toString()
+
+                val currentItem = exoPlayer.currentMediaItem
+                if (currentItem != null) {
+                    val mediaId = currentItem.mediaId
+                    if (mediaId.isNotBlank() &&
+                        !mediaId.startsWith("commentary_") &&
+                        currentSongTitle != "No Track Loaded" &&
+                        currentSongTitle.isNotBlank() &&
+                        currentSongArtist != "TuneSpark AI DJ") {
+                        
+                        val artistList = currentSongArtist.split(", ").map {
+                            Artist(name = it, id = null)
+                        }
+                        
+                        val songItem = SongItem(
+                            id = mediaId,
+                            title = currentSongTitle,
+                            artists = artistList,
+                            thumbnail = currentSongArtwork ?: ""
+                        )
+                        
+                        SessionManager.addSongToHistory(context, songItem)
+                    }
+                }
             }
 
             override fun onEvents(player: Player, events: Player.Events) {
@@ -617,7 +653,22 @@ fun MainPlayerScreen(
                     isShuffling = isShuffling,
                     onNavigate = { currentScreen = it },
                     onShufflePlay = shufflePlay,
-                    onPlaySong = { playSong(it) }
+                    onPlaySong = { playSong(it) },
+                    onPlayPlaylist = { name, songs, startIndex ->
+                        playPlaylist(name, songs, startIndex)
+                    },
+                    onPlaylistClick = { data ->
+                        initialPlaylistId = data.playlist.id
+                        initialPlaylistName = data.playlist.title
+                        initialPlaylistThumbnail = data.playlist.thumbnail ?: data.songs.firstOrNull()?.thumbnail
+                        initialPlaylistSongCountText = data.playlist.songCountText ?: "${data.songs.size} songs"
+                        initialPlaylistIsLiked = false
+                        initialPlaylistRawItem = data.playlist
+                        initialPlaylistAuthorName = data.playlist.author?.name
+                        initialPlaylistAuthorAvatarUrl = data.playlist.authorAvatarUrl
+                        initialPlaylistSongs = data.songs
+                        currentScreen = AppScreen.PLAYLISTS
+                    }
                 )
             }
             AppScreen.SETTINGS -> {
@@ -662,6 +713,18 @@ fun MainPlayerScreen(
                     hasPreviousTrack = hasPreviousTrack,
                     hasNextTrack = hasNextTrack,
                     onNavigate = { currentScreen = it },
+                    onStopRadio = {
+                        exoPlayer.stop()
+                        exoPlayer.clearMediaItems()
+                        currentSongTitle = "No Track Loaded"
+                        currentSongArtist = ""
+                        currentSongArtwork = null
+                        playQueue = emptyList()
+                        currentTrackIndex = -1
+                        hasPreviousTrack = false
+                        hasNextTrack = false
+                        currentScreen = AppScreen.HOME
+                    },
                     lyricsLines = hoistedLyricsLines,
                     isLyricsLoading = hoistedIsLyricsLoading
                 )
@@ -700,10 +763,32 @@ fun MainPlayerScreen(
             }
             AppScreen.PLAYLISTS -> {
                 PlaylistsScreen(
+                    initialPlaylistId = initialPlaylistId,
+                    initialPlaylistName = initialPlaylistName,
+                    initialPlaylistThumbnail = initialPlaylistThumbnail,
+                    initialPlaylistSongCountText = initialPlaylistSongCountText,
+                    initialPlaylistIsLiked = initialPlaylistIsLiked,
+                    initialPlaylistRawItem = initialPlaylistRawItem,
+                    initialPlaylistAuthorName = initialPlaylistAuthorName,
+                    initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
+                    initialPlaylistSongs = initialPlaylistSongs,
                     onPlayPlaylist = { name, songs, startIndex ->
                         playPlaylist(name, songs, startIndex)
                     },
-                    onNavigate = { currentScreen = it }
+                    onNavigate = { screen ->
+                        if (screen != AppScreen.PLAYLISTS) {
+                            initialPlaylistId = null
+                            initialPlaylistName = ""
+                            initialPlaylistThumbnail = null
+                            initialPlaylistSongCountText = ""
+                            initialPlaylistIsLiked = false
+                            initialPlaylistRawItem = null
+                            initialPlaylistAuthorName = null
+                            initialPlaylistAuthorAvatarUrl = null
+                            initialPlaylistSongs = emptyList()
+                        }
+                        currentScreen = screen
+                    }
                 )
             }
         }
