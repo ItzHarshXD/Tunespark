@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -98,9 +99,14 @@ fun PlaylistsScreen(
 
     var selectedTab by remember { mutableStateOf("Playlists") }
 
-    // Sorting parameters
-    var sortBy by rememberSaveable { mutableStateOf("Date added") }
-    var sortAscending by rememberSaveable { mutableStateOf(false) } // False -> descending (↓), True -> ascending (↑)
+    // Sorting parameters persistence
+    val sharedPrefs = remember { context.getSharedPreferences("tunespark_playlists_prefs", Context.MODE_PRIVATE) }
+    var sortBy by remember {
+        mutableStateOf(sharedPrefs.getString("sort_by", "Date added") ?: "Date added")
+    }
+    var sortAscending by remember {
+        mutableStateOf(sharedPrefs.getBoolean("sort_ascending", false))
+    } // False -> descending (↓), True -> ascending (↑)
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
     // Search parameters
@@ -712,10 +718,17 @@ fun PlaylistsScreen(
 
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp)
                             ) {
+                                val isSaved = remember(activePlaylistId, gridItems) {
+                                    activePlaylistId == "LM" || activePlaylistIsLiked || gridItems.any { it.id == activePlaylistId }
+                                }
+                                var isLocallySaved by remember(activePlaylistId) { mutableStateOf(false) }
+                                val showSaveOption = activePlaylistId != null && activePlaylistId != "LM" && !isSaved && !isLocallySaved
+
                                 Button(
                                     onClick = {
                                         playSoundAndHaptic()
@@ -725,6 +738,7 @@ fun PlaylistsScreen(
                                         }
                                     },
                                     shape = RoundedCornerShape(24.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = textColor,
                                         contentColor = backgroundColor
@@ -734,8 +748,8 @@ fun PlaylistsScreen(
                                         .height(48.dp)
                                 ) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Play", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Play", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
 
                                 Button(
@@ -748,6 +762,7 @@ fun PlaylistsScreen(
                                         }
                                     },
                                     shape = RoundedCornerShape(24.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = Color.Gray.copy(alpha = 0.2f),
                                         contentColor = textColor
@@ -757,38 +772,68 @@ fun PlaylistsScreen(
                                         .height(48.dp)
                                 ) {
                                     Icon(Icons.Default.Refresh, contentDescription = "Shuffle", modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Shuffle", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Shuffle", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
 
                                 val currentActiveId = activePlaylistId
-                                if (currentActiveId != null && currentActiveId != "LM" && !activePlaylistIsLiked) {
-                                    Button(
-                                        onClick = {
-                                            playSoundAndHaptic()
-                                            coroutineScope.launch {
-                                                val result = withContext(Dispatchers.IO) {
-                                                    YouTube.likePlaylist(currentActiveId, true)
-                                                }
-                                                if (result.isSuccess) {
-                                                    Toast.makeText(context, "Saved '$activePlaylistName' to library!", Toast.LENGTH_SHORT).show()
-                                                } else {
-                                                    Toast.makeText(context, "Failed to save playlist to library.", Toast.LENGTH_SHORT).show()
-                                                }
+                                if (currentActiveId != null) {
+                                    var menuExpanded by remember { mutableStateOf(false) }
+                                    Box {
+                                        IconButton(
+                                            onClick = {
+                                                playSoundAndHaptic()
+                                                menuExpanded = true
+                                            },
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .background(Color.Gray.copy(alpha = 0.2f))
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.MoreVert,
+                                                contentDescription = "More options",
+                                                tint = textColor,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+
+                                        DropdownMenu(
+                                            expanded = menuExpanded,
+                                            onDismissRequest = { menuExpanded = false },
+                                            modifier = Modifier
+                                                .background(backgroundColor)
+                                                .border(1.dp, textColor.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                        ) {
+                                            if (showSaveOption) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Save to library", color = textColor) },
+                                                    leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = "Save", tint = textColor) },
+                                                    onClick = {
+                                                        playSoundAndHaptic()
+                                                        menuExpanded = false
+                                                        coroutineScope.launch {
+                                                            val result = withContext(Dispatchers.IO) {
+                                                                YouTube.likePlaylist(currentActiveId, true)
+                                                            }
+                                                            if (result.isSuccess) {
+                                                                isLocallySaved = true
+                                                                Toast.makeText(context, "Saved '$activePlaylistName' to library!", Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                Toast.makeText(context, "Failed to save playlist to library.", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        }
+                                                    }
+                                                )
+                                            } else {
+                                                DropdownMenuItem(
+                                                    text = { Text("Already saved", color = textColor.copy(alpha = 0.5f)) },
+                                                    leadingIcon = { Icon(Icons.Default.Favorite, contentDescription = "Saved", tint = textColor.copy(alpha = 0.5f)) },
+                                                    enabled = false,
+                                                    onClick = {}
+                                                )
                                             }
-                                        },
-                                        shape = RoundedCornerShape(24.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = Color.Gray.copy(alpha = 0.2f),
-                                            contentColor = textColor
-                                        ),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(48.dp)
-                                    ) {
-                                        Icon(Icons.Default.PlaylistAdd, contentDescription = "Save", modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Save", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        }
                                     }
                                 }
                             }
@@ -957,7 +1002,9 @@ fun PlaylistsScreen(
                                 modifier = Modifier
                                     .clickable {
                                         playSoundAndHaptic()
-                                        sortAscending = !sortAscending
+                                        val newVal = !sortAscending
+                                        sortAscending = newVal
+                                        sharedPrefs.edit().putBoolean("sort_ascending", newVal).apply()
                                     }
                                     .padding(horizontal = 4.dp)
                             )
@@ -974,6 +1021,7 @@ fun PlaylistsScreen(
                                     onClick = {
                                         playSoundAndHaptic()
                                         sortBy = param
+                                        sharedPrefs.edit().putString("sort_by", param).apply()
                                         sortMenuExpanded = false
                                     }
                                 )

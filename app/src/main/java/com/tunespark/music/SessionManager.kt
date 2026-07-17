@@ -117,6 +117,7 @@ object SessionManager {
                 put("id", song.id)
                 put("title", song.title)
                 put("thumbnail", song.thumbnail)
+                put("timestamp", System.currentTimeMillis())
                 val artistsArray = JSONArray()
                 song.artists.forEach { artist ->
                     artistsArray.put(JSONObject().apply {
@@ -135,9 +136,9 @@ object SessionManager {
                 }
             }
             
-            // Limit local history size to 50 songs to prevent SharedPreferences from growing too large
+            // Limit local history size to 1000 songs to prevent SharedPreferences from growing too large
             val finalArray = JSONArray()
-            val limit = Math.min(newArray.length(), 50)
+            val limit = Math.min(newArray.length(), 1000)
             for (i in 0 until limit) {
                 finalArray.put(newArray.get(i))
             }
@@ -178,6 +179,46 @@ object SessionManager {
                         title = title,
                         artists = artistsList,
                         thumbnail = thumbnail
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return songsList
+    }
+
+    fun getLocalHistoryWithTimestamps(context: Context): List<Pair<SongItem, Long>> {
+        val prefs = getPrefs(context)
+        val historyStr = prefs.getString(KEY_LOCAL_HISTORY, "[]") ?: "[]"
+        val songsList = mutableListOf<Pair<SongItem, Long>>()
+        try {
+            val jsonArray = JSONArray(historyStr)
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+                val id = item.getString("id")
+                val title = item.getString("title")
+                val thumbnail = item.getString("thumbnail")
+                val timestamp = item.optLong("timestamp", System.currentTimeMillis() - i * 60000L)
+                
+                val artistsList = mutableListOf<Artist>()
+                val artistsArray = item.getJSONArray("artists")
+                for (j in 0 until artistsArray.length()) {
+                    val artistObj = artistsArray.getJSONObject(j)
+                    val artistName = artistObj.getString("name")
+                    val artistId = artistObj.optString("id").ifBlank { null }
+                    artistsList.add(Artist(name = artistName, id = artistId))
+                }
+                
+                songsList.add(
+                    Pair(
+                        SongItem(
+                            id = id,
+                            title = title,
+                            artists = artistsList,
+                            thumbnail = thumbnail
+                        ),
+                        timestamp
                     )
                 )
             }

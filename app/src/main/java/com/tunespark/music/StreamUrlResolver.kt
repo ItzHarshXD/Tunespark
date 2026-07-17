@@ -4,8 +4,19 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.YouTubeClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Collections
+import java.util.LinkedHashMap
 
 object StreamUrlResolver {
+    // Cache for playback tracking URLs mapping videoId -> videostatsPlaybackUrl
+    val playbackTrackingCache = Collections.synchronizedMap(
+        object : LinkedHashMap<String, String>(100, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean {
+                return size > 100
+            }
+        }
+    )
+
     // YouTube may block or omit stream URLs for some client profiles. Try several
     // InnerTube clients and use the first playable audio stream we can resolve.
     private val clients = listOf(
@@ -40,6 +51,10 @@ object StreamUrlResolver {
 
                         if (audioFormat?.url != null) {
                             fetchedUrl = audioFormat.url
+                            val trackingUrl = response.playbackTracking?.videostatsPlaybackUrl?.baseUrl
+                            if (trackingUrl != null) {
+                                playbackTrackingCache[videoId] = trackingUrl
+                            }
                             break
                         }
                     }

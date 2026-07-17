@@ -75,7 +75,7 @@ Key files:
 
 ## Screen Architecture
 
-TuneSpark has been structured into 12 distinct screens for clear separation of concerns and a native-feeling UX:
+TuneSpark has been structured into 13 distinct screens for clear separation of concerns and a native-feeling UX:
 
 1. **Home Screen**:
    - A highly polished, light-themed system dashboard featuring a real-time system clock and localized weather info.
@@ -128,8 +128,12 @@ TuneSpark has been structured into 12 distinct screens for clear separation of c
 12. **Playlists Screen**:
    - Designed precisely to match reference layouts for both Light and Dark themes.
    - Displays "Date added ↓" sorting options, and a search icon (the top tabs bar was removed as playlists are showing up properly and switching is unnecessary).
-   - Features a clean 3-column grid of playlist items. The "Liked" playlist features a prominent red card with a white heart outline icon, while other playlists are rendered with rounded squares using adaptive backgrounds (solid black in Light theme and solid white in Dark theme).
+  - Features a clean 3-column grid of playlist items. The "Liked" playlist features a prominent red card with a white heart outline icon, while other playlists are rendered with rounded squares using adaptive backgrounds (solid black in Light theme and solid white in Dark theme).
    - Selecting any playlist instantly loads its complete song collection into the background media service, sets `isPlaylistMode` to true, and launches the player view.
+13. **Recents Screen**:
+   - Dedicated full-screen recently-listened history tracker displaying songs in sectioned dates (like "Today", "Yesterday", and custom date headers), matching high-end design specifications.
+   - Connects directly to YouTube Music's `YouTube.musicHistory()` endpoints for authenticated sessions and falls back to a locally-cached database with microsecond precision Unix timestamps.
+   - Selecting any track triggers background radio queue seeding and redirects the user immediately to the Radio player screen.
 
 ---
 
@@ -321,4 +325,4 @@ We have successfully refined and completed the premium user experience across al
 - **Dynamic Dual-Source History Engine**: Developed a smart dual-source recent listening tracker. When signed in, it queries YouTube Music's native history endpoints (`YouTube.musicHistory()`). When signed out (or when logged in history is empty), it seamlessly falls back to a locally cached list persisted securely inside `SharedPreferences` as a JSON array.
 - **Automated Listening Capture**: Fully wired up in `MainActivity.kt` inside the Media3 `Player.Listener`'s `onMediaMetadataChanged`. It intercepts played songs dynamically as they begin streaming, skipping any AI Commentary/DJ tracks, and adds them to the local listening history cache instantly.
 - **High-Fidelity Recents Horizontal Row**: Integrated a beautiful horizontal-scrolling `LazyRow` featuring compact, highly-polished 120.dp `RecentsCard`s with high-resolution artwork, exact titles, and adaptive secondary styling ("Song • Artist") aligning with DM Sans standard typography and pure black/white theme.
-- **Interactive Listening History Full-Screen Overlay**: Created a premium, native-feeling full-screen `ListeningHistoryView` inside the Home Screen that opens instantly upon clicking "Show all". Supported with system BackHandler integration, click click-to-play callbacks, and microsecond-accurate haptic/audio tap feedback for a highly refined native application feel.
+- **Dedicated Recents Screen**: Replaced the overlay with a full, dedicated Recents Screen (`RecentsScreen.kt`) with robust date headers ("Today", "Yesterday", "Tue, Jul 14, 2026") grouping all songs beautifully as shown in design specifications. Handled back integration cleanly and wired song clicks to play instantly, transitions to the Radio screen, and seeds the continuous background autoplay queue.
