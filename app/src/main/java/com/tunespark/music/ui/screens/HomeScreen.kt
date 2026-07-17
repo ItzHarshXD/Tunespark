@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -1658,21 +1659,73 @@ fun DailyDiscoverView(
         if (isLoading || songs.isEmpty()) {
             DailyDiscoverSkeleton()
         } else {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(end = 16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                itemsIndexed(songs) { index, song ->
-                    DailyDiscoverCard(
-                        song = song,
-                        textColor = textColor,
-                        primaryColor = primaryColor,
-                        onClick = { onPlayPlaylist("Daily Discover", songs, index) }
-                    )
+            val pagerState = rememberPagerState(pageCount = { songs.size })
+
+            // Auto-scroll every 10 seconds
+            LaunchedEffect(songs) {
+                if (songs.isNotEmpty()) {
+                    while (true) {
+                        delay(10000)
+                        val nextPage = (pagerState.currentPage + 1) % songs.size
+                        pagerState.animateScrollToPage(
+                            page = nextPage,
+                            animationSpec = tween(durationMillis = 2000, easing = LinearOutSlowInEasing)
+                        )
+                    }
                 }
             }
+
+            HorizontalPager(
+                state = pagerState,
+                contentPadding = PaddingValues(end = 48.dp),
+                pageSpacing = 16.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) { index ->
+                val song = songs[index]
+                val isSnapped = pagerState.currentPage == index
+
+                // Very very slow, subtle zoom micro-animation (1.05f max scale, 4000ms animation duration)
+                val zoomScale by animateFloatAsState(
+                    targetValue = if (isSnapped) 1.05f else 1.00f,
+                    animationSpec = tween(durationMillis = 4000, easing = LinearOutSlowInEasing),
+                    label = "zoomScale"
+                )
+
+                DailyDiscoverCard(
+                    song = song,
+                    textColor = textColor,
+                    primaryColor = primaryColor,
+                    scale = zoomScale,
+                    onClick = { onPlayPlaylist("Daily Discover", songs, index) }
+                )
+            }
         }
+    }
+}
+
+private fun String.toHighResThumbnail(): String {
+    return when {
+        contains("googleusercontent.com") -> {
+            var url = this
+            val wHRegex = "=[ws]\\d+-h\\d+.*".toRegex()
+            if (url.contains(wHRegex)) {
+                url = url.replace(wHRegex, "=w544-h544")
+            } else {
+                val sRegex = "=s\\d+.*".toRegex()
+                if (url.contains(sRegex)) {
+                    url = url.replace(sRegex, "=w544-h544")
+                }
+            }
+            url
+        }
+        contains("ytimg.com") -> {
+            if (contains("/default.jpg")) {
+                replace("/default.jpg", "/hqdefault.jpg")
+            } else {
+                this
+            }
+        }
+        else -> this
     }
 }
 
@@ -1681,6 +1734,7 @@ fun DailyDiscoverCard(
     song: SongItem,
     textColor: Color,
     primaryColor: Color,
+    scale: Float = 1.0f,
     onClick: () -> Unit
 ) {
     Box(
@@ -1691,9 +1745,14 @@ fun DailyDiscoverCard(
             .clickable { onClick() }
     ) {
         AsyncImage(
-            model = song.thumbnail,
+            model = song.thumbnail?.toHighResThumbnail(),
             contentDescription = song.title,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
             contentScale = ContentScale.Crop
         )
 

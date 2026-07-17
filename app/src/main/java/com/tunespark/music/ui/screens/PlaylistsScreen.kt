@@ -812,15 +812,19 @@ fun PlaylistsScreen(
                                                     onClick = {
                                                         playSoundAndHaptic()
                                                         menuExpanded = false
-                                                        coroutineScope.launch {
-                                                            val result = withContext(Dispatchers.IO) {
-                                                                YouTube.likePlaylist(currentActiveId, true)
-                                                            }
-                                                            if (result.isSuccess) {
-                                                                isLocallySaved = true
-                                                                Toast.makeText(context, "Saved '$activePlaylistName' to library!", Toast.LENGTH_SHORT).show()
-                                                            } else {
-                                                                Toast.makeText(context, "Failed to save playlist to library.", Toast.LENGTH_SHORT).show()
+                                                        if (!SessionManager.isUserSignedIn(context)) {
+                                                            Toast.makeText(context, "Please sign in to your account first.", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            coroutineScope.launch {
+                                                                val result = withContext(Dispatchers.IO) {
+                                                                    YouTube.likePlaylist(currentActiveId, true)
+                                                                }
+                                                                if (result.isSuccess) {
+                                                                    isLocallySaved = true
+                                                                    Toast.makeText(context, "Saved '$activePlaylistName' to library!", Toast.LENGTH_SHORT).show()
+                                                                } else {
+                                                                    Toast.makeText(context, "Failed to save playlist to library.", Toast.LENGTH_SHORT).show()
+                                                                }
                                                             }
                                                         }
                                                     }
