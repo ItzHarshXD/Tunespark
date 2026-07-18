@@ -96,7 +96,13 @@ object SessionManager {
      * Clears all session data (logout).
      */
     fun clearSession(context: Context) {
-        getPrefs(context).edit().clear().apply()
+        getPrefs(context).edit()
+            .remove(KEY_COOKIE)
+            .remove(KEY_USER_NAME)
+            .remove(KEY_USER_EMAIL)
+            .remove(KEY_USER_HANDLE)
+            .remove(KEY_USER_THUMBNAIL)
+            .apply()
         YouTube.cookie = null
     }
 

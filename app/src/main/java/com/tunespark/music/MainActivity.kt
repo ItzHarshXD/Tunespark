@@ -264,43 +264,46 @@ fun MainPlayerScreen(
         }
     }
 
-    val currentMediaItem = remember(currentSongTitle, currentSongArtist, playbackState, isPlaying) {
-        if (isPlaying && playbackState == Player.STATE_READY) {
-            exoPlayer.currentMediaItem
-        } else {
-            null
-        }
-    }
+    var localHistorySize by remember { mutableStateOf(SessionManager.getLocalHistory(context).size) }
 
-    LaunchedEffect(currentMediaItem) {
-        val item = currentMediaItem
-        if (item != null) {
-            val mediaId = item.mediaId
-            val title = item.mediaMetadata.title?.toString() ?: ""
-            val artist = item.mediaMetadata.artist?.toString() ?: ""
-            val artwork = item.mediaMetadata.artworkUri?.toString() ?: ""
+    LaunchedEffect(currentSongTitle, currentSongArtist, isPlaying, playbackState) {
+        if (isPlaying && playbackState == Player.STATE_READY &&
+            currentSongTitle != "No Track Loaded" &&
+            currentSongTitle.isNotBlank() &&
+            !currentSongTitle.startsWith("AI DJ") &&
+            !currentSongTitle.startsWith("commentary_") &&
+            currentSongArtist != "TuneSpark AI DJ") {
             
-            if (mediaId.isNotBlank() &&
-                !mediaId.startsWith("commentary_") &&
-                title != "No Track Loaded" &&
-                title.isNotBlank() &&
-                artist != "TuneSpark AI DJ") {
+            // Wait for 10 seconds of continuous playback
+            kotlinx.coroutines.delay(10000)
+            
+            // Re-verify that it is still playing the same song and in READY state
+            val currentMediaItem = exoPlayer.currentMediaItem
+            if (currentMediaItem != null) {
+                val mediaId = currentMediaItem.mediaId
+                val title = currentMediaItem.mediaMetadata.title?.toString() ?: ""
+                val artist = currentMediaItem.mediaMetadata.artist?.toString() ?: ""
+                val artwork = currentMediaItem.mediaMetadata.artworkUri?.toString() ?: ""
                 
-                // Wait for the 10-second threshold before counting as a listen
-                kotlinx.coroutines.delay(10000)
-                
-                // If we reach here, the song has been playing continuously for 10 seconds!
-                val artistList = artist.split(", ").map {
-                    Artist(name = it, id = null)
+                if (mediaId.isNotBlank() &&
+                    !mediaId.startsWith("commentary_") &&
+                    title != "No Track Loaded" &&
+                    title.isNotBlank() &&
+                    artist != "TuneSpark AI DJ" &&
+                    title == currentSongTitle) { // Ensure same song is still playing
+                    
+                    val artistList = artist.split(", ").map {
+                        Artist(name = it, id = null)
+                    }
+                    val songItem = SongItem(
+                        id = mediaId,
+                        title = title,
+                        artists = artistList,
+                        thumbnail = artwork
+                    )
+                    SessionManager.addSongToHistory(context, songItem)
+                    localHistorySize = SessionManager.getLocalHistory(context).size
                 }
-                val songItem = SongItem(
-                    id = mediaId,
-                    title = title,
-                    artists = artistList,
-                    thumbnail = artwork
-                )
-                
-                SessionManager.addSongToHistory(context, songItem)
             }
         }
     }
@@ -674,31 +677,15 @@ fun MainPlayerScreen(
     var homeDailyDiscoverSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isHomeDailyDiscoverLoading by remember { mutableStateOf(false) }
 
-    LaunchedEffect(userSignedIn) {
+    LaunchedEffect(userSignedIn, localHistorySize) {
         isHomeDailyDiscoverLoading = true
         homeDailyDiscoverSongs = emptyList()
         withContext(Dispatchers.IO) {
             try {
                 val songs = mutableListOf<SongItem>()
-                if (userSignedIn) {
-                    val seedTracks = mutableListOf<SongItem>()
-                    
-                    // Fetch library activity and home concurrently to reduce latency
-                    val recentDeferred = async { YouTube.libraryRecentActivity() }
-                    val homeDeferred = async { YouTube.home() }
-                    
-                    val recentResult = recentDeferred.await()
-                    if (recentResult.isSuccess) {
-                        val items = recentResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
-                        seedTracks.addAll(items.take(2)) // Optimized from take(3) to take(2) to speed up load time
-                    }
-                    if (seedTracks.isEmpty()) {
-                        val historyResult = YouTube.musicHistory()
-                        if (historyResult.isSuccess) {
-                            val historySongs = historyResult.getOrNull()?.sections?.flatMap { it.songs }.orEmpty()
-                            seedTracks.addAll(historySongs.distinctBy { it.id }.take(2)) // Optimized to take(2)
-                        }
-                    }
+                val localHistory = SessionManager.getLocalHistory(context)
+                if (localHistory.size >= 3) {
+                    val seedTracks = localHistory.distinctBy { it.id }.take(3)
                     if (seedTracks.isNotEmpty()) {
                         val jobs = seedTracks.map { seed ->
                             async {
@@ -711,45 +698,102 @@ fun MainPlayerScreen(
                         val recommendedLists = jobs.awaitAll()
                         recommendedLists.forEach { songs.addAll(it) }
                     }
-                    val homeResult = homeDeferred.await()
-                    if (homeResult.isSuccess) {
-                        val homeSongs = homeResult.getOrNull()?.sections.orEmpty().flatMap { section ->
-                            section.items.filterIsInstance<SongItem>()
-                        }
-                        songs.addAll(homeSongs)
-                    }
                     val seedIds = seedTracks.map { it.id }.toSet()
+                    val localIds = localHistory.map { it.id }.toSet()
                     var finalPersonalSongs = songs.distinctBy { it.id }
-                        .filter { it.id !in seedIds }
+                        .filter { it.id !in seedIds && it.id !in localIds }
                         .shuffled()
                         .take(10)
                     if (finalPersonalSongs.size < 10) {
                         val remainingNeeded = 10 - finalPersonalSongs.size
                         val extraSongs = songs.distinctBy { it.id }
                             .filter { it.id !in finalPersonalSongs.map { s -> s.id } }
+                            .shuffled()
+                            .take(remainingNeeded)
+                        finalPersonalSongs = finalPersonalSongs + extraSongs
+                    }
+                    if (finalPersonalSongs.size < 10) {
+                        val remainingNeeded = 10 - finalPersonalSongs.size
+                        val extraSongs = localHistory.distinctBy { it.id }
+                            .filter { it.id !in finalPersonalSongs.map { s -> s.id } }
+                            .shuffled()
                             .take(remainingNeeded)
                         finalPersonalSongs = finalPersonalSongs + extraSongs
                     }
                     songs.clear()
                     songs.addAll(finalPersonalSongs.take(10))
                 } else {
-                    val chartsResult = YouTube.getChartsPage()
-                    if (chartsResult.isSuccess) {
-                        val chartSongs = chartsResult.getOrNull()?.sections?.flatMap { section ->
-                            section.items.filterIsInstance<SongItem>()
-                        }.orEmpty()
-                        songs.addAll(chartSongs)
-                    }
-                    if (songs.size < 15) {
-                        val searchResult = YouTube.search("trending music billboard charts", YouTube.SearchFilter.FILTER_SONG)
-                        if (searchResult.isSuccess) {
-                            val searchSongs = searchResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
-                            songs.addAll(searchSongs)
+                    if (userSignedIn) {
+                        val seedTracks = mutableListOf<SongItem>()
+                        
+                        // Fetch library activity and home concurrently to reduce latency
+                        val recentDeferred = async { YouTube.libraryRecentActivity() }
+                        val homeDeferred = async { YouTube.home() }
+                        
+                        val recentResult = recentDeferred.await()
+                        if (recentResult.isSuccess) {
+                            val items = recentResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                            seedTracks.addAll(items.take(2)) // Optimized from take(3) to take(2) to speed up load time
                         }
+                        if (seedTracks.isEmpty()) {
+                            val historyResult = YouTube.musicHistory()
+                            if (historyResult.isSuccess) {
+                                val historySongs = historyResult.getOrNull()?.sections?.flatMap { it.songs }.orEmpty()
+                                seedTracks.addAll(historySongs.distinctBy { it.id }.take(2)) // Optimized to take(2)
+                            }
+                        }
+                        if (seedTracks.isNotEmpty()) {
+                            val jobs = seedTracks.map { seed ->
+                                async {
+                                    val nextResult = YouTube.next(WatchEndpoint(videoId = seed.id))
+                                    if (nextResult.isSuccess) {
+                                        nextResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                                    } else emptyList()
+                                }
+                            }
+                            val recommendedLists = jobs.awaitAll()
+                            recommendedLists.forEach { songs.addAll(it) }
+                        }
+                        val homeResult = homeDeferred.await()
+                        if (homeResult.isSuccess) {
+                            val homeSongs = homeResult.getOrNull()?.sections.orEmpty().flatMap { section ->
+                                section.items.filterIsInstance<SongItem>()
+                            }
+                            songs.addAll(homeSongs)
+                        }
+                        val seedIds = seedTracks.map { it.id }.toSet()
+                        var finalPersonalSongs = songs.distinctBy { it.id }
+                            .filter { it.id !in seedIds }
+                            .shuffled()
+                            .take(10)
+                        if (finalPersonalSongs.size < 10) {
+                            val remainingNeeded = 10 - finalPersonalSongs.size
+                            val extraSongs = songs.distinctBy { it.id }
+                                .filter { it.id !in finalPersonalSongs.map { s -> s.id } }
+                                .take(remainingNeeded)
+                            finalPersonalSongs = finalPersonalSongs + extraSongs
+                        }
+                        songs.clear()
+                        songs.addAll(finalPersonalSongs.take(10))
+                    } else {
+                        val chartsResult = YouTube.getChartsPage()
+                        if (chartsResult.isSuccess) {
+                            val chartSongs = chartsResult.getOrNull()?.sections?.flatMap { section ->
+                                section.items.filterIsInstance<SongItem>()
+                            }.orEmpty()
+                            songs.addAll(chartSongs)
+                        }
+                        if (songs.size < 15) {
+                            val searchResult = YouTube.search("trending music billboard charts", YouTube.SearchFilter.FILTER_SONG)
+                            if (searchResult.isSuccess) {
+                                val searchSongs = searchResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                                songs.addAll(searchSongs)
+                            }
+                        }
+                        val finalSignedOutSongs = songs.distinctBy { it.id }.shuffled().take(10)
+                        songs.clear()
+                        songs.addAll(finalSignedOutSongs)
                     }
-                    val finalSignedOutSongs = songs.distinctBy { it.id }.shuffled().take(10)
-                    songs.clear()
-                    songs.addAll(finalSignedOutSongs)
                 }
                 withContext(Dispatchers.Main) {
                     homeDailyDiscoverSongs = songs
@@ -787,7 +831,7 @@ fun MainPlayerScreen(
         }
     }
 
-    LaunchedEffect(userSignedIn) {
+    LaunchedEffect(userSignedIn, localHistorySize) {
         isHomeCommunityLoading = true
         homeCommunityPlaylists = emptyList()
         withContext(Dispatchers.IO) {
@@ -798,37 +842,17 @@ fun MainPlayerScreen(
                 val favoriteArtists = mutableSetOf<String>()
                 val recentSongIds = mutableSetOf<String>()
 
-                if (userSignedIn) {
-                    // Personalized: Extract favorite artists & recent song IDs from user's actual recent activity
-                    val recentResult = YouTube.libraryRecentActivity()
-                    if (recentResult.isSuccess) {
-                        val items = recentResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
-                        items.forEach { song ->
-                            recentSongIds.add(song.id)
-                            song.artists.forEach { artist ->
-                                if (artist.name.isNotBlank()) {
-                                    favoriteArtists.add(artist.name.lowercase().trim())
-                                }
+                val localHistory = SessionManager.getLocalHistory(context)
+                if (localHistory.size >= 3) {
+                    localHistory.forEach { song ->
+                        recentSongIds.add(song.id)
+                        song.artists.forEach { artist ->
+                            if (artist.name.isNotBlank()) {
+                                favoriteArtists.add(artist.name.lowercase().trim())
                             }
                         }
                     }
 
-                    // Supplement with Home recommended feeds
-                    val homeResult = YouTube.home()
-                    if (homeResult.isSuccess) {
-                        val homeSongs = homeResult.getOrNull()?.sections.orEmpty().flatMap { section ->
-                            section.items.filterIsInstance<SongItem>()
-                        }
-                        homeSongs.forEach { song ->
-                            song.artists.forEach { artist ->
-                                if (artist.name.isNotBlank()) {
-                                    favoriteArtists.add(artist.name.lowercase().trim())
-                                }
-                            }
-                        }
-                    }
-
-                    // Broader queries based on user's actual listening history for higher variety candidate retrieval (fetched concurrently)
                     val queriesToRun = favoriteArtists.take(3).ifEmpty { listOf("Chill Mix", "Today's Hits") }
                     val searchJobs = queriesToRun.map { query ->
                         async {
@@ -841,10 +865,7 @@ fun MainPlayerScreen(
                     val searchResultsList = searchJobs.awaitAll()
                     searchResultsList.forEach { fetchedPlaylists.addAll(it) }
 
-                    // Retrieve unique candidate playlists up to 3 (Optimized from 5 to 3 to reduce network load/latency)
                     val candidates = fetchedPlaylists.distinctBy { it.id }.take(3)
-
-                    // Fetch candidate playlist details concurrently using async coroutines
                     val jobs = candidates.map { playlist ->
                         async {
                             val pageResult = YouTube.playlist(playlist.id)
@@ -858,44 +879,112 @@ fun MainPlayerScreen(
                     }
                     val fetchedCandidates = jobs.awaitAll().filterNotNull()
 
-                    // Compute algorithmic relevance score based on listening history & collaborative niche listener factors
                     val rankedCandidates = fetchedCandidates.map { data ->
                         val score = calculateRelevanceScore(data.playlist, data.songs, favoriteArtists, recentSongIds)
                         data to score
                     }.sortedByDescending { it.second }.map { it.first }
 
-                    // Take all ranked candidate playlists
                     playlistDataList.addAll(rankedCandidates)
-
                 } else {
-                    // Signed-out flow: fetch general popular community playlists (fetched concurrently)
-                    val generalQueries = listOf("Pop Hits Mix", "Chill Acoustic", "Lofi Study Beats")
-                    val searchJobs = generalQueries.map { query ->
-                        async {
-                            val searchResult = YouTube.search(query, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST)
-                            if (searchResult.isSuccess) {
-                                searchResult.getOrNull()?.items?.filterIsInstance<PlaylistItem>().orEmpty()
-                            } else emptyList()
+                    if (userSignedIn) {
+                        // Personalized: Extract favorite artists & recent song IDs from user's actual recent activity
+                        val recentResult = YouTube.libraryRecentActivity()
+                        if (recentResult.isSuccess) {
+                            val items = recentResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                            items.forEach { song ->
+                                recentSongIds.add(song.id)
+                                song.artists.forEach { artist ->
+                                    if (artist.name.isNotBlank()) {
+                                        favoriteArtists.add(artist.name.lowercase().trim())
+                                    }
+                                }
+                            }
                         }
-                    }
-                    val searchResultsList = searchJobs.awaitAll()
-                    searchResultsList.forEach { fetchedPlaylists.addAll(it) }
 
-                    // Retrieve unique candidate playlists up to 3 (Optimized from 5 to 3)
-                    val candidates = fetchedPlaylists.distinctBy { it.id }.take(3)
-                    val jobs = candidates.map { playlist ->
-                        async {
-                            val pageResult = YouTube.playlist(playlist.id)
-                            if (pageResult.isSuccess) {
-                                val page = pageResult.getOrNull()
-                                if (page != null && page.songs.isNotEmpty()) {
-                                    CommunityPlaylistData(playlist = playlist, songs = page.songs)
-                                } else null
-                            } else null
+                        // Supplement with Home recommended feeds
+                        val homeResult = YouTube.home()
+                        if (homeResult.isSuccess) {
+                            val homeSongs = homeResult.getOrNull()?.sections.orEmpty().flatMap { section ->
+                                section.items.filterIsInstance<SongItem>()
+                            }
+                            homeSongs.forEach { song ->
+                                song.artists.forEach { artist ->
+                                    if (artist.name.isNotBlank()) {
+                                        favoriteArtists.add(artist.name.lowercase().trim())
+                                    }
+                                }
+                            }
                         }
+
+                        // Broader queries based on user's actual listening history for higher variety candidate retrieval (fetched concurrently)
+                        val queriesToRun = favoriteArtists.take(3).ifEmpty { listOf("Chill Mix", "Today's Hits") }
+                        val searchJobs = queriesToRun.map { query ->
+                            async {
+                                val searchResult = YouTube.search(query, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST)
+                                if (searchResult.isSuccess) {
+                                    searchResult.getOrNull()?.items?.filterIsInstance<PlaylistItem>().orEmpty()
+                                } else emptyList()
+                            }
+                        }
+                        val searchResultsList = searchJobs.awaitAll()
+                        searchResultsList.forEach { fetchedPlaylists.addAll(it) }
+
+                        // Retrieve unique candidate playlists up to 3 (Optimized from 5 to 3 to reduce network load/latency)
+                        val candidates = fetchedPlaylists.distinctBy { it.id }.take(3)
+
+                        // Fetch candidate playlist details concurrently using async coroutines
+                        val jobs = candidates.map { playlist ->
+                            async {
+                                val pageResult = YouTube.playlist(playlist.id)
+                                if (pageResult.isSuccess) {
+                                    val page = pageResult.getOrNull()
+                                    if (page != null && page.songs.isNotEmpty()) {
+                                        CommunityPlaylistData(playlist = playlist, songs = page.songs)
+                                    } else null
+                                } else null
+                            }
+                        }
+                        val fetchedCandidates = jobs.awaitAll().filterNotNull()
+
+                        // Compute algorithmic relevance score based on listening history & collaborative niche listener factors
+                        val rankedCandidates = fetchedCandidates.map { data ->
+                            val score = calculateRelevanceScore(data.playlist, data.songs, favoriteArtists, recentSongIds)
+                            data to score
+                        }.sortedByDescending { it.second }.map { it.first }
+
+                        // Take all ranked candidate playlists
+                        playlistDataList.addAll(rankedCandidates)
+
+                    } else {
+                        // Signed-out flow: fetch general popular community playlists (fetched concurrently)
+                        val generalQueries = listOf("Pop Hits Mix", "Chill Acoustic", "Lofi Study Beats")
+                        val searchJobs = generalQueries.map { query ->
+                            async {
+                                val searchResult = YouTube.search(query, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST)
+                                if (searchResult.isSuccess) {
+                                    searchResult.getOrNull()?.items?.filterIsInstance<PlaylistItem>().orEmpty()
+                                } else emptyList()
+                            }
+                        }
+                        val searchResultsList = searchJobs.awaitAll()
+                        searchResultsList.forEach { fetchedPlaylists.addAll(it) }
+
+                        // Retrieve unique candidate playlists up to 3 (Optimized from 5 to 3)
+                        val candidates = fetchedPlaylists.distinctBy { it.id }.take(3)
+                        val jobs = candidates.map { playlist ->
+                            async {
+                                val pageResult = YouTube.playlist(playlist.id)
+                                if (pageResult.isSuccess) {
+                                    val page = pageResult.getOrNull()
+                                    if (page != null && page.songs.isNotEmpty()) {
+                                        CommunityPlaylistData(playlist = playlist, songs = page.songs)
+                                    } else null
+                                } else null
+                            }
+                        }
+                        val fetchedCandidates = jobs.awaitAll().filterNotNull()
+                        playlistDataList.addAll(fetchedCandidates)
                     }
-                    val fetchedCandidates = jobs.awaitAll().filterNotNull()
-                    playlistDataList.addAll(fetchedCandidates)
                 }
 
                 withContext(Dispatchers.Main) {
@@ -911,54 +1000,96 @@ fun MainPlayerScreen(
         }
     }
 
-    LaunchedEffect(userSignedIn) {
+    LaunchedEffect(userSignedIn, localHistorySize) {
         isHomeSpeedDialLoading = true
         homeSpeedDialSongs = emptyList()
         withContext(Dispatchers.IO) {
             try {
                 val songs = mutableListOf<SongItem>()
-                if (userSignedIn) {
-                    // Try to load user's actual recent activity
-                    val recentResult = YouTube.libraryRecentActivity()
-                    if (recentResult.isSuccess) {
-                        val recentSongs = recentResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
-                        songs.addAll(recentSongs)
-                    }
-                    
-                    // Supplement with user's Home recommended feeds (Listen again, Quick picks, etc.)
-                    val homeResult = YouTube.home()
-                    if (homeResult.isSuccess) {
-                        val homeSections = homeResult.getOrNull()?.sections.orEmpty()
-                        val homeSongs = homeSections.flatMap { section ->
-                            section.items.filterIsInstance<SongItem>()
-                        }
-                        songs.addAll(homeSongs)
-                    }
-                    
-                    // Fallback to liked playlist LM songs if we are short on tracks
-                    if (songs.distinctBy { it.id }.size < 45) {
-                        val likedPlaylistResult = YouTube.playlist("LM")
-                        if (likedPlaylistResult.isSuccess) {
-                            val likedSongs = likedPlaylistResult.getOrNull()?.songs.orEmpty()
-                            songs.addAll(likedSongs)
+                val localHistory = SessionManager.getLocalHistory(context)
+                if (localHistory.size >= 3) {
+                    val seeds = localHistory.distinctBy { it.id }.take(10)
+                    val jobs = seeds.map { seed ->
+                        async {
+                            val nextResult = YouTube.next(WatchEndpoint(videoId = seed.id))
+                            if (nextResult.isSuccess) {
+                                nextResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                            } else emptyList()
                         }
                     }
+                    val recommendedLists = jobs.awaitAll()
+                    
+                    val combinedSongs = mutableListOf<SongItem>()
+                    combinedSongs.addAll(localHistory.distinctBy { it.id })
+                    
+                    recommendedLists.flatten().distinctBy { it.id }.forEach { song ->
+                        if (song.id !in combinedSongs.map { i -> i.id }) {
+                            combinedSongs.add(song)
+                        }
+                    }
+                    
+                    val localArtists = localHistory.flatMap { it.artists }.map { it.name }.filter { it.isNotBlank() }.distinct()
+                    if (combinedSongs.size < 45 && localArtists.isNotEmpty()) {
+                        val searchJobs = localArtists.take(3).map { artist ->
+                            async {
+                                val res = YouTube.search(artist, YouTube.SearchFilter.FILTER_SONG)
+                                if (res.isSuccess) {
+                                    res.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                                } else emptyList()
+                            }
+                        }
+                        val searchResults = searchJobs.awaitAll().flatten()
+                        searchResults.forEach { song ->
+                            if (song.id !in combinedSongs.map { i -> i.id }) {
+                                combinedSongs.add(song)
+                            }
+                        }
+                    }
+                    songs.addAll(combinedSongs)
                 } else {
-                    // Unsigned-in flows: grab charts and public home recommendations
-                    val homeResult = YouTube.home()
-                    if (homeResult.isSuccess) {
-                        val homeSongs = homeResult.getOrNull()?.sections.orEmpty().flatMap { section ->
-                            section.items.filterIsInstance<SongItem>()
+                    if (userSignedIn) {
+                        // Try to load user's actual recent activity
+                        val recentResult = YouTube.libraryRecentActivity()
+                        if (recentResult.isSuccess) {
+                            val recentSongs = recentResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                            songs.addAll(recentSongs)
                         }
-                        songs.addAll(homeSongs)
-                    }
-                    if (songs.distinctBy { it.id }.size < 45) {
-                        val chartsResult = YouTube.getChartsPage()
-                        if (chartsResult.isSuccess) {
-                            val chartSongs = chartsResult.getOrNull()?.sections.orEmpty().flatMap { section ->
+                        
+                        // Supplement with user's Home recommended feeds (Listen again, Quick picks, etc.)
+                        val homeResult = YouTube.home()
+                        if (homeResult.isSuccess) {
+                            val homeSections = homeResult.getOrNull()?.sections.orEmpty()
+                            val homeSongs = homeSections.flatMap { section ->
                                 section.items.filterIsInstance<SongItem>()
                             }
-                            songs.addAll(chartSongs)
+                            songs.addAll(homeSongs)
+                        }
+                        
+                        // Fallback to liked playlist LM songs if we are short on tracks
+                        if (songs.distinctBy { it.id }.size < 45) {
+                            val likedPlaylistResult = YouTube.playlist("LM")
+                            if (likedPlaylistResult.isSuccess) {
+                                val likedSongs = likedPlaylistResult.getOrNull()?.songs.orEmpty()
+                                songs.addAll(likedSongs)
+                            }
+                        }
+                    } else {
+                        // Unsigned-in flows: grab charts and public home recommendations
+                        val homeResult = YouTube.home()
+                        if (homeResult.isSuccess) {
+                            val homeSongs = homeResult.getOrNull()?.sections.orEmpty().flatMap { section ->
+                                section.items.filterIsInstance<SongItem>()
+                            }
+                            songs.addAll(homeSongs)
+                        }
+                        if (songs.distinctBy { it.id }.size < 45) {
+                            val chartsResult = YouTube.getChartsPage()
+                            if (chartsResult.isSuccess) {
+                                val chartSongs = chartsResult.getOrNull()?.sections.orEmpty().flatMap { section ->
+                                    section.items.filterIsInstance<SongItem>()
+                                }
+                                songs.addAll(chartSongs)
+                            }
                         }
                     }
                 }
