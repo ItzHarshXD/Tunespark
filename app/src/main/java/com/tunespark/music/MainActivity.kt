@@ -266,16 +266,20 @@ fun MainPlayerScreen(
 
     var localHistorySize by remember { mutableStateOf(SessionManager.getLocalHistory(context).size) }
 
-    LaunchedEffect(currentSongTitle, currentSongArtist, isPlaying, playbackState) {
-        if (isPlaying && playbackState == Player.STATE_READY &&
-            currentSongTitle != "No Track Loaded" &&
+    LaunchedEffect(currentSongTitle, currentSongArtist) {
+        if (currentSongTitle != "No Track Loaded" &&
             currentSongTitle.isNotBlank() &&
             !currentSongTitle.startsWith("AI DJ") &&
             !currentSongTitle.startsWith("commentary_") &&
             currentSongArtist != "TuneSpark AI DJ") {
             
-            // Wait for 10 seconds of continuous playback
-            kotlinx.coroutines.delay(10000)
+            var secondsPlayed = 0
+            while (secondsPlayed < 10) {
+                kotlinx.coroutines.delay(1000)
+                if (isPlaying && playbackState == Player.STATE_READY) {
+                    secondsPlayed++
+                }
+            }
             
             // Re-verify that it is still playing the same song and in READY state
             val currentMediaItem = exoPlayer.currentMediaItem
@@ -819,7 +823,7 @@ fun MainPlayerScreen(
                 songs.addAll(localSongs)
                 
                 withContext(Dispatchers.Main) {
-                    homeRecentsSongs = songs.distinctBy { it.id }.take(10)
+                    homeRecentsSongs = songs.take(10)
                     isHomeRecentsLoading = false
                 }
             } catch (e: Exception) {

@@ -115,7 +115,14 @@ object SessionManager {
         try {
             val jsonArray = JSONArray(historyStr)
             
-            // Remove existing duplicate of this song to move it to the top/recent position
+            // If the song is identical to the most recent one (at index 0), do not record it consecutively
+            if (jsonArray.length() > 0) {
+                val lastSong = jsonArray.getJSONObject(0)
+                if (lastSong.getString("id") == song.id) {
+                    return // skip adding consecutively
+                }
+            }
+            
             val newArray = JSONArray()
             
             // Add the new song at the top/index 0
@@ -135,11 +142,10 @@ object SessionManager {
             }
             newArray.put(newSongJson)
             
+            // Append all previous items (do not remove existing duplicates!)
             for (i in 0 until jsonArray.length()) {
                 val item = jsonArray.getJSONObject(i)
-                if (item.getString("id") != song.id) {
-                    newArray.put(item)
-                }
+                newArray.put(item)
             }
             
             // Limit local history size to 1000 songs to prevent SharedPreferences from growing too large

@@ -41,6 +41,11 @@ class PlaybackService : MediaSessionService() {
         lastCommentaryCheckedVideoId = null
     }
 
+    fun clearSeededVideoIds() {
+        lastSeededVideoId = null
+        seedingVideoIds.clear()
+    }
+
     companion object {
         private var _isPlaylistMode = false
         var isPlaylistMode: Boolean
@@ -49,6 +54,8 @@ class PlaybackService : MediaSessionService() {
                 _isPlaylistMode = value
                 if (value) {
                     instance?.resetPlaylistCounter()
+                } else {
+                    instance?.clearSeededVideoIds()
                 }
             }
 
