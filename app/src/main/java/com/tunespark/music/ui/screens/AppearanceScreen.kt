@@ -123,15 +123,17 @@ fun AppearanceScreen(
                         .border(1.5.dp, textColor, CircleShape)
                         .rotate(-45f)
                 ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawRect(
-                            color = Color.White,
-                            size = androidx.compose.ui.geometry.Size(size.width, size.height / 2f)
-                        )
-                    }
-                }
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawRect(
+                    color = Color.White,
+                    size = androidx.compose.ui.geometry.Size(size.width, size.height / 2f)
+                )
             }
         }
+    }
+    
+    Spacer(modifier = Modifier.height(110.dp))
+}
     }
 }
 

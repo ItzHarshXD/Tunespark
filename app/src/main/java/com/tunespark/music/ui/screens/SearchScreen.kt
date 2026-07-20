@@ -182,6 +182,7 @@ fun SearchScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
+            contentPadding = PaddingValues(bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (searchQuery.isNotEmpty() && suggestions.isNotEmpty()) {

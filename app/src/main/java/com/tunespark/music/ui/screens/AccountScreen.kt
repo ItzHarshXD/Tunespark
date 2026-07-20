@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -85,6 +87,7 @@ fun AccountScreen(
             modifier = modifier
                 .fillMaxSize()
                 .background(backgroundColor)
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.Start
         ) {
@@ -200,7 +203,7 @@ fun AccountScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.weight(1f))
+                        Spacer(modifier = Modifier.height(32.dp))
 
                         Button(
                             onClick = {
@@ -212,10 +215,12 @@ fun AccountScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000)),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 16.dp)
+                                .height(50.dp)
                         ) {
                             Text("Sign Out", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
+                        
+                        Spacer(modifier = Modifier.height(110.dp))
                     }
                 } else {
                     Column(
@@ -257,17 +262,19 @@ fun AccountScreen(
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
 
-                        Spacer(modifier = Modifier.weight(1f))
+                        Spacer(modifier = Modifier.height(32.dp))
 
                         Button(
                             onClick = { showWebView = true },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000)),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 16.dp)
+                                .height(50.dp)
                         ) {
                             Text("Sign In with YouTube Music", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
+                        
+                        Spacer(modifier = Modifier.height(110.dp))
                     }
                 }
             }

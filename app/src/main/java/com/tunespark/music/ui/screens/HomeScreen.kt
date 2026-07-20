@@ -281,13 +281,13 @@ fun HomeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = 8.dp, bottom = 12.dp)
+                    .padding(top = 8.dp, bottom = 0.dp)
             ) {
                 // Scrollable container for everything except BottomDock
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
                     onRefresh = { handleRefresh() },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     Column(
                         modifier = Modifier
@@ -314,15 +314,20 @@ fun HomeScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                IconButton(
-                                    onClick = {
-                                        playSoundAndHaptic()
-                                        onNavigate(AppScreen.ACCOUNT)
-                                    },
+                                val buttonBg = if (isSystemInDarkTheme()) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+                                val buttonBorder = if (isSystemInDarkTheme()) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.15f)
+
+                                Box(
                                     modifier = Modifier
                                         .size(40.dp)
-                                        .background(textColor.copy(alpha = 0.1f), CircleShape)
                                         .clip(CircleShape)
+                                        .background(buttonBg)
+                                        .border(1.dp, buttonBorder, CircleShape)
+                                        .clickable {
+                                            playSoundAndHaptic()
+                                            onNavigate(AppScreen.ACCOUNT)
+                                        },
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.AccountCircle,
@@ -332,15 +337,17 @@ fun HomeScreen(
                                     )
                                 }
 
-                                IconButton(
-                                    onClick = {
-                                        playSoundAndHaptic()
-                                        onNavigate(AppScreen.SETTINGS)
-                                    },
+                                Box(
                                     modifier = Modifier
                                         .size(40.dp)
-                                        .background(textColor.copy(alpha = 0.1f), CircleShape)
                                         .clip(CircleShape)
+                                        .background(buttonBg)
+                                        .border(1.dp, buttonBorder, CircleShape)
+                                        .clickable {
+                                            playSoundAndHaptic()
+                                            onNavigate(AppScreen.SETTINGS)
+                                        },
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Settings,
@@ -356,46 +363,55 @@ fun HomeScreen(
 
                         // Hero block
                         Column(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 20.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
                                 text = timeString,
-                                fontSize = 68.sp,
-                                lineHeight = 68.sp,
-                                fontWeight = FontWeight.Black,
+                                fontSize = 76.sp,
+                                lineHeight = 84.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = (-2).sp,
                                 color = textColor,
-                                fontFamily = FontFamily.SansSerif,
                                 textAlign = TextAlign.Center
                             )
 
                             if (locationEnabled) {
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(18.dp))
 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
+                                Surface(
+                                    shape = RoundedCornerShape(100.dp),
+                                    color = textColor,
+                                    contentColor = textColor,
+                                    shadowElevation = 6.dp
                                 ) {
-                                    Text(
-                                        text = weatherInfo?.emoji ?: "☁️",
-                                        fontSize = 30.sp,
-                                        modifier = Modifier.padding(end = 10.dp)
-                                    )
-
-                                    Column(
-                                        horizontalAlignment = Alignment.Start
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "${weatherInfo?.temperature?.toInt() ?: 35}°C",
-                                            fontSize = 22.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = textColor
+                                            text = weatherInfo?.emoji ?: "☁️",
+                                            fontSize = 28.sp
                                         )
-                                        Text(
-                                            text = weatherInfo?.description ?: "Cloudy",
-                                            fontSize = 13.sp,
-                                            color = textColor.copy(alpha = 0.55f)
-                                        )
+
+//                                        Spacer(modifier = Modifier.width(5.dp))
+
+                                        Column {
+                                            Text(
+                                                text = "${weatherInfo?.temperature?.toInt() ?: 35}°",
+                                                fontSize = 20.sp,
+                                                color = backgroundColor,
+                                                fontWeight = FontWeight.Bold
+                                            )
+
+                                            Text(
+                                                text = weatherInfo?.description ?: "Cloudy",
+                                                fontSize = 12.sp,
+                                                color = backgroundColor.copy(alpha = 0.60f)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -439,20 +455,9 @@ fun HomeScreen(
                                 onPlaylistClick(data)
                             }
                         )
+                        Spacer(modifier = Modifier.height(96.dp))
                     }
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                BottomDock(
-                    isTrackLoaded = isTrackLoaded,
-                    currentSongTitle = currentSongTitle,
-                    currentSongArtist = currentSongArtist,
-                    currentSongArtwork = currentSongArtwork,
-                    primaryColor = primaryColor,
-                    onPrimaryColor = onPrimaryColor,
-                    onNavigate = onNavigate
-                )
             }
         }
     }
@@ -737,7 +742,7 @@ private fun PlayingContent(
 }
 
 @Composable
-private fun BottomDock(
+fun BottomDock(
     isTrackLoaded: Boolean,
     currentSongTitle: String,
     currentSongArtist: String,
@@ -746,6 +751,14 @@ private fun BottomDock(
     onPrimaryColor: Color,
     onNavigate: (AppScreen) -> Unit
 ) {
+    val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val playSoundAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
     if (isTrackLoaded) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -757,7 +770,10 @@ private fun BottomDock(
                 contentDescription = "Search",
                 primaryColor = primaryColor,
                 onPrimaryColor = onPrimaryColor
-            ) { onNavigate(AppScreen.SEARCH) }
+            ) {
+                playSoundAndHaptic()
+                onNavigate(AppScreen.SEARCH)
+            }
 
             Row(
                 modifier = Modifier
@@ -765,7 +781,10 @@ private fun BottomDock(
                     .weight(1f)
                     .clip(RoundedCornerShape(28.dp))
                     .background(primaryColor)
-                    .clickable { onNavigate(AppScreen.RADIO) }
+                    .clickable {
+                        playSoundAndHaptic()
+                        onNavigate(AppScreen.RADIO)
+                    }
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -816,7 +835,10 @@ private fun BottomDock(
                 contentDescription = "Playlist",
                 primaryColor = primaryColor,
                 onPrimaryColor = onPrimaryColor
-            ) { onNavigate(AppScreen.PLAYLISTS) }
+            ) {
+                playSoundAndHaptic()
+                onNavigate(AppScreen.PLAYLISTS)
+            }
         }
     } else {
         Row(
@@ -830,6 +852,7 @@ private fun BottomDock(
                 onPrimaryColor = onPrimaryColor,
                 modifier = Modifier.weight(1f)
             ) {
+                playSoundAndHaptic()
                 onNavigate(AppScreen.SEARCH)
             }
 
@@ -840,6 +863,7 @@ private fun BottomDock(
                 onPrimaryColor = onPrimaryColor,
                 modifier = Modifier.weight(1f)
             ) {
+                playSoundAndHaptic()
                 onNavigate(AppScreen.PLAYLISTS)
             }
         }
@@ -1744,12 +1768,23 @@ fun DailyDiscoverCard(
     scale: Float = 1.0f,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val playSoundAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
     Box(
         modifier = Modifier
             .width(260.dp)
             .aspectRatio(1f)
             .clip(RoundedCornerShape(24.dp))
-            .clickable { onClick() }
+            .clickable {
+                playSoundAndHaptic()
+                onClick()
+            }
     ) {
         AsyncImage(
             model = song.thumbnail?.toHighResThumbnail(),
@@ -1910,10 +1945,21 @@ fun RecentsCard(
     textColor: Color,
     onPlaySong: (SongItem) -> Unit
 ) {
+    val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val playSoundAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
     Column(
         modifier = Modifier
             .width(120.dp)
-            .clickable { onPlaySong(song) }
+            .clickable {
+                playSoundAndHaptic()
+                onPlaySong(song)
+            }
     ) {
         AsyncImage(
             model = song.thumbnail,

@@ -647,7 +647,7 @@ fun PlaylistsScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 16.dp),
-                        contentPadding = PaddingValues(bottom = 32.dp)
+                        contentPadding = PaddingValues(bottom = 96.dp)
                     ) {
                     item {
                         Column(
@@ -1079,7 +1079,8 @@ fun PlaylistsScreen(
                         columns = GridCells.Fixed(3),
                         verticalArrangement = Arrangement.spacedBy(24.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 96.dp)
                     ) {
                     items(sortedGridItems) { item ->
                         Column(

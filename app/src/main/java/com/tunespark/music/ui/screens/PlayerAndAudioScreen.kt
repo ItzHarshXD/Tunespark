@@ -164,6 +164,8 @@ fun PlayerAndAudioScreen(
                 textColor = textColor
             )
         }
+        
+        Spacer(modifier = Modifier.height(110.dp))
     }
 }
 
