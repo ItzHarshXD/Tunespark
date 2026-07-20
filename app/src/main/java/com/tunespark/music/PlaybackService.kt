@@ -1,5 +1,6 @@
 package com.tunespark.music
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.widget.Toast
 import androidx.annotation.OptIn
@@ -117,8 +118,19 @@ class PlaybackService : MediaSessionService() {
             }
         })
 
+        val sessionIntent = Intent(this, MainActivity::class.java).apply {
+            action = "com.tunespark.music.action.SHOW_PLAYER"
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            sessionIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         mediaSession = MediaSession.Builder(this, exoPlayer)
             .setCallback(CustomSessionCallback())
+            .setSessionActivity(pendingIntent)
             .build()
     }
 

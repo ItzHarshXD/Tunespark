@@ -6,6 +6,14 @@ import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -45,21 +53,17 @@ fun SettingsScreen(
         )
 
         val settingsItems = listOf(
-            "Appearance",
-            "Account",
-            "AI and Voice",
-            "Commentary",
-            "Player and Audio",
-            "Location",
-            "Updates"
+            "Appearance" to Icons.Default.Palette,
+            "Account" to Icons.Default.AccountCircle,
+            "AI and Voice" to Icons.Default.Mic,
+            "Commentary" to Icons.Default.ChatBubble,
+            "Player and Audio" to Icons.Default.MusicNote,
+            "Location" to Icons.Default.LocationOn,
+            "Updates" to Icons.Default.Info
         )
 
-        settingsItems.forEach { item ->
-            Text(
-                text = item,
-                color = textColor,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Normal,
+        settingsItems.forEach { (item, icon) ->
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
@@ -79,8 +83,23 @@ fun SettingsScreen(
                             onNavigate(destination)
                         }
                     }
-                    .padding(vertical = 16.dp)
-            )
+                    .padding(vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = item,
+                    tint = textColor,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = item,
+                    color = textColor,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Normal
+                )
+            }
         }
     }
 }

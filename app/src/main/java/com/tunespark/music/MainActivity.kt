@@ -1,6 +1,7 @@
 package com.tunespark.music
 
 import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -40,6 +41,13 @@ import kotlinx.coroutines.awaitAll
 
 class MainActivity : ComponentActivity() {
     private var controllerFuture: ListenableFuture<MediaController>? = null
+    var onNewIntentListener: ((Intent) -> Unit)? = null
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        onNewIntentListener?.invoke(intent)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -131,6 +139,29 @@ fun MainPlayerScreen(
     val context = LocalContext.current
 
     var currentScreen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
+
+    DisposableEffect(context) {
+        val activity = context as? MainActivity
+        
+        // 1. Check for cold start action if present
+        val initialIntent = activity?.intent
+        if (initialIntent?.action == "com.tunespark.music.action.SHOW_PLAYER") {
+            currentScreen = AppScreen.RADIO
+            initialIntent.action = null // Clear/consume action
+        }
+        
+        // 2. Set listener for new intents (warm starts)
+        activity?.onNewIntentListener = { intent ->
+            if (intent.action == "com.tunespark.music.action.SHOW_PLAYER") {
+                currentScreen = AppScreen.RADIO
+                intent.action = null // Clear/consume action
+            }
+        }
+        
+        onDispose {
+            activity?.onNewIntentListener = null
+        }
+    }
     var accountInfo by remember { mutableStateOf<com.metrolist.innertube.models.AccountInfo?>(SessionManager.getCachedAccountInfo(context)) }
 
     // State variables for initial playlist navigation to Playlists screen
@@ -669,6 +700,8 @@ fun MainPlayerScreen(
     // Hoisted HomeScreen states
     val userSignedIn = remember(accountInfo) { SessionManager.isUserSignedIn(context) }
 
+    var homeRefreshTrigger by remember { mutableStateOf(0) }
+
     var homeSpeedDialSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isHomeSpeedDialLoading by remember { mutableStateOf(false) }
 
@@ -681,7 +714,7 @@ fun MainPlayerScreen(
     var homeDailyDiscoverSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isHomeDailyDiscoverLoading by remember { mutableStateOf(false) }
 
-    LaunchedEffect(userSignedIn, localHistorySize) {
+    LaunchedEffect(userSignedIn, localHistorySize, homeRefreshTrigger) {
         isHomeDailyDiscoverLoading = true
         homeDailyDiscoverSongs = emptyList()
         withContext(Dispatchers.IO) {
@@ -812,7 +845,7 @@ fun MainPlayerScreen(
         }
     }
 
-    LaunchedEffect(userSignedIn, currentSongTitle) {
+    LaunchedEffect(userSignedIn, currentSongTitle, homeRefreshTrigger) {
         isHomeRecentsLoading = true
         homeRecentsSongs = emptyList()
         withContext(Dispatchers.IO) {
@@ -835,7 +868,7 @@ fun MainPlayerScreen(
         }
     }
 
-    LaunchedEffect(userSignedIn, localHistorySize) {
+    LaunchedEffect(userSignedIn, localHistorySize, homeRefreshTrigger) {
         isHomeCommunityLoading = true
         homeCommunityPlaylists = emptyList()
         withContext(Dispatchers.IO) {
@@ -1004,7 +1037,7 @@ fun MainPlayerScreen(
         }
     }
 
-    LaunchedEffect(userSignedIn, localHistorySize) {
+    LaunchedEffect(userSignedIn, localHistorySize, homeRefreshTrigger) {
         isHomeSpeedDialLoading = true
         homeSpeedDialSongs = emptyList()
         withContext(Dispatchers.IO) {
@@ -1164,6 +1197,7 @@ fun MainPlayerScreen(
                         initialPlaylistSongs = data.songs
                         currentScreen = AppScreen.PLAYLISTS
                     },
+                    onRefresh = { homeRefreshTrigger++ },
                     speedDialSongs = homeSpeedDialSongs,
                     isSpeedDialLoading = isHomeSpeedDialLoading,
                     communityPlaylists = homeCommunityPlaylists,

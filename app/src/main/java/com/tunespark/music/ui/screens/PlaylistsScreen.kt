@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import android.content.Context
@@ -53,6 +54,7 @@ import com.metrolist.innertube.models.response.*
 import com.tunespark.music.AppScreen
 import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.ktor.client.call.body
@@ -98,6 +100,18 @@ fun PlaylistsScreen(
     }
 
     var selectedTab by remember { mutableStateOf("Playlists") }
+
+    var isRefreshing by remember { mutableStateOf(false) }
+    var playlistsRefreshTrigger by remember { mutableStateOf(0) }
+
+    val handleRefresh = {
+        isRefreshing = true
+        coroutineScope.launch {
+            playlistsRefreshTrigger++
+            delay(1500)
+            isRefreshing = false
+        }
+    }
 
     // Sorting parameters persistence
     val sharedPrefs = remember { context.getSharedPreferences("tunespark_playlists_prefs", Context.MODE_PRIVATE) }
@@ -197,7 +211,7 @@ fun PlaylistsScreen(
         }
     }
 
-    LaunchedEffect(selectedTab) {
+    LaunchedEffect(selectedTab, playlistsRefreshTrigger) {
         val userSignedIn = SessionManager.isUserSignedIn(context)
         if (!userSignedIn) {
             gridItems = when (selectedTab) {
@@ -395,11 +409,11 @@ fun PlaylistsScreen(
         }
     }
 
-    LaunchedEffect(activePlaylistId) {
+    LaunchedEffect(activePlaylistId, playlistsRefreshTrigger) {
         val playlistId = activePlaylistId ?: return@LaunchedEffect
         
         // If we already have the songs from the initial playlist, don't clear or reload them
-        if (playlistId == initialPlaylistId && playlistSongs.isNotEmpty()) {
+        if (playlistsRefreshTrigger == 0 && playlistId == initialPlaylistId && playlistSongs.isNotEmpty()) {
             return@LaunchedEffect
         }
         
@@ -624,12 +638,17 @@ fun PlaylistsScreen(
                     }
                 }
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(bottom = 32.dp)
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = { handleRefresh() },
+                    modifier = Modifier.fillMaxSize()
                 ) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        contentPadding = PaddingValues(bottom = 32.dp)
+                    ) {
                     item {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
@@ -925,6 +944,7 @@ fun PlaylistsScreen(
                         }
                     }
                 }
+                }
             }
         }
     } else {
@@ -1050,12 +1070,17 @@ fun PlaylistsScreen(
                     CircularProgressIndicator(color = textColor)
                 }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    verticalArrangement = Arrangement.spacedBy(24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = { handleRefresh() },
                     modifier = Modifier.weight(1f)
                 ) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        verticalArrangement = Arrangement.spacedBy(24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
                     items(sortedGridItems) { item ->
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -1092,6 +1117,7 @@ fun PlaylistsScreen(
                             Text(text = item.subtitle, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                         }
                     }
+                }
                 }
             }
         }
