@@ -228,7 +228,10 @@ fun LocationScreen(
                     locationEnabled = newValue
                     sharedPrefs.edit().putBoolean("location_enabled", newValue).apply()
                 }
-                .padding(vertical = 12.dp),
+                .padding(
+                    horizontal = 10.dp,
+                    vertical = 10.dp
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -239,12 +242,14 @@ fun LocationScreen(
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
+
                 Text(
                     text = "Toggle weather and location services inside the app",
                     color = Color.Gray,
                     fontSize = 14.sp
                 )
             }
+
             SimpleToggleSwitch(
                 checked = locationEnabled,
                 onCheckedChange = {
@@ -276,7 +281,10 @@ fun LocationScreen(
                         autoLocation = newValue
                         sharedPrefs.edit().putBoolean("auto_location", newValue).apply()
                     }
-                    .padding(vertical = 12.dp),
+                    .padding(
+                        horizontal = 10.dp,
+                        vertical = 10.dp
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -287,12 +295,14 @@ fun LocationScreen(
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
+
                     Text(
                         text = "Fetch device GPS automatically",
                         color = Color.Gray,
                         fontSize = 14.sp
                     )
                 }
+
                 SimpleToggleSwitch(
                     checked = autoLocation,
                     onCheckedChange = {
@@ -346,8 +356,10 @@ fun LocationScreen(
                         focusedLabelColor = primaryColor,
                         unfocusedLabelColor = Color.Gray
                     ),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp),
+                    shape = RoundedCornerShape(30.dp)
                 )
 
                 // DROPDOWN AUTO-SUGGESTIONS FROM GLOBAL GEOCODER

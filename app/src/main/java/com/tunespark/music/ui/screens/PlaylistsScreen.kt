@@ -541,14 +541,14 @@ fun PlaylistsScreen(
                                 searchQuery = ""
                             },
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(60.dp)
                                 .background(textColor, CircleShape)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "Back",
                                 tint = backgroundColor,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
@@ -567,7 +567,8 @@ fun PlaylistsScreen(
                                 focusedTextColor = textColor,
                                 unfocusedTextColor = textColor
                             ),
-                            modifier = Modifier.weight(1f)
+                            shape = RoundedCornerShape(30.dp),
+                            modifier = Modifier.weight(1f).height(60.dp)
                         )
 
                         if (searchQuery.isNotEmpty()) {
@@ -599,14 +600,14 @@ fun PlaylistsScreen(
                                 playlistSongs = emptyList()
                             },
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(60.dp)
                                 .background(textColor, CircleShape)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "Back",
                                 tint = backgroundColor,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
@@ -756,7 +757,7 @@ fun PlaylistsScreen(
                                             onNavigate(AppScreen.RADIO)
                                         }
                                     },
-                                    shape = RoundedCornerShape(24.dp),
+                                    shape = RoundedCornerShape(30.dp),
                                     contentPadding = PaddingValues(horizontal = 16.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = textColor,
@@ -764,7 +765,7 @@ fun PlaylistsScreen(
                                     ),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(48.dp)
+                                        .height(60.dp)
                                 ) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
@@ -780,7 +781,7 @@ fun PlaylistsScreen(
                                             onNavigate(AppScreen.RADIO)
                                         }
                                     },
-                                    shape = RoundedCornerShape(24.dp),
+                                    shape = RoundedCornerShape(30.dp),
                                     contentPadding = PaddingValues(horizontal = 16.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = Color.Gray.copy(alpha = 0.2f),
@@ -788,7 +789,7 @@ fun PlaylistsScreen(
                                     ),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(48.dp)
+                                        .height(60.dp)
                                 ) {
                                     Icon(Icons.Default.Refresh, contentDescription = "Shuffle", modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
@@ -966,9 +967,9 @@ fun PlaylistsScreen(
                             isSearchActive = false
                             searchQuery = ""
                         },
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(60.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", tint = textColor)
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", tint = textColor, modifier = Modifier.size(24.dp))
                     }
 
                     Spacer(modifier = Modifier.width(8.dp))
@@ -986,7 +987,8 @@ fun PlaylistsScreen(
                             focusedTextColor = textColor,
                             unfocusedTextColor = textColor
                         ),
-                        modifier = Modifier.weight(1f)
+                        shape = RoundedCornerShape(30.dp),
+                        modifier = Modifier.weight(1f).height(60.dp)
                     )
 
                     if (searchQuery.isNotEmpty()) {

@@ -74,28 +74,36 @@ fun PlayerAndAudioScreen(
                 .clickable {
                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
                     val newValue = !keepScreenOn
                     keepScreenOn = newValue
                     SessionManager.saveKeepScreenOn(context, newValue)
                 }
-                .padding(vertical = 12.dp),
+                .padding(
+                    horizontal = 10.dp,
+                    vertical = 10.dp
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
                 Text(
                     text = "Keep screen ON when expanded",
                     color = textColor,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
+                    // No maxLines: title can grow instead of being cut
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
                     text = "The screen will remain awake when the Radio player screen is opened.",
                     color = Color.Gray,
                     fontSize = 14.sp
+                    // No maxLines: description fully wraps on narrow devices
                 )
             }
 
@@ -106,6 +114,7 @@ fun PlayerAndAudioScreen(
                 onCheckedChange = {
                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
                     keepScreenOn = it
                     SessionManager.saveKeepScreenOn(context, it)
                 },
@@ -125,15 +134,21 @@ fun PlayerAndAudioScreen(
                 .clickable {
                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
                     val newValue = !showVisualizer
                     showVisualizer = newValue
                     SessionManager.saveShowVisualizer(context, newValue)
                 }
-                .padding(vertical = 12.dp),
+                .padding(
+                    horizontal = 10.dp,
+                    vertical = 10.dp
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
                 Text(
                     text = "Display visualizer",
                     color = textColor,
@@ -157,6 +172,7 @@ fun PlayerAndAudioScreen(
                 onCheckedChange = {
                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
                     showVisualizer = it
                     SessionManager.saveShowVisualizer(context, it)
                 },

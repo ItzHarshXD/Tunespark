@@ -69,6 +69,7 @@ fun SettingsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .height(60.dp)
                     .clickable {
                         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -85,8 +86,7 @@ fun SettingsScreen(
                         if (destination != null) {
                             onNavigate(destination)
                         }
-                    }
-                    .padding(vertical = 16.dp),
+                    },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(

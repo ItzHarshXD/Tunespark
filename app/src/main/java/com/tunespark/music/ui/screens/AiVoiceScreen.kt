@@ -108,10 +108,10 @@ fun AiVoiceScreen(
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp)
+                    .height(60.dp)
                     .then(
                         if (activeAiTab != "Gemini") {
-                            Modifier.border(1.dp, textColor, RoundedCornerShape(24.dp))
+                            Modifier.border(1.dp, textColor, RoundedCornerShape(30.dp))
                         } else {
                             Modifier
                         }
@@ -120,7 +120,7 @@ fun AiVoiceScreen(
                     containerColor = if (activeAiTab == "Gemini") Color(0xFFFF0000) else Color.Transparent,
                     contentColor = if (activeAiTab == "Gemini") Color.White else textColor
                 ),
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(30.dp)
             ) {
                 Text("Gemini", fontWeight = FontWeight.Bold)
             }
@@ -133,10 +133,10 @@ fun AiVoiceScreen(
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp)
+                    .height(60.dp)
                     .then(
                         if (activeAiTab != "ElevenLabs") {
-                            Modifier.border(1.dp, textColor, RoundedCornerShape(24.dp))
+                            Modifier.border(1.dp, textColor, RoundedCornerShape(30.dp))
                         } else {
                             Modifier
                         }
@@ -145,7 +145,7 @@ fun AiVoiceScreen(
                     containerColor = if (activeAiTab == "ElevenLabs") Color(0xFFFF0000) else Color.Transparent,
                     contentColor = if (activeAiTab == "ElevenLabs") Color.White else textColor
                 ),
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(30.dp)
             ) {
                 Text("ElevenLabs", fontWeight = FontWeight.Bold)
             }
@@ -201,8 +201,10 @@ fun AiVoiceScreen(
                 placeholder = {
                     Text("Paste your Gemini API key here", color = Color.Gray)
                 },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                shape = RoundedCornerShape(30.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
@@ -340,8 +342,10 @@ fun AiVoiceScreen(
                 placeholder = {
                     Text("Paste your ElevenLabs API key here", color = Color.Gray)
                 },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                shape = RoundedCornerShape(30.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
@@ -386,8 +390,10 @@ fun AiVoiceScreen(
                         color = Color.Gray
                     )
                 },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                shape = RoundedCornerShape(30.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
@@ -448,14 +454,14 @@ fun AiVoiceScreen(
             enabled = !isGenerating,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp),
+                .height(60.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = primaryColor,
                 contentColor = onPrimaryColor,
                 disabledContainerColor = Color.Gray,
                 disabledContentColor = Color.White
             ),
-            shape = RoundedCornerShape(28.dp)
+            shape = RoundedCornerShape(30.dp)
         ) {
             Text(
                 text = if (isGenerating) "Generating Preview..." else "Preview voice",

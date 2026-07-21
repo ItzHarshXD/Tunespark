@@ -89,7 +89,11 @@ fun CommentaryScreen(
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     val geminiKey = SessionManager.getGeminiApiKey(context)
                     if (geminiKey.isBlank()) {
-                        Toast.makeText(context, "Please enter your Gemini API Key in AI Settings first!", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            context,
+                            "Please enter your Gemini API Key in AI Settings first!",
+                            Toast.LENGTH_LONG
+                        ).show()
                         isCommentaryEnabled = false
                     } else {
                         val newValue = !isCommentaryEnabled
@@ -97,18 +101,25 @@ fun CommentaryScreen(
                         SessionManager.saveCommentaryEnabled(context, newValue)
                     }
                 }
-                .padding(vertical = 12.dp),
+                .padding(
+                    horizontal = 10.dp,
+                    vertical = 10.dp
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
                 Text(
                     text = "Enable AI DJ Commentary",
                     color = textColor,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
+
                 Spacer(modifier = Modifier.height(4.dp))
+
                 Text(
                     text = "Inject AI-generated radio host commentary tracks between songs.",
                     color = Color.Gray,
@@ -125,7 +136,11 @@ fun CommentaryScreen(
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     val geminiKey = SessionManager.getGeminiApiKey(context)
                     if (geminiKey.isBlank()) {
-                        Toast.makeText(context, "Please enter your Gemini API Key in AI Settings first!", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            context,
+                            "Please enter your Gemini API Key in AI Settings first!",
+                            Toast.LENGTH_LONG
+                        ).show()
                         isCommentaryEnabled = false
                     } else {
                         isCommentaryEnabled = it
@@ -156,14 +171,14 @@ fun CommentaryScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .height(60.dp)
                         .clickable {
                             selectedCommentary = if (isChecked) {
                                 selectedCommentary - option
                             } else {
                                 selectedCommentary + option
                             }
-                        }
-                        .padding(vertical = 12.dp),
+                        },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(

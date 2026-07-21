@@ -44,7 +44,7 @@ fun SettingsHeader(
                 onBack()
             },
             modifier = Modifier
-                .size(48.dp)
+                .size(60.dp)
                 .background(Color(0xFFFF0000), shape = CircleShape)
         ) {
             Icon(

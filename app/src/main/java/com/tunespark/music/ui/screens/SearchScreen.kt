@@ -157,12 +157,14 @@ fun SearchScreen(
                 unfocusedContainerColor = backgroundColor,
                 cursorColor = textColor
             ),
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(30.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp)
+                .height(60.dp)
                 .focusRequester(focusRequester)
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         if (localIsSearching && localResults.isEmpty()) {
             Box(

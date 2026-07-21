@@ -1348,7 +1348,7 @@ fun MainPlayerScreen(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
                 ) {
                     BottomDock(
                         isTrackLoaded = currentSongTitle != "No Track Loaded",

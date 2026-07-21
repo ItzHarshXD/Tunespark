@@ -213,9 +213,10 @@ fun AccountScreen(
                                 CookieManager.getInstance().flush()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000)),
+                            shape = RoundedCornerShape(30.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(50.dp)
+                                .height(60.dp)
                         ) {
                             Text("Sign Out", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
@@ -267,9 +268,10 @@ fun AccountScreen(
                         Button(
                             onClick = { showWebView = true },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000)),
+                            shape = RoundedCornerShape(30.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(50.dp)
+                                .height(60.dp)
                         ) {
                             Text("Sign In with YouTube Music", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }

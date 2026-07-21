@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -304,7 +305,7 @@ fun HomeScreen(
                         ) {
                             Text(
                                 text = "Tunespark",
-                                fontSize = 22.sp,
+                                fontSize = 24.sp,
                                 fontWeight = FontWeight.Normal,
                                 fontFamily = BitcountSingleFontFamily,
                                 color = textColor
@@ -321,7 +322,7 @@ fun HomeScreen(
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(CircleShape)
-                                        .background(buttonBg)
+                                        .background(textColor)
                                         .border(1.dp, buttonBorder, CircleShape)
                                         .clickable {
                                             playSoundAndHaptic()
@@ -332,7 +333,7 @@ fun HomeScreen(
                                     Icon(
                                         imageVector = Icons.Default.AccountCircle,
                                         contentDescription = "Account",
-                                        tint = textColor,
+                                        tint = backgroundColor,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
@@ -341,8 +342,7 @@ fun HomeScreen(
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(CircleShape)
-                                        .background(buttonBg)
-                                        .border(1.dp, buttonBorder, CircleShape)
+                                        .background(textColor)
                                         .clickable {
                                             playSoundAndHaptic()
                                             onNavigate(AppScreen.SETTINGS)
@@ -352,7 +352,7 @@ fun HomeScreen(
                                     Icon(
                                         imageVector = Icons.Default.Settings,
                                         contentDescription = "Settings",
-                                        tint = textColor,
+                                        tint = backgroundColor,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
@@ -382,13 +382,15 @@ fun HomeScreen(
                                 Spacer(modifier = Modifier.height(18.dp))
 
                                 Surface(
-                                    shape = RoundedCornerShape(100.dp),
+                                    shape = RoundedCornerShape(30.dp),
                                     color = textColor,
                                     contentColor = textColor,
                                     shadowElevation = 6.dp
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                        modifier = Modifier
+                                            .height(60.dp)
+                                            .padding(horizontal = 16.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
@@ -494,7 +496,7 @@ private fun IdleContent(
             onShowAllClick = onShowAllClick
         )
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(40.dp))
 
         DailyDiscoverView(
             songs = dailyDiscoverSongs,
@@ -504,7 +506,7 @@ private fun IdleContent(
             onPlayPlaylist = onPlayPlaylist
         )
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(40.dp))
 
         SpeedDialView(
             songs = speedDialSongs,
@@ -514,7 +516,7 @@ private fun IdleContent(
             onPlaySong = onPlaySong
         )
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(40.dp))
 
         CommunityPlaylistsView(
             playlists = communityPlaylists,
@@ -525,6 +527,8 @@ private fun IdleContent(
             onPlaySong = onPlaySong,
             onPlaylistClick = onPlaylistClick
         )
+
+        Spacer(modifier = Modifier.height(40.dp))
     }
 }
 
@@ -731,10 +735,10 @@ private fun PlayingContent(
                 containerColor = primaryColor,
                 contentColor = onPrimaryColor
             ),
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(30.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(60.dp)
         ) {
             Text("Stop Radio", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
@@ -777,9 +781,9 @@ fun BottomDock(
 
             Row(
                 modifier = Modifier
-                    .height(56.dp)
+                    .height(60.dp)
                     .weight(1f)
-                    .clip(RoundedCornerShape(28.dp))
+                    .clip(RoundedCornerShape(30.dp))
                     .background(primaryColor)
                     .clickable {
                         playSoundAndHaptic()
@@ -831,8 +835,8 @@ fun BottomDock(
             }
 
             CircularDockButton(
-                icon = Icons.Default.List,
-                contentDescription = "Playlist",
+                icon = Icons.Outlined.LibraryMusic,
+                contentDescription = "Library",
                 primaryColor = primaryColor,
                 onPrimaryColor = onPrimaryColor
             ) {
@@ -857,8 +861,8 @@ fun BottomDock(
             }
 
             BottomActionButton(
-                label = "Playlist",
-                icon = Icons.Default.List,
+                label = "Library",
+                icon = Icons.Outlined.LibraryMusic,
                 primaryColor = primaryColor,
                 onPrimaryColor = onPrimaryColor,
                 modifier = Modifier.weight(1f)
@@ -881,8 +885,8 @@ private fun BottomActionButton(
 ) {
     Row(
         modifier = modifier
-            .height(56.dp)
-            .clip(RoundedCornerShape(28.dp))
+            .height(60.dp)
+            .clip(RoundedCornerShape(30.dp))
             .background(primaryColor)
             .clickable { onClick() },
         verticalAlignment = Alignment.CenterVertically,
@@ -914,7 +918,7 @@ private fun CircularDockButton(
 ) {
     Box(
         modifier = Modifier
-            .size(56.dp)
+            .size(60.dp)
             .clip(CircleShape)
             .background(primaryColor)
             .clickable { onClick() },
