@@ -27,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
@@ -781,6 +782,7 @@ fun BottomDock(
 
             Row(
                 modifier = Modifier
+                    .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
                     .height(60.dp)
                     .weight(1f)
                     .clip(RoundedCornerShape(30.dp))
@@ -885,6 +887,7 @@ private fun BottomActionButton(
 ) {
     Row(
         modifier = modifier
+            .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
             .height(60.dp)
             .clip(RoundedCornerShape(30.dp))
             .background(primaryColor)
@@ -918,6 +921,7 @@ private fun CircularDockButton(
 ) {
     Box(
         modifier = Modifier
+            .shadow(elevation = 6.dp, shape = CircleShape)
             .size(60.dp)
             .clip(CircleShape)
             .background(primaryColor)

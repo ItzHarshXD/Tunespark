@@ -334,3 +334,20 @@ We have successfully refined and completed the premium user experience across al
   - If the user's local history contains *fewer than 3 songs* (`localHistory.size < 3`), the algorithms leverage YouTube cloud history/activity as a starting fallback (if `userSignedIn`), or popular global/regional chart feeds (if signed out).
   - As soon as the user listens to *3 or more songs* (`localHistory.size >= 3`) on the app, the recommendation algorithms for all three sections switch entirely to a purely app-dependent local history model. This utilizes the local history's tracks as seeds for watch-next radio queues, artist matches, and community playlist relevance ranking, completely ignoring cloud feeds.
 - **Seamless Login Session Carryover**: Refactored `SessionManager.clearSession` to remove only session-specific keys (Google session cookies and account profile details), preserving all user-customized settings (theme, AI Commentary APIs and parameters, player preferences) and the entire local listening history on-device during sign-out and sign-in transitions, ensuring no past list or session data is lost.
+
+### 7. Floating Bottom Bar (Dock) Architecture & Subtle Shadows
+- **Directory and Architecture**:
+  - The floating bottom dock component is declared as `BottomDock` in `app/src/main/java/com/tunespark/music/ui/screens/HomeScreen.kt`.
+  - It is hosted globally in `app/src/main/java/com/tunespark/music/MainActivity.kt` inside the root content view container overlay, meaning it hovers/floats over any active screen view (except when the expanded `RadioScreen` player is active).
+  - It aligns seamlessly at `Alignment.BottomCenter`, styled with local system navigation bar insets and custom paddings.
+- **Dynamic Playback-State Responsive Layouts**:
+  - **Inactive Playback Mode (`isTrackLoaded` is false)**:
+    - Renders a horizontal `Row` containing two beautiful `BottomActionButton`s: "Search" (redirects to `AppScreen.SEARCH`) and "Library" (redirects to `AppScreen.PLAYLISTS`), each set to exactly `56.dp` height with capsule shapes (`RoundedCornerShape(30.dp)`).
+  - **Active Playback Mode (`isTrackLoaded` is true)**:
+    - Renders a horizontal `Row` containing a compact `CircularDockButton` on the left for quick Search access, a central music-playing tile displaying the current track artwork/title/artist (clickable to instantly open the player view `AppScreen.RADIO`), and a compact `CircularDockButton` on the right for Library access.
+- **Subtle Shadow Refinement**:
+  - To make the floating bar stand out against its backdrops with a clean, high-fidelity premium aesthetic, all components inside the dock are elevated with subtle drop shadows using Jetpack Compose's `.shadow(elevation = 6.dp, shape = ...)` modifier.
+  - These shadows are applied explicitly to:
+    - `CircularDockButton` with a `CircleShape` shadow boundary.
+    - `BottomActionButton` with a `RoundedCornerShape(30.dp)` capsule boundary.
+    - The active music-playing tile with a `RoundedCornerShape(30.dp)` capsule boundary.
