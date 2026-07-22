@@ -649,6 +649,27 @@ fun RadioScreen(
                 } else {
                     val listState = rememberLazyListState()
 
+                    var isAutoScrolling by remember { mutableStateOf(false) }
+                    var userHasScrolledAway by remember { mutableStateOf(false) }
+
+                    val activeInSight by remember(activeLyricIndex) {
+                        derivedStateOf {
+                            if (activeLyricIndex < 0 || lyricsLines.isEmpty()) {
+                                true
+                            } else {
+                                listState.layoutInfo.visibleItemsInfo.any { it.index == activeLyricIndex }
+                            }
+                        }
+                    }
+
+                    LaunchedEffect(activeInSight, listState.isScrollInProgress) {
+                        if (activeInSight) {
+                            userHasScrolledAway = false
+                        } else if (listState.isScrollInProgress && !isAutoScrolling) {
+                            userHasScrolledAway = true
+                        }
+                    }
+
                     val isPlaybackDone = remember(exoPlayer.playbackState, isPlaying, currentPosition, duration) {
                         exoPlayer.playbackState == Player.STATE_ENDED || (!isPlaying && currentPosition >= duration - 1000 && duration > 0)
                     }
@@ -660,7 +681,7 @@ fun RadioScreen(
                     }
 
                     LaunchedEffect(activeLyricIndex) {
-                        if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
+                        if (!userHasScrolledAway && activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
                             val targetOffset = -10
                             val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
                             if (initialVisibleItem == null) {
@@ -671,46 +692,54 @@ fun RadioScreen(
                                 // If the item is already visible, perform a buttery-smooth chase scroll.
                                 // It runs inside a scroll session and continuously calculates the item's live offset
                                 // during expansion/shrinks, guaranteeing 0% overshoot or bounciness glitches.
-                                listState.scroll {
-                                    var lastValue = 0f
-                                    animate(
-                                        initialValue = 0f,
-                                        targetValue = 1f,
-                                        animationSpec = tween(
-                                            durationMillis = 600,
-                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                        )
-                                    ) { currentValue, _ ->
-                                        val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                                        if (visibleItem != null) {
-                                            val currentOffset = visibleItem.offset
-                                            val remainingDelta = currentOffset - targetOffset
+                                isAutoScrolling = true
+                                try {
+                                    listState.scroll {
+                                        var lastValue = 0f
+                                        animate(
+                                            initialValue = 0f,
+                                            targetValue = 1f,
+                                            animationSpec = tween(
+                                                durationMillis = 600,
+                                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                            )
+                                        ) { currentValue, _ ->
+                                            val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                                            if (visibleItem != null) {
+                                                val currentOffset = visibleItem.offset
+                                                val remainingDelta = currentOffset - targetOffset
 
-                                            val denominator = 1f - lastValue
-                                            val stepFraction = if (denominator > 0.001f) {
-                                                (currentValue - lastValue) / denominator
-                                            } else {
-                                                1f
+                                                val denominator = 1f - lastValue
+                                                val stepFraction = if (denominator > 0.001f) {
+                                                    (currentValue - lastValue) / denominator
+                                                } else {
+                                                    1f
+                                                }
+                                                val scrollAmount = remainingDelta * stepFraction
+
+                                                scrollBy(scrollAmount)
+                                                lastValue = currentValue
                                             }
-                                            val scrollAmount = remainingDelta * stepFraction
-
-                                            scrollBy(scrollAmount)
-                                            lastValue = currentValue
                                         }
                                     }
+                                } finally {
+                                    isAutoScrolling = false
                                 }
                             }
                         }
                     }
 
-                    LazyColumn(
-                        state = listState,
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f),
-                        contentPadding = PaddingValues(top = 24.dp, bottom = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                            .weight(1f)
                     ) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(top = 24.dp, bottom = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
                         itemsIndexed(lyricsLines) { index, line ->
                             val isPlaceholder = lyricsLines.size == 1 &&
                                     (line.text.startsWith("No lyrics") ||
@@ -834,8 +863,55 @@ fun RadioScreen(
                             }
                         }
                     }
+
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = userHasScrolledAway && activeLyricIndex >= 0,
+                        enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 24.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                userHasScrolledAway = false
+                                scope.launch {
+                                    if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
+                                        val targetOffset = -10
+                                        isAutoScrolling = true
+                                        try {
+                                            val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                                            if (initialVisibleItem == null) {
+                                                listState.scrollToItem(activeLyricIndex, targetOffset)
+                                            } else {
+                                                listState.animateScrollToItem(activeLyricIndex, targetOffset)
+                                            }
+                                        } finally {
+                                            isAutoScrolling = false
+                                        }
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = primaryColor,
+                                contentColor = onPrimaryColor
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+                        ) {
+                            Text(
+                                text = "Sync",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
-            } else {
+            }
+        } else {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
