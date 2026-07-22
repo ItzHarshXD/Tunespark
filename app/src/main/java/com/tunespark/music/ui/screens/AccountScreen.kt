@@ -4,6 +4,8 @@ import android.content.Context
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.media.AudioManager
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,18 +17,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import coil.compose.AsyncImage
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.AccountInfo
 import com.tunespark.music.AppScreen
@@ -44,11 +50,16 @@ fun AccountScreen(
     onIsLoadingProfileChange: (Boolean) -> Unit,
     onProfileErrorChange: (String?) -> Unit,
     onNavigate: (AppScreen) -> Unit,
+    onWebViewShowingChange: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     var showWebView by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showWebView) {
+        onWebViewShowingChange?.invoke(showWebView)
+    }
 
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
@@ -137,19 +148,31 @@ fun AccountScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Colored avatar with initials
-                        Box(
-                            modifier = Modifier
-                                .size(80.dp)
-                                .background(Color(0xFFFF0000), shape = CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = info.name.take(1).uppercase(),
-                                color = Color.White,
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.Bold
+                        // Proper profile image or initials avatar
+                        if (!info.thumbnailUrl.isNullOrEmpty()) {
+                            AsyncImage(
+                                model = info.thumbnailUrl,
+                                contentDescription = "User Avatar",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(80.dp)
+                                    .clip(CircleShape)
+                                    .border(2.dp, Color(0xFFFF0000), CircleShape)
                             )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(80.dp)
+                                    .background(Color(0xFFFF0000), shape = CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = info.name.take(1).uppercase(),
+                                    color = Color.White,
+                                    fontSize = 36.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -230,16 +253,18 @@ fun AccountScreen(
                     ) {
                         Spacer(modifier = Modifier.height(32.dp))
 
-                        // Placeholder Avatar Icon
+                        // Placeholder Avatar Icon (Material Icon instead of emoji)
                         Box(
                             modifier = Modifier
                                 .size(80.dp)
                                 .background(secondaryColor, shape = CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "👤",
-                                fontSize = 40.sp
+                            Icon(
+                                imageVector = Icons.Default.AccountCircle,
+                                contentDescription = "User Icon",
+                                tint = textColor,
+                                modifier = Modifier.size(56.dp)
                             )
                         }
 
@@ -294,53 +319,52 @@ fun YouTubeSignInWebView(
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
     val secondaryColor = MaterialTheme.colorScheme.secondary
-    val onSecondaryColor = MaterialTheme.colorScheme.onSecondary
+
+    val context = LocalContext.current
+    val view = LocalView.current
+    val audioManager = remember {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor)
     ) {
-        // Premium, Trustworthy Top App Bar
+        // Clean Premium Top App Bar matching standard SettingsHeader design perfectly
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(secondaryColor)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .background(backgroundColor)
+                .padding(horizontal = 24.dp, vertical = 24.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
-                onClick = onCancel,
+                onClick = {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onCancel()
+                },
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(60.dp)
                     .background(Color(0xFFFF0000), shape = CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Default.ArrowBack,
                     contentDescription = "Cancel and Back",
                     tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            Column {
-                Text(
-                    text = "Sign In",
-                    color = onSecondaryColor,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "🔒 accounts.google.com",
-                        color = Color(0xFF4CAF50), // Secure Green
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Normal
-                    )
-                }
-            }
+            Text(
+                text = "Sign In",
+                color = textColor,
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         // Web page loading indicator

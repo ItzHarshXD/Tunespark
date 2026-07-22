@@ -140,6 +140,13 @@ fun MainPlayerScreen(
     val context = LocalContext.current
 
     var currentScreen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
+    var isAccountWebViewShowing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentScreen) {
+        if (currentScreen != AppScreen.ACCOUNT) {
+            isAccountWebViewShowing = false
+        }
+    }
 
     DisposableEffect(context) {
         val activity = context as? MainActivity
@@ -1224,7 +1231,8 @@ fun MainPlayerScreen(
                             onAccountInfoChange = { accountInfo = it },
                             onIsLoadingProfileChange = { isLoadingProfile = it },
                             onProfileErrorChange = { profileError = it },
-                            onNavigate = { currentScreen = it }
+                            onNavigate = { currentScreen = it },
+                            onWebViewShowingChange = { isAccountWebViewShowing = it }
                         )
                     }
                     AppScreen.SEARCH -> {
@@ -1343,7 +1351,7 @@ fun MainPlayerScreen(
                 }
             }
 
-            if (currentScreen != AppScreen.RADIO) {
+            if (currentScreen != AppScreen.RADIO && !(currentScreen == AppScreen.ACCOUNT && isAccountWebViewShowing)) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
