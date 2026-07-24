@@ -7,11 +7,13 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalFocusManager
@@ -34,6 +36,11 @@ import com.tunespark.music.ui.screens.cleanYouTubeTitle
 import com.tunespark.music.ui.screens.parseLyricsToLines
 import com.metrolist.lrclib.LrcLib
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -142,7 +149,49 @@ fun MainPlayerScreen(
     var currentScreen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
     var isAccountWebViewShowing by remember { mutableStateOf(false) }
 
+    val fullPlayerProgress = remember { Animatable(0f) }
+
+    val openFullPlayer: () -> Unit = {
+        coroutineScope.launch {
+            fullPlayerProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
+    val closeFullPlayer: () -> Unit = {
+        coroutineScope.launch {
+            fullPlayerProgress.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
+    val navigateHandler: (AppScreen) -> Unit = { screen ->
+        if (screen == AppScreen.RADIO) {
+            openFullPlayer()
+        } else {
+            currentScreen = screen
+        }
+    }
+
+    BackHandler(enabled = fullPlayerProgress.value > 0f) {
+        closeFullPlayer()
+    }
+
     LaunchedEffect(currentScreen) {
+        if (currentScreen == AppScreen.RADIO) {
+            currentScreen = AppScreen.HOME
+            openFullPlayer()
+        }
         if (currentScreen != AppScreen.ACCOUNT) {
             isAccountWebViewShowing = false
         }
@@ -1176,196 +1225,270 @@ fun MainPlayerScreen(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val screenHeight = maxHeight
             Box(modifier = Modifier.fillMaxSize()) {
-                when (currentScreen) {
-                    AppScreen.HOME -> {
-                        HomeScreen(
-                            currentSongTitle = currentSongTitle,
-                            currentSongArtist = currentSongArtist,
-                            currentSongArtwork = currentSongArtwork,
-                            isPlaying = isPlaying,
-                            onPlayPauseToggle = {
-                                if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
-                            },
-                            isShuffling = isShuffling,
-                            onNavigate = { currentScreen = it },
-                            onShufflePlay = shufflePlay,
-                            onPlaySong = { playSong(it) },
-                            onPlayPlaylist = { name, songs, startIndex ->
-                                playPlaylist(name, songs, startIndex)
-                            },
-                            onPlaylistClick = { data ->
-                                initialPlaylistId = data.playlist.id
-                                initialPlaylistName = data.playlist.title
-                                initialPlaylistThumbnail = data.playlist.thumbnail ?: data.songs.firstOrNull()?.thumbnail
-                                initialPlaylistSongCountText = data.playlist.songCountText ?: "${data.songs.size} songs"
-                                initialPlaylistIsLiked = false
-                                initialPlaylistRawItem = data.playlist
-                                initialPlaylistAuthorName = data.playlist.author?.name
-                                initialPlaylistAuthorAvatarUrl = data.playlist.authorAvatarUrl
-                                initialPlaylistSongs = data.songs
-                                currentScreen = AppScreen.PLAYLISTS
-                            },
-                            onRefresh = { homeRefreshTrigger++ },
-                            speedDialSongs = homeSpeedDialSongs,
-                            isSpeedDialLoading = isHomeSpeedDialLoading,
-                            communityPlaylists = homeCommunityPlaylists,
-                            isCommunityLoading = isHomeCommunityLoading,
-                            recentsSongs = homeRecentsSongs,
-                            isRecentsLoading = isHomeRecentsLoading,
-                            dailyDiscoverSongs = homeDailyDiscoverSongs,
-                            isDailyDiscoverLoading = isHomeDailyDiscoverLoading
-                        )
-                    }
-                    AppScreen.SETTINGS -> {
-                        SettingsScreen(
-                            onNavigate = { currentScreen = it }
-                        )
-                    }
-                    AppScreen.ACCOUNT -> {
-                        AccountScreen(
-                            accountInfo = accountInfo,
-                            isLoadingProfile = isLoadingProfile,
-                            profileError = profileError,
-                            onAccountInfoChange = { accountInfo = it },
-                            onIsLoadingProfileChange = { isLoadingProfile = it },
-                            onProfileErrorChange = { profileError = it },
-                            onNavigate = { currentScreen = it },
-                            onWebViewShowingChange = { isAccountWebViewShowing = it }
-                        )
-                    }
-                    AppScreen.SEARCH -> {
-                        SearchScreen(
-                            searchQuery = searchQuery,
-                            searchResults = searchResults,
-                            isSearching = isSearching,
-                            onSearchQueryChange = { searchQuery = it },
-                            onTriggerSearch = triggerSearch,
-                            onPlaySong = { playSong(it) },
-                            onNavigate = { currentScreen = it }
-                        )
-                    }
-                    AppScreen.RADIO -> {
-                        RadioScreen(
-                            exoPlayer = exoPlayer,
-                            playQueue = playQueue,
-                            currentTrackIndex = currentTrackIndex,
-                            currentSongTitle = currentSongTitle,
-                            currentSongArtist = currentSongArtist,
-                            currentSongArtwork = currentSongArtwork,
-                            isPlaying = isPlaying,
-                            isLoading = isLoading,
-                            errorMessage = errorMessage,
-                            statusMessage = statusMessage,
-                            hasPreviousTrack = hasPreviousTrack,
-                            hasNextTrack = hasNextTrack,
-                            onNavigate = { currentScreen = it },
-                            onStopRadio = {
-                                exoPlayer.stop()
-                                exoPlayer.clearMediaItems()
-                                currentSongTitle = "No Track Loaded"
-                                currentSongArtist = ""
-                                currentSongArtwork = null
-                                playQueue = emptyList()
-                                currentTrackIndex = -1
-                                hasPreviousTrack = false
-                                hasNextTrack = false
-                                currentScreen = AppScreen.HOME
-                            },
-                            lyricsLines = hoistedLyricsLines,
-                            isLyricsLoading = hoistedIsLyricsLoading
-                        )
-                    }
-                    AppScreen.APPEARANCE -> {
-                        AppearanceScreen(
-                            currentTheme = themeSetting,
-                            onThemeChange = onThemeSettingChange,
-                            onNavigate = { currentScreen = it }
-                        )
-                    }
-                    AppScreen.AI_VOICE -> {
-                        AiVoiceScreen(
-                            onNavigate = { currentScreen = it }
-                        )
-                    }
-                    AppScreen.COMMENTARY -> {
-                        CommentaryScreen(
-                            onNavigate = { currentScreen = it }
-                        )
-                    }
-                    AppScreen.PLAYER_AUDIO -> {
-                        PlayerAndAudioScreen(
-                            onNavigate = { currentScreen = it }
-                        )
-                    }
-                    AppScreen.LOCATION -> {
-                        LocationScreen(
-                            onNavigate = { currentScreen = it }
-                        )
-                    }
-                    AppScreen.UPDATES -> {
-                        UpdatesScreen(
-                            onNavigate = { currentScreen = it }
-                        )
-                    }
-                    AppScreen.PLAYLISTS -> {
-                        PlaylistsScreen(
-                            initialPlaylistId = initialPlaylistId,
-                            initialPlaylistName = initialPlaylistName,
-                            initialPlaylistThumbnail = initialPlaylistThumbnail,
-                            initialPlaylistSongCountText = initialPlaylistSongCountText,
-                            initialPlaylistIsLiked = initialPlaylistIsLiked,
-                            initialPlaylistRawItem = initialPlaylistRawItem,
-                            initialPlaylistAuthorName = initialPlaylistAuthorName,
-                            initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
-                            initialPlaylistSongs = initialPlaylistSongs,
-                            onPlayPlaylist = { name, songs, startIndex ->
-                                playPlaylist(name, songs, startIndex)
-                            },
-                            onNavigate = { screen ->
-                                if (screen != AppScreen.PLAYLISTS) {
-                                    initialPlaylistId = null
-                                    initialPlaylistName = ""
-                                    initialPlaylistThumbnail = null
-                                    initialPlaylistSongCountText = ""
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when (currentScreen) {
+                        AppScreen.HOME -> {
+                            HomeScreen(
+                                currentSongTitle = currentSongTitle,
+                                currentSongArtist = currentSongArtist,
+                                currentSongArtwork = currentSongArtwork,
+                                isPlaying = isPlaying,
+                                onPlayPauseToggle = {
+                                    if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                },
+                                isShuffling = isShuffling,
+                                onNavigate = navigateHandler,
+                                onShufflePlay = shufflePlay,
+                                onPlaySong = { song ->
+                                    playSong(song)
+                                    openFullPlayer()
+                                },
+                                onPlayPlaylist = { name, songs, startIndex ->
+                                    playPlaylist(name, songs, startIndex)
+                                    openFullPlayer()
+                                },
+                                onPlaylistClick = { data ->
+                                    initialPlaylistId = data.playlist.id
+                                    initialPlaylistName = data.playlist.title
+                                    initialPlaylistThumbnail = data.playlist.thumbnail ?: data.songs.firstOrNull()?.thumbnail
+                                    initialPlaylistSongCountText = data.playlist.songCountText ?: "${data.songs.size} songs"
                                     initialPlaylistIsLiked = false
-                                    initialPlaylistRawItem = null
-                                    initialPlaylistAuthorName = null
-                                    initialPlaylistAuthorAvatarUrl = null
-                                    initialPlaylistSongs = emptyList()
+                                    initialPlaylistRawItem = data.playlist
+                                    initialPlaylistAuthorName = data.playlist.author?.name
+                                    initialPlaylistAuthorAvatarUrl = data.playlist.authorAvatarUrl
+                                    initialPlaylistSongs = data.songs
+                                    currentScreen = AppScreen.PLAYLISTS
+                                },
+                                onRefresh = { homeRefreshTrigger++ },
+                                speedDialSongs = homeSpeedDialSongs,
+                                isSpeedDialLoading = isHomeSpeedDialLoading,
+                                communityPlaylists = homeCommunityPlaylists,
+                                isCommunityLoading = isHomeCommunityLoading,
+                                recentsSongs = homeRecentsSongs,
+                                isRecentsLoading = isHomeRecentsLoading,
+                                dailyDiscoverSongs = homeDailyDiscoverSongs,
+                                isDailyDiscoverLoading = isHomeDailyDiscoverLoading
+                            )
+                        }
+                        AppScreen.SETTINGS -> {
+                            SettingsScreen(
+                                onNavigate = navigateHandler
+                            )
+                        }
+                        AppScreen.ACCOUNT -> {
+                            AccountScreen(
+                                accountInfo = accountInfo,
+                                isLoadingProfile = isLoadingProfile,
+                                profileError = profileError,
+                                onAccountInfoChange = { accountInfo = it },
+                                onIsLoadingProfileChange = { isLoadingProfile = it },
+                                onProfileErrorChange = { profileError = it },
+                                onNavigate = navigateHandler,
+                                onWebViewShowingChange = { isAccountWebViewShowing = it }
+                            )
+                        }
+                        AppScreen.SEARCH -> {
+                            SearchScreen(
+                                searchQuery = searchQuery,
+                                searchResults = searchResults,
+                                isSearching = isSearching,
+                                onSearchQueryChange = { searchQuery = it },
+                                onTriggerSearch = triggerSearch,
+                                onPlaySong = { song ->
+                                    playSong(song)
+                                    openFullPlayer()
+                                },
+                                onNavigate = navigateHandler
+                            )
+                        }
+                        AppScreen.RADIO -> {
+                            // Rendered as global sliding overlay instead
+                        }
+                        AppScreen.APPEARANCE -> {
+                            AppearanceScreen(
+                                currentTheme = themeSetting,
+                                onThemeChange = onThemeSettingChange,
+                                onNavigate = navigateHandler
+                            )
+                        }
+                        AppScreen.AI_VOICE -> {
+                            AiVoiceScreen(
+                                onNavigate = navigateHandler
+                            )
+                        }
+                        AppScreen.COMMENTARY -> {
+                            CommentaryScreen(
+                                onNavigate = navigateHandler
+                            )
+                        }
+                        AppScreen.PLAYER_AUDIO -> {
+                            PlayerAndAudioScreen(
+                                onNavigate = navigateHandler
+                            )
+                        }
+                        AppScreen.LOCATION -> {
+                            LocationScreen(
+                                onNavigate = navigateHandler
+                            )
+                        }
+                        AppScreen.UPDATES -> {
+                            UpdatesScreen(
+                                onNavigate = navigateHandler
+                            )
+                        }
+                        AppScreen.PLAYLISTS -> {
+                            PlaylistsScreen(
+                                initialPlaylistId = initialPlaylistId,
+                                initialPlaylistName = initialPlaylistName,
+                                initialPlaylistThumbnail = initialPlaylistThumbnail,
+                                initialPlaylistSongCountText = initialPlaylistSongCountText,
+                                initialPlaylistIsLiked = initialPlaylistIsLiked,
+                                initialPlaylistRawItem = initialPlaylistRawItem,
+                                initialPlaylistAuthorName = initialPlaylistAuthorName,
+                                initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
+                                initialPlaylistSongs = initialPlaylistSongs,
+                                onPlayPlaylist = { name, songs, startIndex ->
+                                    playPlaylist(name, songs, startIndex)
+                                    openFullPlayer()
+                                },
+                                onNavigate = { screen ->
+                                    if (screen != AppScreen.PLAYLISTS) {
+                                        initialPlaylistId = null
+                                        initialPlaylistName = ""
+                                        initialPlaylistThumbnail = null
+                                        initialPlaylistSongCountText = ""
+                                        initialPlaylistIsLiked = false
+                                        initialPlaylistRawItem = null
+                                        initialPlaylistAuthorName = null
+                                        initialPlaylistAuthorAvatarUrl = null
+                                        initialPlaylistSongs = emptyList()
+                                    }
+                                    if (screen == AppScreen.RADIO) {
+                                        openFullPlayer()
+                                    } else {
+                                        navigateHandler(screen)
+                                    }
                                 }
-                                currentScreen = screen
-                            }
-                        )
+                            )
+                        }
+                        AppScreen.RECENTS -> {
+                            RecentsScreen(
+                                onPlaySong = { song ->
+                                    playSong(song)
+                                    openFullPlayer()
+                                },
+                                onNavigate = navigateHandler
+                            )
+                        }
                     }
-                    AppScreen.RECENTS -> {
-                        RecentsScreen(
-                            onPlaySong = { song ->
-                                playSong(song)
-                                currentScreen = AppScreen.RADIO
-                            },
-                            onNavigate = { currentScreen = it }
-                        )
+                }
+
+                if (!(currentScreen == AppScreen.ACCOUNT && isAccountWebViewShowing)) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .graphicsLayer {
+                                alpha = 1f - fullPlayerProgress.value
+                            }
+                            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
+                    ) {
+                        val touchEnabled = fullPlayerProgress.value < 0.1f
+                        Box(modifier = if (touchEnabled) Modifier else Modifier.graphicsLayer { alpha = 0f }.clickable(enabled = false) {}) {
+                            val nextSong = playQueue.getOrNull(currentTrackIndex + 1)
+                            val prevSong = playQueue.getOrNull(currentTrackIndex - 1)
+                            BottomDock(
+                                isTrackLoaded = currentSongTitle != "No Track Loaded",
+                                currentSongTitle = currentSongTitle,
+                                currentSongArtist = currentSongArtist,
+                                currentSongArtwork = currentSongArtwork,
+                                primaryColor = MaterialTheme.colorScheme.primary,
+                                onPrimaryColor = MaterialTheme.colorScheme.onPrimary,
+                                onNavigate = navigateHandler,
+                                nextSongTitle = nextSong?.mediaMetadata?.title?.toString(),
+                                nextSongArtist = nextSong?.mediaMetadata?.artist?.toString(),
+                                nextSongArtwork = nextSong?.mediaMetadata?.artworkUri?.toString(),
+                                prevSongTitle = prevSong?.mediaMetadata?.title?.toString(),
+                                prevSongArtist = prevSong?.mediaMetadata?.artist?.toString(),
+                                prevSongArtwork = prevSong?.mediaMetadata?.artworkUri?.toString(),
+                                onNextSong = {
+                                    if (exoPlayer.hasNextMediaItem()) {
+                                        exoPlayer.seekToNextMediaItem()
+                                    }
+                                },
+                                onPreviousSong = {
+                                    if (exoPlayer.hasPreviousMediaItem()) {
+                                        exoPlayer.seekToPreviousMediaItem()
+                                    }
+                                },
+                                onDismiss = {
+                                    exoPlayer.stop()
+                                    exoPlayer.clearMediaItems()
+                                    currentSongTitle = "No Track Loaded"
+                                    currentSongArtist = ""
+                                    currentSongArtwork = null
+                                    playQueue = emptyList()
+                                    currentTrackIndex = -1
+                                    hasPreviousTrack = false
+                                    hasNextTrack = false
+                                },
+                                fullPlayerProgress = fullPlayerProgress,
+                                onOpenFullPlayer = openFullPlayer
+                            )
+                        }
                     }
                 }
             }
 
-            if (currentScreen != AppScreen.RADIO && !(currentScreen == AppScreen.ACCOUNT && isAccountWebViewShowing)) {
+            // RadioScreen premium sliding overlay
+            val yOffset = with(LocalDensity.current) { screenHeight * (1f - fullPlayerProgress.value) }
+            if (fullPlayerProgress.value > 0.001f) {
+                val radioAlpha = (fullPlayerProgress.value / 0.5f).coerceIn(0f, 1f)
                 Box(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = yOffset.toPx()
+                            alpha = radioAlpha
+                        }
                 ) {
-                    BottomDock(
-                        isTrackLoaded = currentSongTitle != "No Track Loaded",
+                    RadioScreen(
+                        exoPlayer = exoPlayer,
+                        playQueue = playQueue,
+                        currentTrackIndex = currentTrackIndex,
                         currentSongTitle = currentSongTitle,
                         currentSongArtist = currentSongArtist,
                         currentSongArtwork = currentSongArtwork,
-                        primaryColor = MaterialTheme.colorScheme.primary,
-                        onPrimaryColor = MaterialTheme.colorScheme.onPrimary,
-                        onNavigate = { currentScreen = it }
+                        isPlaying = isPlaying,
+                        isLoading = isLoading,
+                        errorMessage = errorMessage,
+                        statusMessage = statusMessage,
+                        hasPreviousTrack = hasPreviousTrack,
+                        hasNextTrack = hasNextTrack,
+                        onNavigate = { screen ->
+                            if (screen == AppScreen.HOME) {
+                                closeFullPlayer()
+                            } else {
+                                navigateHandler(screen)
+                            }
+                        },
+                        onStopRadio = {
+                            exoPlayer.stop()
+                            exoPlayer.clearMediaItems()
+                            currentSongTitle = "No Track Loaded"
+                            currentSongArtist = ""
+                            currentSongArtwork = null
+                            playQueue = emptyList()
+                            currentTrackIndex = -1
+                            hasPreviousTrack = false
+                            hasNextTrack = false
+                            closeFullPlayer()
+                        },
+                        lyricsLines = hoistedLyricsLines,
+                        isLyricsLoading = hoistedIsLyricsLoading
                     )
                 }
             }

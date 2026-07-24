@@ -1,6 +1,7 @@
 package com.tunespark.music.ui.screens
 
 import android.content.Context
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -33,6 +34,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -747,6 +752,65 @@ private fun PlayingContent(
 }
 
 @Composable
+fun TileSongContent(
+    title: String?,
+    artist: String?,
+    artwork: String?,
+    onPrimaryColor: Color,
+    modifier: Modifier = Modifier
+) {
+    val displayTitle = title ?: ""
+    val displayArtist = artist ?: ""
+    Row(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (!artwork.isNullOrEmpty()) {
+            AsyncImage(
+                model = artwork,
+                contentDescription = "Artwork",
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.DarkGray),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("🎵", fontSize = 18.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = displayTitle,
+                color = onPrimaryColor,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = displayArtist,
+                color = onPrimaryColor.copy(alpha = 0.65f),
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
 fun BottomDock(
     isTrackLoaded: Boolean,
     currentSongTitle: String,
@@ -754,186 +818,359 @@ fun BottomDock(
     currentSongArtwork: String?,
     primaryColor: Color,
     onPrimaryColor: Color,
-    onNavigate: (AppScreen) -> Unit
+    onNavigate: (AppScreen) -> Unit,
+    // Interactive gestures parameters
+    nextSongTitle: String? = null,
+    nextSongArtist: String? = null,
+    nextSongArtwork: String? = null,
+    prevSongTitle: String? = null,
+    prevSongArtist: String? = null,
+    prevSongArtwork: String? = null,
+    onNextSong: () -> Unit = {},
+    onPreviousSong: () -> Unit = {},
+    onDismiss: () -> Unit = {},
+    fullPlayerProgress: Animatable<Float, *>,
+    onOpenFullPlayer: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
     val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val scope = rememberCoroutineScope()
+
     val playSoundAndHaptic = {
         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
     }
 
-    if (isTrackLoaded) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            CircularDockButton(
-                icon = Icons.Default.Search,
-                contentDescription = "Search",
-                primaryColor = primaryColor,
-                onPrimaryColor = onPrimaryColor
-            ) {
-                playSoundAndHaptic()
-                onNavigate(AppScreen.SEARCH)
-            }
+    // Animation states
+    val contentOffsetX = remember { Animatable(0f) }
+    val tileOffsetY = remember { Animatable(0f) }
+    var tileWidthPx by remember { mutableStateOf(0f) }
 
-            Row(
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(60.dp)
+    ) {
+        val maxWidth = maxWidth
+        val density = LocalDensity.current.density
+        val screenHeightPx = with(LocalDensity.current) { 800.dp.toPx() } // Fallback or standard height drag scale
+
+        // Calculate dynamic layouts driven by spring
+        val searchWidth by animateDpAsState(
+            targetValue = if (isTrackLoaded) 60.dp else (maxWidth - 12.dp) / 2,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+        )
+        val libraryWidth by animateDpAsState(
+            targetValue = if (isTrackLoaded) 60.dp else (maxWidth - 12.dp) / 2,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+        )
+        val tileWidth by animateDpAsState(
+            targetValue = if (isTrackLoaded) maxWidth - 144.dp else 0.dp,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+        )
+
+        val spacing1 = 12.dp
+        val spacing2 = 12.dp
+
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 1. Search Button
+            Box(
                 modifier = Modifier
                     .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
+                    .width(searchWidth)
                     .height(60.dp)
-                    .weight(1f)
                     .clip(RoundedCornerShape(30.dp))
                     .background(primaryColor)
                     .clickable {
                         playSoundAndHaptic()
-                        onNavigate(AppScreen.RADIO)
-                    }
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                        onNavigate(AppScreen.SEARCH)
+                    },
+                contentAlignment = Alignment.Center
             ) {
-                if (!currentSongArtwork.isNullOrEmpty()) {
-                    AsyncImage(
-                        model = currentSongArtwork,
-                        contentDescription = "Artwork",
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = onPrimaryColor,
+                        modifier = Modifier.size(if (isTrackLoaded) 24.dp else 20.dp)
                     )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(Color.DarkGray),
-                        contentAlignment = Alignment.Center
+                    AnimatedVisibility(
+                        visible = !isTrackLoaded,
+                        enter = fadeIn() + expandHorizontally(),
+                        exit = fadeOut() + shrinkHorizontally()
                     ) {
-                        Text("🎵", fontSize = 18.sp)
+                        Row {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Search",
+                                color = onPrimaryColor,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(spacing1))
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = currentSongTitle,
-                        color = onPrimaryColor,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = currentSongArtist,
-                        color = onPrimaryColor.copy(alpha = 0.65f),
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+            // 2. Now Playing Tile (middle)
+            if (tileWidth > 0.dp) {
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            translationY = tileOffsetY.value
+                        }
+                        .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
+                        .width(tileWidth)
+                        .height(60.dp)
+                        .clip(RoundedCornerShape(30.dp))
+                        .background(primaryColor)
+                        .onGloballyPositioned { coords ->
+                            tileWidthPx = coords.size.width.toFloat()
+                        }
+                        .pointerInput(isTrackLoaded, tileWidthPx) {
+                            val thresholdPx = 15f * density
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val down = awaitFirstDown()
+                                    var startTime = System.currentTimeMillis()
+                                    var accumulatedDx = 0f
+                                    var accumulatedDy = 0f
+                                    var gestureDirection: String? = null
+
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        if (change.pressed) {
+                                            val position = change.position
+                                            val prevPosition = change.previousPosition
+                                            val deltaX = position.x - prevPosition.x
+                                            val deltaY = position.y - prevPosition.y
+
+                                            if (gestureDirection == null) {
+                                                accumulatedDx += deltaX
+                                                accumulatedDy += deltaY
+                                                val distSq = accumulatedDx * accumulatedDx + accumulatedDy * accumulatedDy
+                                                if (distSq >= thresholdPx * thresholdPx) {
+                                                    if (kotlin.math.abs(accumulatedDx) > kotlin.math.abs(accumulatedDy)) {
+                                                        gestureDirection = "horizontal"
+                                                    } else {
+                                                        gestureDirection = "vertical"
+                                                    }
+                                                    change.consume()
+                                                }
+                                            } else {
+                                                change.consume()
+                                                if (gestureDirection == "horizontal") {
+                                                    val newOffset = contentOffsetX.value + deltaX
+                                                    scope.launch {
+                                                        contentOffsetX.snapTo(newOffset)
+                                                    }
+                                                } else {
+                                                    if (deltaY > 0) {
+                                                        if (fullPlayerProgress.value > 0f) {
+                                                            val progressDelta = -deltaY / screenHeightPx
+                                                            val newProgress = (fullPlayerProgress.value + progressDelta).coerceIn(0f, 1f)
+                                                            scope.launch {
+                                                                fullPlayerProgress.snapTo(newProgress)
+                                                            }
+                                                        } else if (tileOffsetY.value >= 0f) {
+                                                            val newTileOffset = tileOffsetY.value + deltaY
+                                                            scope.launch {
+                                                                tileOffsetY.snapTo(newTileOffset)
+                                                            }
+                                                        }
+                                                    } else if (deltaY < 0 && tileOffsetY.value == 0f) {
+                                                        val progressDelta = -deltaY / screenHeightPx
+                                                        val newProgress = (fullPlayerProgress.value + progressDelta).coerceIn(0f, 1f)
+                                                        scope.launch {
+                                                            fullPlayerProgress.snapTo(newProgress)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } while (event.changes.any { it.pressed })
+
+                                    // Touch released
+                                    if (gestureDirection == "horizontal") {
+                                        val threshold = 0.4f * tileWidthPx
+                                        val currentOffset = contentOffsetX.value
+                                        if (currentOffset < -threshold && nextSongTitle != null) {
+                                            scope.launch {
+                                                contentOffsetX.animateTo(
+                                                    targetValue = -tileWidthPx,
+                                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                                                )
+                                                onNextSong()
+                                                contentOffsetX.snapTo(0f)
+                                            }
+                                        } else if (currentOffset > threshold && prevSongTitle != null) {
+                                            scope.launch {
+                                                contentOffsetX.animateTo(
+                                                    targetValue = tileWidthPx,
+                                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                                                )
+                                                onPreviousSong()
+                                                contentOffsetX.snapTo(0f)
+                                            }
+                                        } else {
+                                            scope.launch {
+                                                contentOffsetX.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                                                )
+                                            }
+                                        }
+                                    } else if (gestureDirection == "vertical") {
+                                        if (tileOffsetY.value > 0f) {
+                                            val dismissThreshold = 30f * density
+                                            if (tileOffsetY.value > dismissThreshold) {
+                                                scope.launch {
+                                                    tileOffsetY.animateTo(
+                                                        targetValue = 150f * density,
+                                                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                                                    )
+                                                    onDismiss()
+                                                    tileOffsetY.snapTo(0f)
+                                                }
+                                            } else {
+                                                scope.launch {
+                                                    tileOffsetY.animateTo(
+                                                        targetValue = 0f,
+                                                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                                                    )
+                                                }
+                                            }
+                                        } else if (fullPlayerProgress.value > 0f) {
+                                            val swipeDuration = System.currentTimeMillis() - startTime
+                                            val isFlingUp = swipeDuration < 250 && (-accumulatedDy) > 30f * density
+                                            if (fullPlayerProgress.value > 0.15f || isFlingUp) {
+                                                scope.launch {
+                                                    fullPlayerProgress.animateTo(
+                                                        targetValue = 1f,
+                                                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                                                    )
+                                                    onOpenFullPlayer()
+                                                }
+                                            } else {
+                                                scope.launch {
+                                                    fullPlayerProgress.animateTo(
+                                                        targetValue = 0f,
+                                                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Tap gesture
+                                        scope.launch {
+                                            fullPlayerProgress.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                                            )
+                                            onOpenFullPlayer()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                ) {
+                    // ViewPager-like sliding inner content
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    translationX = contentOffsetX.value
+                                }
+                        ) {
+                            TileSongContent(currentSongTitle, currentSongArtist, currentSongArtwork, onPrimaryColor)
+                        }
+
+                        if (nextSongTitle != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        translationX = contentOffsetX.value + tileWidthPx
+                                    }
+                            ) {
+                                TileSongContent(nextSongTitle, nextSongArtist, nextSongArtwork, onPrimaryColor)
+                            }
+                        }
+
+                        if (prevSongTitle != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        translationX = contentOffsetX.value - tileWidthPx
+                                    }
+                            ) {
+                                TileSongContent(prevSongTitle, prevSongArtist, prevSongArtwork, onPrimaryColor)
+                            }
+                        }
+                    }
                 }
             }
 
-            CircularDockButton(
-                icon = Icons.Outlined.LibraryMusic,
-                contentDescription = "Library",
-                primaryColor = primaryColor,
-                onPrimaryColor = onPrimaryColor
+            Spacer(modifier = Modifier.width(if (isTrackLoaded) spacing2 else 0.dp))
+
+            // 3. Library Button
+            Box(
+                modifier = Modifier
+                    .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
+                    .width(libraryWidth)
+                    .height(60.dp)
+                    .clip(RoundedCornerShape(30.dp))
+                    .background(primaryColor)
+                    .clickable {
+                        playSoundAndHaptic()
+                        onNavigate(AppScreen.PLAYLISTS)
+                    },
+                contentAlignment = Alignment.Center
             ) {
-                playSoundAndHaptic()
-                onNavigate(AppScreen.PLAYLISTS)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.LibraryMusic,
+                        contentDescription = "Library",
+                        tint = onPrimaryColor,
+                        modifier = Modifier.size(if (isTrackLoaded) 24.dp else 20.dp)
+                    )
+                    AnimatedVisibility(
+                        visible = !isTrackLoaded,
+                        enter = fadeIn() + expandHorizontally(),
+                        exit = fadeOut() + shrinkHorizontally()
+                    ) {
+                        Row {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Library",
+                                color = onPrimaryColor,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
             }
         }
-    } else {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            BottomActionButton(
-                label = "Search",
-                icon = Icons.Default.Search,
-                primaryColor = primaryColor,
-                onPrimaryColor = onPrimaryColor,
-                modifier = Modifier.weight(1f)
-            ) {
-                playSoundAndHaptic()
-                onNavigate(AppScreen.SEARCH)
-            }
-
-            BottomActionButton(
-                label = "Library",
-                icon = Icons.Outlined.LibraryMusic,
-                primaryColor = primaryColor,
-                onPrimaryColor = onPrimaryColor,
-                modifier = Modifier.weight(1f)
-            ) {
-                playSoundAndHaptic()
-                onNavigate(AppScreen.PLAYLISTS)
-            }
-        }
-    }
-}
-
-@Composable
-private fun BottomActionButton(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    primaryColor: Color,
-    onPrimaryColor: Color,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = modifier
-            .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
-            .height(60.dp)
-            .clip(RoundedCornerShape(30.dp))
-            .background(primaryColor)
-            .clickable { onClick() },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = onPrimaryColor,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = label,
-            color = onPrimaryColor,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
-
-@Composable
-private fun CircularDockButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    primaryColor: Color,
-    onPrimaryColor: Color,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .shadow(elevation = 6.dp, shape = CircleShape)
-            .size(60.dp)
-            .clip(CircleShape)
-            .background(primaryColor)
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = onPrimaryColor,
-            modifier = Modifier.size(24.dp)
-        )
     }
 }
 
