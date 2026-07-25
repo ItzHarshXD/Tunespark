@@ -2,7 +2,15 @@ package com.tunespark.music.ui.screens
 
 import android.content.Context
 import android.media.AudioManager
+import android.os.Vibrator
+import android.os.VibrationEffect
+import android.os.Build
 import com.tunespark.music.VisualizerData
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -116,6 +124,22 @@ fun parseLyricsToLines(rawLyrics: String): List<LyricLine> {
 }
 
 @Composable
+fun DropIndicatorLine(
+    isHighlighted: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .background(
+                color = if (isHighlighted) MaterialTheme.colorScheme.primary else Color.Transparent,
+                shape = RoundedCornerShape(3.dp)
+            )
+    )
+}
+
+@Composable
 fun RadioScreen(
     exoPlayer: Player,
     playQueue: List<MediaItem>,
@@ -142,6 +166,114 @@ fun RadioScreen(
     val context = LocalContext.current
     val keepScreenOnSetting = remember(context) { com.tunespark.music.SessionManager.getKeepScreenOn(context) }
     val showVisualizerSetting = remember(context) { com.tunespark.music.SessionManager.getShowVisualizer(context) }
+
+    var draggedId by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    var currentTouchY by remember { mutableStateOf(0f) }
+    var hoverIndex by remember { mutableStateOf(-1) }
+    val density = LocalDensity.current
+    val itemHeightPx = with(density) { 76.dp.toPx() }
+    val queueListState = rememberLazyListState()
+
+    var localQueue by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    LaunchedEffect(playQueue, draggedId) {
+        if (draggedId == null) {
+            localQueue = playQueue
+        }
+    }
+
+    val vibrator = remember(context) { context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator }
+    val triggerVibration: (Long) -> Unit = { durationMs ->
+        try {
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(durationMs)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    val updateHoverIndex = {
+        val layoutInfo = queueListState.layoutInfo
+        val draggedItemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.key == draggedId }
+        if (draggedItemInfo != null) {
+            val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+            val minOffset = -draggedItemInfo.offset.toFloat()
+            val maxOffset = (viewportHeight - draggedItemInfo.size - draggedItemInfo.offset).toFloat()
+            dragOffset = dragOffset.coerceIn(minOffset, maxOffset)
+        }
+
+        val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+        if (viewportHeight > 0) {
+            val clampedTouchY = currentTouchY.coerceIn(0f, viewportHeight.toFloat())
+
+            var bestTarget = -1
+            var minDiff = Float.MAX_VALUE
+
+            for (itemInfo in layoutInfo.visibleItemsInfo) {
+                val idx = itemInfo.index
+
+                // Distance to top of this item
+                val distTop = kotlin.math.abs(itemInfo.offset - clampedTouchY)
+                if (distTop < minDiff) {
+                    minDiff = distTop
+                    bestTarget = idx
+                }
+
+                // Distance to bottom of this item
+                val distBottom = kotlin.math.abs((itemInfo.offset + itemInfo.size) - clampedTouchY)
+                if (distBottom < minDiff) {
+                    minDiff = distBottom
+                    bestTarget = idx + 1
+                }
+            }
+
+            if (bestTarget != -1) {
+                val newHover = bestTarget.coerceIn(0, localQueue.size)
+                if (newHover != hoverIndex) {
+                    hoverIndex = newHover
+                    triggerVibration(25) // sharp physical click vibration on hover line shift
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(draggedId) {
+        if (draggedId != null) {
+            while (true) {
+                val layoutInfo = queueListState.layoutInfo
+                val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+                if (viewportHeight > 0) {
+                    val scrollThreshold = itemHeightPx * 0.75f
+                    var scrollAmount = 0f
+
+                    if (currentTouchY < scrollThreshold) {
+                        val ratio = ((scrollThreshold - currentTouchY) / scrollThreshold).coerceIn(0f, 2f)
+                        scrollAmount = -12f * ratio
+                    } else if (currentTouchY > viewportHeight - scrollThreshold) {
+                        val ratio = ((currentTouchY - (viewportHeight - scrollThreshold)) / scrollThreshold).coerceIn(0f, 2f)
+                        scrollAmount = 12f * ratio
+                    }
+
+                    if (scrollAmount != 0f) {
+                        val canScrollUp = queueListState.canScrollBackward
+                        val canScrollDown = queueListState.canScrollForward
+                        if ((scrollAmount < 0f && canScrollUp) || (scrollAmount > 0f && canScrollDown)) {
+                            queueListState.scrollBy(scrollAmount)
+                            dragOffset += scrollAmount
+                            updateHoverIndex()
+                        }
+                    }
+                }
+                delay(16)
+            }
+        }
+    }
 
     DisposableEffect(keepScreenOnSetting) {
         var window: android.view.Window? = null
@@ -913,83 +1045,169 @@ fun RadioScreen(
             }
         } else {
                 LazyColumn(
+                    state = queueListState,
+                    userScrollEnabled = draggedId == null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(vertical = 8.dp)
+                        .pointerInput(localQueue) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { startOffset ->
+                                    val layoutInfo = queueListState.layoutInfo
+                                    val clickedItem = layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                                        startOffset.y >= item.offset && startOffset.y <= (item.offset + item.size)
+                                    }
+                                    if (clickedItem != null) {
+                                        draggedId = clickedItem.key as? String
+                                        currentTouchY = startOffset.y
+                                        dragOffset = 0f
+                                        val originalIdx = localQueue.indexOfFirst { it.mediaId == draggedId }
+                                        if (originalIdx != -1) {
+                                            hoverIndex = originalIdx
+                                            triggerVibration(120) // hardware-level long-press physical grab vibration
+                                        }
+                                    }
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffset += dragAmount.y
+                                    currentTouchY = change.position.y
+                                    updateHoverIndex()
+                                },
+                                onDragEnd = {
+                                    val originalIdx = playQueue.indexOfFirst { it.mediaId == draggedId }
+                                    if (originalIdx != -1 && hoverIndex != -1) {
+                                        val targetIdx = if (hoverIndex < originalIdx) {
+                                            hoverIndex
+                                        } else if (hoverIndex > originalIdx) {
+                                            hoverIndex - 1
+                                        } else {
+                                            originalIdx
+                                        }
+                                        if (targetIdx != originalIdx) {
+                                            exoPlayer.moveMediaItem(originalIdx, targetIdx)
+                                        }
+                                    }
+                                    draggedId = null
+                                    hoverIndex = -1
+                                    dragOffset = 0f
+                                    currentTouchY = 0f
+                                },
+                                onDragCancel = {
+                                    val originalIdx = playQueue.indexOfFirst { it.mediaId == draggedId }
+                                    if (originalIdx != -1 && hoverIndex != -1) {
+                                        val targetIdx = if (hoverIndex < originalIdx) {
+                                            hoverIndex
+                                        } else if (hoverIndex > originalIdx) {
+                                            hoverIndex - 1
+                                        } else {
+                                            originalIdx
+                                        }
+                                        if (targetIdx != originalIdx) {
+                                            exoPlayer.moveMediaItem(originalIdx, targetIdx)
+                                        }
+                                    }
+                                    draggedId = null
+                                    hoverIndex = -1
+                                    dragOffset = 0f
+                                    currentTouchY = 0f
+                                }
+                            )
+                        },
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    itemsIndexed(playQueue) { index, item ->
-                        val isCurrent = index == currentTrackIndex
+                    itemsIndexed(localQueue, key = { index, item -> item.mediaId }) { index, item ->
+                        val isCurrent = item.mediaId == (playQueue.getOrNull(currentTrackIndex)?.mediaId ?: "")
                         val isCommentary = item.mediaId.startsWith("commentary_")
 
                         val title = item.mediaMetadata.title?.toString() ?: "Unknown Song"
                         val artist = item.mediaMetadata.artist?.toString() ?: "Unknown Artist"
                         val artworkUri = item.mediaMetadata.artworkUri
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isCurrent) secondaryColor else Color.Transparent)
-                                .clickable {
-                                    exoPlayer.seekToDefaultPosition(index)
-                                }
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        val isDragged = item.mediaId == draggedId
+                        val translationY = if (isDragged) dragOffset else 0f
+                        val zIndexValue = if (isDragged) 10f else 1f
 
-                            Box(
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            // Highlightable line before the item
+                            DropIndicatorLine(isHighlighted = draggedId != null && hoverIndex == index)
+
+                            Row(
                                 modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(secondaryColor)
+                                    .fillMaxWidth()
+                                    .zIndex(zIndexValue)
+                                    .graphicsLayer {
+                                        this.translationY = translationY
+                                        this.scaleX = if (isDragged) 1.05f else 1f
+                                        this.scaleY = if (isDragged) 1.05f else 1f
+                                        this.shadowElevation = if (isDragged) with(density) { 8.dp.toPx() } else 0f
+                                    }
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isCurrent) secondaryColor else if (isDragged) secondaryColor.copy(alpha = 0.15f) else Color.Transparent)
+                                    .clickable(enabled = draggedId == null) {
+                                        exoPlayer.seekToDefaultPosition(index)
+                                    }
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (isCommentary) {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("✨", fontSize = 20.sp)
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(secondaryColor)
+                                ) {
+                                    if (isCommentary) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("✨", fontSize = 20.sp)
+                                        }
+                                    } else if (artworkUri != null) {
+                                        AsyncImage(
+                                            model = artworkUri.toString(),
+                                            contentDescription = "Queue Artwork",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("🎵", fontSize = 20.sp)
+                                        }
                                     }
-                                } else if (artworkUri != null) {
-                                    AsyncImage(
-                                        model = artworkUri.toString(),
-                                        contentDescription = "Queue Artwork",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = title,
+                                        fontSize = 15.sp,
+                                        fontWeight = if (isCurrent) FontWeight.Medium else FontWeight.Normal,
+                                        color = if (isCommentary) Color(0xFF5856D6) else textColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                } else {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("🎵", fontSize = 20.sp)
-                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = artist,
+                                        fontSize = 12.sp,
+                                        color = textColor.copy(alpha = 0.6f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = title,
-                                    fontSize = 15.sp,
-                                    fontWeight = if (isCurrent) FontWeight.Medium else FontWeight.Normal,
-                                    color = if (isCommentary) Color(0xFF5856D6) else textColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = artist,
-                                    fontSize = 12.sp,
-                                    color = textColor.copy(alpha = 0.6f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                            if (index == localQueue.size - 1) {
+                                DropIndicatorLine(isHighlighted = draggedId != null && hoverIndex == localQueue.size)
                             }
                         }
                     }
