@@ -830,7 +830,11 @@ fun BottomDock(
     onPreviousSong: () -> Unit = {},
     onDismiss: () -> Unit = {},
     fullPlayerProgress: Animatable<Float, *>,
-    onOpenFullPlayer: () -> Unit = {}
+    onOpenFullPlayer: () -> Unit = {},
+    searchProgress: Animatable<Float, *>,
+    onOpenSearch: () -> Unit = {},
+    libraryProgress: Animatable<Float, *>,
+    onOpenLibrary: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -880,14 +884,85 @@ fun BottomDock(
             // 1. Search Button
             Box(
                 modifier = Modifier
-                    .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
+                    .shadow(elevation = 6.dp, shape = CircleShape)
                     .width(searchWidth)
                     .height(60.dp)
-                    .clip(RoundedCornerShape(30.dp))
+                    .clip(CircleShape)
                     .background(primaryColor)
-                    .clickable {
-                        playSoundAndHaptic()
-                        onNavigate(AppScreen.SEARCH)
+                    .pointerInput(isTrackLoaded) {
+                        val thresholdPx = 15f * density
+                        awaitPointerEventScope {
+                            while (true) {
+                                val down = awaitFirstDown()
+                                var startTime = System.currentTimeMillis()
+                                var accumulatedDy = 0f
+                                var gestureDirection: String? = null
+
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull() ?: break
+                                    if (change.pressed) {
+                                        val deltaY = change.position.y - change.previousPosition.y
+
+                                        if (gestureDirection == null) {
+                                            accumulatedDy += deltaY
+                                            if (kotlin.math.abs(accumulatedDy) >= thresholdPx) {
+                                                gestureDirection = "vertical"
+                                                change.consume()
+                                            }
+                                        } else {
+                                            change.consume()
+                                            // vertical drag
+                                            if (deltaY < 0) { // dragging up
+                                                val progressDelta = -deltaY / screenHeightPx
+                                                val newProgress = (searchProgress.value + progressDelta).coerceIn(0f, 1f)
+                                                scope.launch {
+                                                    searchProgress.snapTo(newProgress)
+                                                }
+                                            } else if (deltaY > 0 && searchProgress.value > 0f) { // dragging down
+                                                val progressDelta = -deltaY / screenHeightPx
+                                                val newProgress = (searchProgress.value + progressDelta).coerceIn(0f, 1f)
+                                                scope.launch {
+                                                    searchProgress.snapTo(newProgress)
+                                                }
+                                            }
+                                        }
+                                    }
+                                } while (event.changes.any { it.pressed })
+
+                                // Touch released
+                                if (gestureDirection == "vertical") {
+                                    val swipeDuration = System.currentTimeMillis() - startTime
+                                    val isFlingUp = swipeDuration < 250 && (-accumulatedDy) > 30f * density
+                                    if (searchProgress.value > 0.15f || isFlingUp) {
+                                        scope.launch {
+                                            searchProgress.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                                            )
+                                            onOpenSearch()
+                                        }
+                                    } else {
+                                        scope.launch {
+                                            searchProgress.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    // Tap gesture
+                                    playSoundAndHaptic()
+                                    scope.launch {
+                                        searchProgress.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                                        )
+                                        onOpenSearch()
+                                    }
+                                }
+                            }
+                        }
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -1130,14 +1205,85 @@ fun BottomDock(
             // 3. Library Button
             Box(
                 modifier = Modifier
-                    .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
+                    .shadow(elevation = 6.dp, shape = CircleShape)
                     .width(libraryWidth)
                     .height(60.dp)
-                    .clip(RoundedCornerShape(30.dp))
+                    .clip(CircleShape)
                     .background(primaryColor)
-                    .clickable {
-                        playSoundAndHaptic()
-                        onNavigate(AppScreen.PLAYLISTS)
+                    .pointerInput(isTrackLoaded) {
+                        val thresholdPx = 15f * density
+                        awaitPointerEventScope {
+                            while (true) {
+                                val down = awaitFirstDown()
+                                var startTime = System.currentTimeMillis()
+                                var accumulatedDy = 0f
+                                var gestureDirection: String? = null
+
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull() ?: break
+                                    if (change.pressed) {
+                                        val deltaY = change.position.y - change.previousPosition.y
+
+                                        if (gestureDirection == null) {
+                                            accumulatedDy += deltaY
+                                            if (kotlin.math.abs(accumulatedDy) >= thresholdPx) {
+                                                gestureDirection = "vertical"
+                                                change.consume()
+                                            }
+                                        } else {
+                                            change.consume()
+                                            // vertical drag
+                                            if (deltaY < 0) { // dragging up
+                                                val progressDelta = -deltaY / screenHeightPx
+                                                val newProgress = (libraryProgress.value + progressDelta).coerceIn(0f, 1f)
+                                                scope.launch {
+                                                    libraryProgress.snapTo(newProgress)
+                                                }
+                                            } else if (deltaY > 0 && libraryProgress.value > 0f) { // dragging down
+                                                val progressDelta = -deltaY / screenHeightPx
+                                                val newProgress = (libraryProgress.value + progressDelta).coerceIn(0f, 1f)
+                                                scope.launch {
+                                                    libraryProgress.snapTo(newProgress)
+                                                }
+                                            }
+                                        }
+                                    }
+                                } while (event.changes.any { it.pressed })
+
+                                // Touch released
+                                if (gestureDirection == "vertical") {
+                                    val swipeDuration = System.currentTimeMillis() - startTime
+                                    val isFlingUp = swipeDuration < 250 && (-accumulatedDy) > 30f * density
+                                    if (libraryProgress.value > 0.15f || isFlingUp) {
+                                        scope.launch {
+                                            libraryProgress.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                                            )
+                                            onOpenLibrary()
+                                        }
+                                    } else {
+                                        scope.launch {
+                                            libraryProgress.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    // Tap gesture
+                                    playSoundAndHaptic()
+                                    scope.launch {
+                                        libraryProgress.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                                        )
+                                        onOpenLibrary()
+                                    }
+                                }
+                            }
+                        }
                     },
                 contentAlignment = Alignment.Center
             ) {

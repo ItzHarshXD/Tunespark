@@ -150,6 +150,8 @@ fun MainPlayerScreen(
     var isAccountWebViewShowing by remember { mutableStateOf(false) }
 
     val fullPlayerProgress = remember { Animatable(0f) }
+    val searchProgress = remember { Animatable(0f) }
+    val libraryProgress = remember { Animatable(0f) }
 
     val openFullPlayer: () -> Unit = {
         coroutineScope.launch {
@@ -175,22 +177,93 @@ fun MainPlayerScreen(
         }
     }
 
-    val navigateHandler: (AppScreen) -> Unit = { screen ->
-        if (screen == AppScreen.RADIO) {
-            openFullPlayer()
-        } else {
-            currentScreen = screen
+    val openSearch: () -> Unit = {
+        coroutineScope.launch {
+            searchProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
         }
     }
 
-    BackHandler(enabled = fullPlayerProgress.value > 0f) {
-        closeFullPlayer()
+    val closeSearch: () -> Unit = {
+        coroutineScope.launch {
+            searchProgress.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
+    val openLibrary: () -> Unit = {
+        coroutineScope.launch {
+            libraryProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
+    val closeLibrary: () -> Unit = {
+        coroutineScope.launch {
+            libraryProgress.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
+    val navigateHandler: (AppScreen) -> Unit = { screen ->
+        if (screen == AppScreen.RADIO) {
+            openFullPlayer()
+        } else if (screen == AppScreen.SEARCH) {
+            openSearch()
+        } else if (screen == AppScreen.PLAYLISTS) {
+            openLibrary()
+        } else if (screen == AppScreen.HOME) {
+            closeFullPlayer()
+            closeSearch()
+            closeLibrary()
+        } else {
+            currentScreen = screen
+            closeFullPlayer()
+            closeSearch()
+            closeLibrary()
+        }
+    }
+
+    BackHandler(enabled = fullPlayerProgress.value > 0f || searchProgress.value > 0f || libraryProgress.value > 0f) {
+        if (fullPlayerProgress.value > 0f) {
+            closeFullPlayer()
+        } else if (searchProgress.value > 0f) {
+            closeSearch()
+        } else if (libraryProgress.value > 0f) {
+            closeLibrary()
+        }
     }
 
     LaunchedEffect(currentScreen) {
         if (currentScreen == AppScreen.RADIO) {
             currentScreen = AppScreen.HOME
             openFullPlayer()
+        } else if (currentScreen == AppScreen.SEARCH) {
+            currentScreen = AppScreen.HOME
+            openSearch()
+        } else if (currentScreen == AppScreen.PLAYLISTS) {
+            currentScreen = AppScreen.HOME
+            openLibrary()
         }
         if (currentScreen != AppScreen.ACCOUNT) {
             isAccountWebViewShowing = false
@@ -1392,11 +1465,11 @@ fun MainPlayerScreen(
                             .align(Alignment.BottomCenter)
                             .windowInsetsPadding(WindowInsets.navigationBars)
                             .graphicsLayer {
-                                alpha = 1f - fullPlayerProgress.value
+                                alpha = 1f - maxOf(fullPlayerProgress.value, searchProgress.value, libraryProgress.value)
                             }
                             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
                     ) {
-                        val touchEnabled = fullPlayerProgress.value < 0.1f
+                        val touchEnabled = fullPlayerProgress.value < 0.1f && searchProgress.value < 0.1f && libraryProgress.value < 0.1f
                         Box(modifier = if (touchEnabled) Modifier else Modifier.graphicsLayer { alpha = 0f }.clickable(enabled = false) {}) {
                             val nextSong = playQueue.getOrNull(currentTrackIndex + 1)
                             val prevSong = playQueue.getOrNull(currentTrackIndex - 1)
@@ -1436,7 +1509,11 @@ fun MainPlayerScreen(
                                     hasNextTrack = false
                                 },
                                 fullPlayerProgress = fullPlayerProgress,
-                                onOpenFullPlayer = openFullPlayer
+                                onOpenFullPlayer = openFullPlayer,
+                                searchProgress = searchProgress,
+                                onOpenSearch = openSearch,
+                                libraryProgress = libraryProgress,
+                                onOpenLibrary = openLibrary
                             )
                         }
                     }
@@ -1454,6 +1531,11 @@ fun MainPlayerScreen(
                             translationY = yOffset.toPx()
                             alpha = radioAlpha
                         }
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = {}
+                        )
                 ) {
                     RadioScreen(
                         exoPlayer = exoPlayer,
@@ -1489,6 +1571,91 @@ fun MainPlayerScreen(
                         },
                         lyricsLines = hoistedLyricsLines,
                         isLyricsLoading = hoistedIsLyricsLoading
+                    )
+                }
+            }
+
+            // SearchScreen premium sliding overlay
+            val searchYOffset = with(LocalDensity.current) { screenHeight * (1f - searchProgress.value) }
+            if (searchProgress.value > 0.001f) {
+                val searchAlpha = (searchProgress.value / 0.5f).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = searchYOffset.toPx()
+                            alpha = searchAlpha
+                        }
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = {}
+                        )
+                ) {
+                    SearchScreen(
+                        searchQuery = searchQuery,
+                        searchResults = searchResults,
+                        isSearching = isSearching,
+                        onSearchQueryChange = { searchQuery = it },
+                        onTriggerSearch = triggerSearch,
+                        onPlaySong = { song ->
+                            playSong(song)
+                            openFullPlayer()
+                        },
+                        onNavigate = navigateHandler
+                    )
+                }
+            }
+
+            // PlaylistsScreen premium sliding overlay
+            val libraryYOffset = with(LocalDensity.current) { screenHeight * (1f - libraryProgress.value) }
+            if (libraryProgress.value > 0.001f) {
+                val libraryAlpha = (libraryProgress.value / 0.5f).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = libraryYOffset.toPx()
+                            alpha = libraryAlpha
+                        }
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = {}
+                        )
+                ) {
+                    PlaylistsScreen(
+                        initialPlaylistId = initialPlaylistId,
+                        initialPlaylistName = initialPlaylistName,
+                        initialPlaylistThumbnail = initialPlaylistThumbnail,
+                        initialPlaylistSongCountText = initialPlaylistSongCountText,
+                        initialPlaylistIsLiked = initialPlaylistIsLiked,
+                        initialPlaylistRawItem = initialPlaylistRawItem,
+                        initialPlaylistAuthorName = initialPlaylistAuthorName,
+                        initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
+                        initialPlaylistSongs = initialPlaylistSongs,
+                        onPlayPlaylist = { name, songs, startIndex ->
+                            playPlaylist(name, songs, startIndex)
+                            openFullPlayer()
+                        },
+                        onNavigate = { screen ->
+                            if (screen != AppScreen.PLAYLISTS) {
+                                initialPlaylistId = null
+                                initialPlaylistName = ""
+                                initialPlaylistThumbnail = null
+                                initialPlaylistSongCountText = ""
+                                initialPlaylistIsLiked = false
+                                initialPlaylistRawItem = null
+                                initialPlaylistAuthorName = null
+                                initialPlaylistAuthorAvatarUrl = null
+                                initialPlaylistSongs = emptyList()
+                            }
+                            if (screen == AppScreen.RADIO) {
+                                openFullPlayer()
+                            } else {
+                                navigateHandler(screen)
+                            }
+                        }
                     )
                 }
             }
