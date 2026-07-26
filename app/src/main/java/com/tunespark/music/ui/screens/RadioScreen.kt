@@ -54,6 +54,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.gestures.awaitFirstDown
 import android.view.SoundEffectConstants
 import android.view.HapticFeedbackConstants
 import kotlin.math.pow
@@ -157,6 +158,7 @@ fun RadioScreen(
     onStopRadio: () -> Unit,
     lyricsLines: List<LyricLine>,
     isLyricsLoading: Boolean,
+    fullPlayerProgress: Animatable<Float, *>? = null,
     modifier: Modifier = Modifier
 ) {
     BackHandler {
@@ -171,9 +173,10 @@ fun RadioScreen(
     var dragOffset by remember { mutableStateOf(0f) }
     var currentTouchY by remember { mutableStateOf(0f) }
     var hoverIndex by remember { mutableStateOf(-1) }
-    val density = LocalDensity.current
-    val itemHeightPx = with(density) { 76.dp.toPx() }
+    val localDensity = LocalDensity.current
+    val itemHeightPx = with(localDensity) { 76.dp.toPx() }
     val queueListState = rememberLazyListState()
+    val listState = rememberLazyListState()
 
     var localQueue by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     LaunchedEffect(playQueue, draggedId) {
@@ -200,13 +203,13 @@ fun RadioScreen(
 
     val updateHoverIndex = {
         val layoutInfo = queueListState.layoutInfo
-        val draggedItemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.key == draggedId }
-        if (draggedItemInfo != null) {
-            val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
-            val minOffset = -draggedItemInfo.offset.toFloat()
-            val maxOffset = (viewportHeight - draggedItemInfo.size - draggedItemInfo.offset).toFloat()
-            dragOffset = dragOffset.coerceIn(minOffset, maxOffset)
-        }
+                val draggedItemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.key == draggedId }
+                if (draggedItemInfo != null) {
+                    val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+                    val minOffset = -draggedItemInfo.offset.toFloat()
+                    val maxOffset = (viewportHeight - draggedItemInfo.size - draggedItemInfo.offset).toFloat()
+                    dragOffset = dragOffset.coerceIn(minOffset, maxOffset)
+                }
 
         val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
         if (viewportHeight > 0) {
@@ -350,9 +353,103 @@ fun RadioScreen(
 
     val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
+    val dragModifier = if (fullPlayerProgress != null) {
+        Modifier.pointerInput(activeTab, listState, queueListState) {
+            val thresholdPx = 15f * density
+            val screenHeightPx = size.height.toFloat()
+            awaitPointerEventScope {
+                while (true) {
+                    val down = awaitFirstDown()
+                    val startY = down.position.y
+
+                    val isListAtTop = if (activeTab == "lyrics") {
+                        listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                    } else {
+                        queueListState.firstVisibleItemIndex == 0 && queueListState.firstVisibleItemScrollOffset == 0
+                    }
+
+                    val listTopBoundaryPx = 280f * density
+                    val touchStartedInListArea = startY >= listTopBoundaryPx
+                    val touchStartedOnTopButtons = startY <= 80f * density
+
+                    val shouldAllowDrag = when {
+                        touchStartedOnTopButtons -> false
+                        touchStartedInListArea -> isListAtTop
+                        else -> true
+                    }
+
+                    if (shouldAllowDrag) {
+                        var accumulatedDy = 0f
+                        val startTime = System.currentTimeMillis()
+                        var gestureDirection: String? = null
+
+                        do {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: break
+                            if (change.pressed) {
+                                val deltaY = change.position.y - change.previousPosition.y
+
+                                if (gestureDirection == null) {
+                                    accumulatedDy += deltaY
+                                    if (kotlin.math.abs(accumulatedDy) >= thresholdPx) {
+                                        if (accumulatedDy > 0) {
+                                            gestureDirection = "vertical"
+                                            change.consume()
+                                        } else {
+                                            break
+                                        }
+                                    }
+                                } else {
+                                    change.consume()
+                                    val progressDelta = -deltaY / screenHeightPx
+                                    val newProgress = (fullPlayerProgress.value + progressDelta).coerceIn(0f, 1f)
+                                    scope.launch {
+                                        fullPlayerProgress.snapTo(newProgress)
+                                    }
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
+
+                        if (gestureDirection == "vertical") {
+                            val swipeDuration = System.currentTimeMillis() - startTime
+                            val isFlingDown = swipeDuration < 250 && accumulatedDy > 30f * density
+                            val dragPassedThreshold = fullPlayerProgress.value < 0.85f
+
+                            if (dragPassedThreshold || isFlingDown) {
+                                scope.launch {
+                                    fullPlayerProgress.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    )
+                                    onNavigate(AppScreen.HOME)
+                                }
+                            } else {
+                                scope.launch {
+                                    fullPlayerProgress.animateTo(
+                                        targetValue = 1f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Modifier
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
+            .then(dragModifier)
             .background(backgroundColor)
             .padding(horizontal = 24.dp, vertical = 0.dp)
     ) {
@@ -779,8 +876,6 @@ fun RadioScreen(
                         CircularProgressIndicator(color = primaryColor)
                     }
                 } else {
-                    val listState = rememberLazyListState()
-
                     var isAutoScrolling by remember { mutableStateOf(false) }
                     var userHasScrolledAway by remember { mutableStateOf(false) }
 
@@ -1141,7 +1236,7 @@ fun RadioScreen(
                                         this.translationY = translationY
                                         this.scaleX = if (isDragged) 1.05f else 1f
                                         this.scaleY = if (isDragged) 1.05f else 1f
-                                        this.shadowElevation = if (isDragged) with(density) { 8.dp.toPx() } else 0f
+                                        this.shadowElevation = if (isDragged) with(localDensity) { 8.dp.toPx() } else 0f
                                     }
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(if (isCurrent) secondaryColor else if (isDragged) secondaryColor.copy(alpha = 0.15f) else Color.Transparent)

@@ -1570,7 +1570,8 @@ fun MainPlayerScreen(
                             closeFullPlayer()
                         },
                         lyricsLines = hoistedLyricsLines,
-                        isLyricsLoading = hoistedIsLyricsLoading
+                        isLyricsLoading = hoistedIsLyricsLoading,
+                        fullPlayerProgress = fullPlayerProgress
                     )
                 }
             }
