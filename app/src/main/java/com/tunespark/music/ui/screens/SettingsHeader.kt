@@ -31,6 +31,9 @@ fun SettingsHeader(
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
 
+    val textColor = MaterialTheme.colorScheme.onBackground
+    val backgroundColor = MaterialTheme.colorScheme.background
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -44,21 +47,21 @@ fun SettingsHeader(
                 onBack()
             },
             modifier = Modifier
-                .size(60.dp)
+                .size(44.dp)
                 .background(Color(0xFFFF0000), shape = CircleShape)
         ) {
             Icon(
                 imageVector = Icons.Default.ArrowBack,
                 contentDescription = "Back",
                 tint = Color.White,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
         Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = title,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontSize = 32.sp,
+            color = textColor,
+            fontSize = 26.sp,
             fontWeight = FontWeight.Bold
         )
     }

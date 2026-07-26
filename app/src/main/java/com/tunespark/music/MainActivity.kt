@@ -37,6 +37,11 @@ import com.tunespark.music.ui.screens.parseLyricsToLines
 import com.metrolist.lrclib.LrcLib
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
@@ -46,6 +51,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+
+private fun getScreenDepth(screen: AppScreen): Int {
+    return when (screen) {
+        AppScreen.HOME -> 0
+        AppScreen.SETTINGS,
+        AppScreen.RECENTS,
+        AppScreen.PLAYLISTS,
+        AppScreen.SEARCH -> 1
+        AppScreen.APPEARANCE,
+        AppScreen.AI_VOICE,
+        AppScreen.COMMENTARY,
+        AppScreen.PLAYER_AUDIO,
+        AppScreen.LOCATION,
+        AppScreen.UPDATES,
+        AppScreen.ACCOUNT -> 2
+        else -> 1
+    }
+}
 
 class MainActivity : ComponentActivity() {
     private var controllerFuture: ListenableFuture<MediaController>? = null
@@ -233,6 +256,7 @@ fun MainPlayerScreen(
         } else if (screen == AppScreen.PLAYLISTS) {
             openLibrary()
         } else if (screen == AppScreen.HOME) {
+            currentScreen = AppScreen.HOME
             closeFullPlayer()
             closeSearch()
             closeLibrary()
@@ -244,13 +268,27 @@ fun MainPlayerScreen(
         }
     }
 
-    BackHandler(enabled = fullPlayerProgress.value > 0f || searchProgress.value > 0f || libraryProgress.value > 0f) {
+    BackHandler(enabled = fullPlayerProgress.value > 0f || searchProgress.value > 0f || libraryProgress.value > 0f || currentScreen != AppScreen.HOME) {
         if (fullPlayerProgress.value > 0f) {
             closeFullPlayer()
         } else if (searchProgress.value > 0f) {
             closeSearch()
         } else if (libraryProgress.value > 0f) {
             closeLibrary()
+        } else if (currentScreen != AppScreen.HOME) {
+            when (currentScreen) {
+                AppScreen.SETTINGS, AppScreen.RECENTS -> {
+                    navigateHandler(AppScreen.HOME)
+                }
+                AppScreen.APPEARANCE, AppScreen.AI_VOICE, AppScreen.COMMENTARY,
+                AppScreen.PLAYER_AUDIO, AppScreen.LOCATION, AppScreen.UPDATES,
+                AppScreen.ACCOUNT -> {
+                    navigateHandler(AppScreen.SETTINGS)
+                }
+                else -> {
+                    navigateHandler(AppScreen.HOME)
+                }
+            }
         }
     }
 
@@ -1302,8 +1340,24 @@ fun MainPlayerScreen(
             val screenHeight = maxHeight
             Box(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    when (currentScreen) {
-                        AppScreen.HOME -> {
+                    AnimatedContent(
+                        targetState = currentScreen,
+                        transitionSpec = {
+                            val initialDepth = getScreenDepth(initialState)
+                            val targetDepth = getScreenDepth(targetState)
+                            if (targetDepth > initialDepth) {
+                                slideInHorizontally(animationSpec = tween(300)) { width -> width } togetherWith
+                                        slideOutHorizontally(animationSpec = tween(300)) { width -> -width }
+                            } else {
+                                slideInHorizontally(animationSpec = tween(300)) { width -> -width } togetherWith
+                                        slideOutHorizontally(animationSpec = tween(300)) { width -> width }
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        label = "ScreenTransition"
+                    ) { targetScreen ->
+                        when (targetScreen) {
+                            AppScreen.HOME -> {
                             HomeScreen(
                                 currentSongTitle = currentSongTitle,
                                 currentSongArtist = currentSongArtist,
@@ -1447,14 +1501,15 @@ fun MainPlayerScreen(
                                 }
                             )
                         }
-                        AppScreen.RECENTS -> {
-                            RecentsScreen(
-                                onPlaySong = { song ->
-                                    playSong(song)
-                                    openFullPlayer()
-                                },
-                                onNavigate = navigateHandler
-                            )
+                            AppScreen.RECENTS -> {
+                                RecentsScreen(
+                                    onPlaySong = { song ->
+                                        playSong(song)
+                                        openFullPlayer()
+                                    },
+                                    onNavigate = navigateHandler
+                                )
+                            }
                         }
                     }
                 }

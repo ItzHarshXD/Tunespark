@@ -56,8 +56,8 @@ fun PlayerAndAudioScreen(
         modifier = modifier
             .fillMaxSize()
             .background(backgroundColor)
-            .padding(24.dp)
-            .verticalScroll(scrollState),
+            .verticalScroll(scrollState)
+            .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
         SettingsHeader(
