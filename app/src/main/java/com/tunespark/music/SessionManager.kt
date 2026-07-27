@@ -8,6 +8,10 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.Artist
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 object SessionManager {
     private const val PREF_NAME = "tunespark_session_prefs"
@@ -27,6 +31,11 @@ object SessionManager {
     private const val KEY_SHOW_VISUALIZER = "show_visualizer"
     private const val KEY_COMMENTARY_ENABLED = "commentary_enabled"
     private const val KEY_LOCAL_HISTORY = "local_listening_history"
+
+    @Volatile
+    private var cachedHistory: List<Pair<SongItem, Long>>? = null
+    private val historyLock = Any()
+    private val historyScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -110,54 +119,58 @@ object SessionManager {
      * Adds a song to local listening history.
      */
     fun addSongToHistory(context: Context, song: SongItem) {
-        val prefs = getPrefs(context)
-        val historyStr = prefs.getString(KEY_LOCAL_HISTORY, "[]") ?: "[]"
-        try {
-            val jsonArray = JSONArray(historyStr)
+        synchronized(historyLock) {
+            // Force load existing history into cache if not already loaded
+            val currentList = getLocalHistoryWithTimestamps(context)
             
             // If the song is identical to the most recent one (at index 0), do not record it consecutively
-            if (jsonArray.length() > 0) {
-                val lastSong = jsonArray.getJSONObject(0)
-                if (lastSong.getString("id") == song.id) {
-                    return // skip adding consecutively
+            if (currentList.isNotEmpty() && currentList[0].first.id == song.id) {
+                return // skip adding consecutively
+            }
+            
+            val timestamp = System.currentTimeMillis()
+            val newList = mutableListOf<Pair<SongItem, Long>>()
+            newList.add(Pair(song, timestamp))
+            
+            // Limit to 1000 elements
+            val remainingLimit = 1000 - 1
+            val itemsToAdd = Math.min(currentList.size, remainingLimit)
+            for (i in 0 until itemsToAdd) {
+                newList.add(currentList[i])
+            }
+            
+            // Update the cache immediately so it's instantly visible to the app
+            cachedHistory = newList
+            
+            // Asynchronously offload serialization & shared preferences write
+            historyScope.launch(Dispatchers.IO) {
+                synchronized(historyLock) {
+                    val listToSerialize = cachedHistory ?: newList
+                    val finalArray = JSONArray()
+                    for (pair in listToSerialize) {
+                        val songItem = pair.first
+                        val ts = pair.second
+                        val songJson = JSONObject().apply {
+                            put("id", songItem.id)
+                            put("title", songItem.title)
+                            put("thumbnail", songItem.thumbnail)
+                            put("timestamp", ts)
+                            val artistsArray = JSONArray()
+                            songItem.artists.forEach { artist ->
+                                artistsArray.put(JSONObject().apply {
+                                    put("name", artist.name)
+                                    put("id", artist.id ?: "")
+                                })
+                            }
+                            put("artists", artistsArray)
+                        }
+                        finalArray.put(songJson)
+                    }
+                    getPrefs(context).edit()
+                        .putString(KEY_LOCAL_HISTORY, finalArray.toString())
+                        .apply()
                 }
             }
-            
-            val newArray = JSONArray()
-            
-            // Add the new song at the top/index 0
-            val newSongJson = JSONObject().apply {
-                put("id", song.id)
-                put("title", song.title)
-                put("thumbnail", song.thumbnail)
-                put("timestamp", System.currentTimeMillis())
-                val artistsArray = JSONArray()
-                song.artists.forEach { artist ->
-                    artistsArray.put(JSONObject().apply {
-                        put("name", artist.name)
-                        put("id", artist.id ?: "")
-                    })
-                }
-                put("artists", artistsArray)
-            }
-            newArray.put(newSongJson)
-            
-            // Append all previous items (do not remove existing duplicates!)
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-                newArray.put(item)
-            }
-            
-            // Limit local history size to 1000 songs to prevent SharedPreferences from growing too large
-            val finalArray = JSONArray()
-            val limit = Math.min(newArray.length(), 1000)
-            for (i in 0 until limit) {
-                finalArray.put(newArray.get(i))
-            }
-            
-            prefs.edit().putString(KEY_LOCAL_HISTORY, finalArray.toString()).apply()
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
 
@@ -165,79 +178,52 @@ object SessionManager {
      * Retrieves the local listening history.
      */
     fun getLocalHistory(context: Context): List<SongItem> {
-        val prefs = getPrefs(context)
-        val historyStr = prefs.getString(KEY_LOCAL_HISTORY, "[]") ?: "[]"
-        val songsList = mutableListOf<SongItem>()
-        try {
-            val jsonArray = JSONArray(historyStr)
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-                val id = item.getString("id")
-                val title = item.getString("title")
-                val thumbnail = item.getString("thumbnail")
-                
-                val artistsList = mutableListOf<Artist>()
-                val artistsArray = item.getJSONArray("artists")
-                for (j in 0 until artistsArray.length()) {
-                    val artistObj = artistsArray.getJSONObject(j)
-                    val artistName = artistObj.getString("name")
-                    val artistId = artistObj.optString("id").ifBlank { null }
-                    artistsList.add(Artist(name = artistName, id = artistId))
-                }
-                
-                songsList.add(
-                    SongItem(
-                        id = id,
-                        title = title,
-                        artists = artistsList,
-                        thumbnail = thumbnail
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return songsList
+        return getLocalHistoryWithTimestamps(context).map { it.first }
     }
 
     fun getLocalHistoryWithTimestamps(context: Context): List<Pair<SongItem, Long>> {
-        val prefs = getPrefs(context)
-        val historyStr = prefs.getString(KEY_LOCAL_HISTORY, "[]") ?: "[]"
-        val songsList = mutableListOf<Pair<SongItem, Long>>()
-        try {
-            val jsonArray = JSONArray(historyStr)
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-                val id = item.getString("id")
-                val title = item.getString("title")
-                val thumbnail = item.getString("thumbnail")
-                val timestamp = item.optLong("timestamp", System.currentTimeMillis() - i * 60000L)
-                
-                val artistsList = mutableListOf<Artist>()
-                val artistsArray = item.getJSONArray("artists")
-                for (j in 0 until artistsArray.length()) {
-                    val artistObj = artistsArray.getJSONObject(j)
-                    val artistName = artistObj.getString("name")
-                    val artistId = artistObj.optString("id").ifBlank { null }
-                    artistsList.add(Artist(name = artistName, id = artistId))
-                }
-                
-                songsList.add(
-                    Pair(
-                        SongItem(
-                            id = id,
-                            title = title,
-                            artists = artistsList,
-                            thumbnail = thumbnail
-                        ),
-                        timestamp
+        cachedHistory?.let { return it }
+        synchronized(historyLock) {
+            cachedHistory?.let { return it }
+            val prefs = getPrefs(context)
+            val historyStr = prefs.getString(KEY_LOCAL_HISTORY, "[]") ?: "[]"
+            val songsList = mutableListOf<Pair<SongItem, Long>>()
+            try {
+                val jsonArray = JSONArray(historyStr)
+                for (i in 0 until jsonArray.length()) {
+                    val item = jsonArray.getJSONObject(i)
+                    val id = item.getString("id")
+                    val title = item.getString("title")
+                    val thumbnail = item.getString("thumbnail")
+                    val timestamp = item.optLong("timestamp", System.currentTimeMillis() - i * 60000L)
+                    
+                    val artistsList = mutableListOf<Artist>()
+                    val artistsArray = item.getJSONArray("artists")
+                    for (j in 0 until artistsArray.length()) {
+                        val artistObj = artistsArray.getJSONObject(j)
+                        val artistName = artistObj.getString("name")
+                        val artistId = artistObj.optString("id").ifBlank { null }
+                        artistsList.add(Artist(name = artistName, id = artistId))
+                    }
+                    
+                    songsList.add(
+                        Pair(
+                            SongItem(
+                                id = id,
+                                title = title,
+                                artists = artistsList,
+                                thumbnail = thumbnail
+                            ),
+                            timestamp
+                        )
                     )
-                )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+            cachedHistory = songsList
+            return songsList
         }
-        return songsList
     }
 
     fun getGeminiApiKey(context: Context): String {
