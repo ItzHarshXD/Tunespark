@@ -17,6 +17,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -237,6 +239,213 @@ fun AiVoiceScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Gemini Text Generation Model Dropdown
+            var textDropdownExpanded by remember { mutableStateOf(false) }
+            var selectedTextModel by remember { mutableStateOf(SessionManager.getSelectedGeminiTextModel(context)) }
+
+            val geminiTextModels = remember {
+                listOf(
+                    "Gemini 3.1 Flash Lite",
+                    "Gemini 3.5 Flash",
+                    "Gemini 3.5 Flash Lite",
+                    "Gemini 2 Flash",
+                    "Gemini 2 Flash Lite",
+                    "Gemini 2.5 Flash",
+                    "Gemini 2.5 Flash Lite",
+                    "Gemini 2.5 Pro",
+                    "Gemini 3 Flash",
+                    "Gemini 3.1 Pro",
+                    "Gemini 3.6 Flash",
+                    "Gemma 4 26B",
+                    "Gemma 4 31B"
+                )
+            }
+
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                OutlinedTextField(
+                    value = selectedTextModel,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Gemini Text Generation Model", color = textColor) },
+                    trailingIcon = {
+                        IconButton(onClick = { textDropdownExpanded = !textDropdownExpanded }) {
+                            Icon(
+                                imageVector = if (textDropdownExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                contentDescription = "Toggle Dropdown",
+                                tint = textColor
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedBorderColor = textColor,
+                        focusedBorderColor = textColor,
+                        unfocusedTextColor = textColor,
+                        focusedTextColor = textColor
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            textDropdownExpanded = true
+                        }
+                )
+                DropdownMenu(
+                    expanded = textDropdownExpanded,
+                    onDismissRequest = { textDropdownExpanded = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    geminiTextModels.forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text(model) },
+                            onClick = {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                selectedTextModel = model
+                                SessionManager.saveSelectedGeminiTextModel(context, model)
+                                textDropdownExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Test API Button & Status Indicator
+            var apiTestStatus by remember { mutableStateOf<String?>(null) }
+            var isTestingApi by remember { mutableStateOf(false) }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        if (geminiApiKey.isBlank()) {
+                            Toast.makeText(context, "Please enter a Gemini API Key first", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        isTestingApi = true
+                        apiTestStatus = "Testing..."
+                        scope.launch {
+                            val (success, message) = testGeminiApiKey(geminiApiKey)
+                            isTestingApi = false
+                            apiTestStatus = message
+                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    enabled = !isTestingApi,
+                    modifier = Modifier.height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFFF0000),
+                        contentColor = Color.White,
+                        disabledContainerColor = Color.Gray
+                    ),
+                    shape = RoundedCornerShape(25.dp)
+                ) {
+                    Text(
+                        text = if (isTestingApi) "Testing..." else "Test API",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                apiTestStatus?.let { status ->
+                    val statusColor = if (status.startsWith("API Key is working")) {
+                        Color(0xFF4CAF50) // Green
+                    } else if (status.startsWith("Testing")) {
+                        Color.Gray
+                    } else {
+                        Color(0xFFE53935) // Red
+                    }
+                    Text(
+                        text = status,
+                        color = statusColor,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Gemini TTS Model Dropdown
+            var ttsDropdownExpanded by remember { mutableStateOf(false) }
+            var selectedTtsModel by remember { mutableStateOf(SessionManager.getSelectedGeminiTtsModel(context)) }
+
+            val geminiTtsModels = remember {
+                listOf(
+                    "Gemini 3.1 Flash TTS",
+                    "Gemini 2.5 Flash TTS",
+                    "Gemini 2.5 Pro TTS"
+                )
+            }
+
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                OutlinedTextField(
+                    value = selectedTtsModel,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Gemini TTS Model", color = textColor) },
+                    trailingIcon = {
+                        IconButton(onClick = { ttsDropdownExpanded = !ttsDropdownExpanded }) {
+                            Icon(
+                                imageVector = if (ttsDropdownExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                contentDescription = "Toggle Dropdown",
+                                tint = textColor
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedBorderColor = textColor,
+                        focusedBorderColor = textColor,
+                        unfocusedTextColor = textColor,
+                        focusedTextColor = textColor
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            ttsDropdownExpanded = true
+                        }
+                )
+                DropdownMenu(
+                    expanded = ttsDropdownExpanded,
+                    onDismissRequest = { ttsDropdownExpanded = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    geminiTtsModels.forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text(model) },
+                            onClick = {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                selectedTtsModel = model
+                                SessionManager.saveSelectedGeminiTtsModel(context, model)
+                                ttsDropdownExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             var isGeminiTts by remember {
                 mutableStateOf(SessionManager.getActiveTtsProvider(context) == "Gemini")
             }
@@ -406,6 +615,78 @@ fun AiVoiceScreen(
                     Text("Voice ID", color = textColor)
                 }
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ElevenLabs Model Dropdown
+            var elevenLabsDropdownExpanded by remember { mutableStateOf(false) }
+            var selectedElevenLabsModel by remember { mutableStateOf(SessionManager.getSelectedElevenLabsModel(context)) }
+
+            val elevenLabsModels = remember {
+                listOf(
+                    "Eleven Multilingual v2",
+                    "Eleven Multilingual v1",
+                    "Eleven Monolingual v1",
+                    "Eleven Turbo v2",
+                    "Eleven Turbo v2.5",
+                    "Eleven Flash v2",
+                    "Eleven Flash v2.5"
+                )
+            }
+
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                OutlinedTextField(
+                    value = selectedElevenLabsModel,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("ElevenLabs TTS Model", color = textColor) },
+                    trailingIcon = {
+                        IconButton(onClick = { elevenLabsDropdownExpanded = !elevenLabsDropdownExpanded }) {
+                            Icon(
+                                imageVector = if (elevenLabsDropdownExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                contentDescription = "Toggle Dropdown",
+                                tint = textColor
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedBorderColor = textColor,
+                        focusedBorderColor = textColor,
+                        unfocusedTextColor = textColor,
+                        focusedTextColor = textColor
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            elevenLabsDropdownExpanded = true
+                        }
+                )
+                DropdownMenu(
+                    expanded = elevenLabsDropdownExpanded,
+                    onDismissRequest = { elevenLabsDropdownExpanded = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    elevenLabsModels.forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text(model) },
+                            onClick = {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                selectedElevenLabsModel = model
+                                SessionManager.saveSelectedElevenLabsModel(context, model)
+                                elevenLabsDropdownExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -472,6 +753,39 @@ fun AiVoiceScreen(
         }
         
         Spacer(modifier = Modifier.height(110.dp))
+    }
+}
+
+private suspend fun testGeminiApiKey(apiKey: String): Pair<Boolean, String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    try {
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val url = "https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}"
+        val request = okhttp3.Request.Builder()
+            .url(url)
+            .get()
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (response.isSuccessful) {
+                Pair(true, "API Key is working successfully!")
+            } else {
+                val body = response.body?.string() ?: ""
+                var errorDetail = response.message
+                try {
+                    val json = org.json.JSONObject(body)
+                    if (json.has("error")) {
+                        errorDetail = json.getJSONObject("error").getString("message")
+                    }
+                } catch (e: Exception) {}
+                Pair(false, "Verification failed: $errorDetail")
+            }
+        }
+    } catch (e: java.io.IOException) {
+        Pair(false, "Connection error: ${e.message}")
+    } catch (e: Exception) {
+        Pair(false, "Error: ${e.message}")
     }
 }
 

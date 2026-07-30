@@ -31,6 +31,9 @@ object SessionManager {
     private const val KEY_SHOW_VISUALIZER = "show_visualizer"
     private const val KEY_COMMENTARY_ENABLED = "commentary_enabled"
     private const val KEY_LOCAL_HISTORY = "local_listening_history"
+    private const val KEY_SELECTED_GEMINI_TEXT_MODEL = "selected_gemini_text_model"
+    private const val KEY_SELECTED_GEMINI_TTS_MODEL = "selected_gemini_tts_model"
+    private const val KEY_SELECTED_ELEVENLABS_MODEL = "selected_elevenlabs_model"
 
     @Volatile
     private var cachedHistory: List<Pair<SongItem, Long>>? = null
@@ -311,5 +314,29 @@ object SessionManager {
 
     fun saveShowVisualizer(context: Context, show: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_SHOW_VISUALIZER, show).apply()
+    }
+
+    fun getSelectedGeminiTextModel(context: Context): String {
+        return getPrefs(context).getString(KEY_SELECTED_GEMINI_TEXT_MODEL, "Gemini 3.5 Flash Lite") ?: "Gemini 3.5 Flash Lite"
+    }
+
+    fun saveSelectedGeminiTextModel(context: Context, model: String) {
+        getPrefs(context).edit().putString(KEY_SELECTED_GEMINI_TEXT_MODEL, model).apply()
+    }
+
+    fun getSelectedGeminiTtsModel(context: Context): String {
+        return getPrefs(context).getString(KEY_SELECTED_GEMINI_TTS_MODEL, "Gemini 3.1 Flash TTS") ?: "Gemini 3.1 Flash TTS"
+    }
+
+    fun saveSelectedGeminiTtsModel(context: Context, model: String) {
+        getPrefs(context).edit().putString(KEY_SELECTED_GEMINI_TTS_MODEL, model).apply()
+    }
+
+    fun getSelectedElevenLabsModel(context: Context): String {
+        return getPrefs(context).getString(KEY_SELECTED_ELEVENLABS_MODEL, "Eleven Multilingual v2") ?: "Eleven Multilingual v2"
+    }
+
+    fun saveSelectedElevenLabsModel(context: Context, model: String) {
+        getPrefs(context).edit().putString(KEY_SELECTED_ELEVENLABS_MODEL, model).apply()
     }
 }
