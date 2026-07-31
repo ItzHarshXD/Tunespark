@@ -190,8 +190,8 @@ fun HomeScreen(
     isCommunityLoading: Boolean,
     recentsSongs: List<SongItem>,
     isRecentsLoading: Boolean,
-    dailyDiscoverSongs: List<SongItem>,
-    isDailyDiscoverLoading: Boolean,
+    quickPicksSongs: List<SongItem>,
+    isQuickPicksLoading: Boolean,
     
     modifier: Modifier = Modifier
 ) {
@@ -437,8 +437,8 @@ fun HomeScreen(
                             isCommunityLoading = isCommunityLoading,
                             recentsSongs = recentsSongs,
                             isRecentsLoading = isRecentsLoading,
-                            dailyDiscoverSongs = dailyDiscoverSongs,
-                            isDailyDiscoverLoading = isDailyDiscoverLoading,
+                            quickPicksSongs = quickPicksSongs,
+                            isQuickPicksLoading = isQuickPicksLoading,
                             onShowAllClick = {
                                 playSoundAndHaptic()
                                 onNavigate(AppScreen.RECENTS)
@@ -482,8 +482,8 @@ private fun IdleContent(
     isCommunityLoading: Boolean,
     recentsSongs: List<SongItem>,
     isRecentsLoading: Boolean,
-    dailyDiscoverSongs: List<SongItem>,
-    isDailyDiscoverLoading: Boolean,
+    quickPicksSongs: List<SongItem>,
+    isQuickPicksLoading: Boolean,
     onShowAllClick: () -> Unit,
     onPlaySong: (SongItem) -> Unit,
     onStartRadio: () -> Unit,
@@ -504,9 +504,9 @@ private fun IdleContent(
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        DailyDiscoverView(
-            songs = dailyDiscoverSongs,
-            isLoading = isDailyDiscoverLoading,
+        QuickPicksView(
+            songs = quickPicksSongs,
+            isLoading = isQuickPicksLoading,
             textColor = textColor,
             primaryColor = primaryColor,
             onPlayPlaylist = onPlayPlaylist
@@ -2036,7 +2036,7 @@ fun CommunityPlaylistDetailView(
 }
 
 @Composable
-fun DailyDiscoverView(
+fun QuickPicksView(
     songs: List<SongItem>,
     isLoading: Boolean,
     textColor: Color,
@@ -2054,7 +2054,7 @@ fun DailyDiscoverView(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Your daily discover",
+                text = "Quick picks",
                 color = textColor,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
@@ -2065,7 +2065,7 @@ fun DailyDiscoverView(
                     modifier = Modifier
                         .clip(CircleShape)
                         .background(textColor)
-                        .clickable { onPlayPlaylist("Daily Discover", songs, 0) }
+                        .clickable { onPlayPlaylist("Quick Picks", songs, 0) }
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Text(
@@ -2079,7 +2079,7 @@ fun DailyDiscoverView(
         }
 
         if (isLoading || songs.isEmpty()) {
-            DailyDiscoverSkeleton()
+            QuickPicksSkeleton()
         } else {
             val pagerState = rememberPagerState(pageCount = { songs.size })
 
@@ -2113,12 +2113,12 @@ fun DailyDiscoverView(
                     label = "zoomScale"
                 )
 
-                DailyDiscoverCard(
+                QuickPicksCard(
                     song = song,
                     textColor = textColor,
                     primaryColor = primaryColor,
                     scale = zoomScale,
-                    onClick = { onPlayPlaylist("Daily Discover", songs, index) }
+                    onClick = { onPlayPlaylist("Quick Picks", songs, index) }
                 )
             }
         }
@@ -2152,7 +2152,7 @@ private fun String.toHighResThumbnail(): String {
 }
 
 @Composable
-fun DailyDiscoverCard(
+fun QuickPicksCard(
     song: SongItem,
     textColor: Color,
     primaryColor: Color,
@@ -2233,7 +2233,7 @@ fun DailyDiscoverCard(
 }
 
 @Composable
-fun DailyDiscoverSkeleton() {
+fun QuickPicksSkeleton() {
     val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
     val alpha by infiniteTransition.animateFloat(
         initialValue = 0.3f,

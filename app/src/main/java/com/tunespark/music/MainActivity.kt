@@ -879,12 +879,12 @@ fun MainPlayerScreen(
     var homeRecentsSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isHomeRecentsLoading by remember { mutableStateOf(false) }
 
-    var homeDailyDiscoverSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
-    var isHomeDailyDiscoverLoading by remember { mutableStateOf(false) }
+    var homeQuickPicksSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
+    var isHomeQuickPicksLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(userSignedIn, localHistorySize, homeRefreshTrigger) {
-        isHomeDailyDiscoverLoading = true
-        homeDailyDiscoverSongs = emptyList()
+        isHomeQuickPicksLoading = true
+        homeQuickPicksSongs = emptyList()
         withContext(Dispatchers.IO) {
             try {
                 val songs = mutableListOf<SongItem>()
@@ -1001,13 +1001,13 @@ fun MainPlayerScreen(
                     }
                 }
                 withContext(Dispatchers.Main) {
-                    homeDailyDiscoverSongs = songs
-                    isHomeDailyDiscoverLoading = false
+                    homeQuickPicksSongs = songs
+                    isHomeQuickPicksLoading = false
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    isHomeDailyDiscoverLoading = false
+                    isHomeQuickPicksLoading = false
                 }
             }
         }
@@ -1396,8 +1396,8 @@ fun MainPlayerScreen(
                                 isCommunityLoading = isHomeCommunityLoading,
                                 recentsSongs = homeRecentsSongs,
                                 isRecentsLoading = isHomeRecentsLoading,
-                                dailyDiscoverSongs = homeDailyDiscoverSongs,
-                                isDailyDiscoverLoading = isHomeDailyDiscoverLoading
+                                quickPicksSongs = homeQuickPicksSongs,
+                                isQuickPicksLoading = isHomeQuickPicksLoading
                             )
                         }
                         AppScreen.SETTINGS -> {
