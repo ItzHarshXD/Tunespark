@@ -48,6 +48,7 @@ import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
 import com.tunespark.music.WeatherInfo
 import com.tunespark.music.WeatherService
+import com.tunespark.music.rss.Article
 import com.tunespark.music.ui.theme.BitcountSingleFontFamily
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.filled.PlaylistAdd
@@ -192,6 +193,9 @@ fun HomeScreen(
     isRecentsLoading: Boolean,
     quickPicksSongs: List<SongItem>,
     isQuickPicksLoading: Boolean,
+    discoverArticles: List<Article>,
+    isDiscoverLoading: Boolean,
+    isDiscoverEnabled: Boolean,
     
     modifier: Modifier = Modifier
 ) {
@@ -439,9 +443,16 @@ fun HomeScreen(
                             isRecentsLoading = isRecentsLoading,
                             quickPicksSongs = quickPicksSongs,
                             isQuickPicksLoading = isQuickPicksLoading,
+                            discoverArticles = discoverArticles,
+                            isDiscoverLoading = isDiscoverLoading,
+                            isDiscoverEnabled = isDiscoverEnabled,
                             onShowAllClick = {
                                 playSoundAndHaptic()
                                 onNavigate(AppScreen.RECENTS)
+                            },
+                            onDiscoverShowAllClick = {
+                                playSoundAndHaptic()
+                                onNavigate(AppScreen.DISCOVER)
                             },
                             onPlaySong = { song ->
                                 playSoundAndHaptic()
@@ -484,7 +495,11 @@ private fun IdleContent(
     isRecentsLoading: Boolean,
     quickPicksSongs: List<SongItem>,
     isQuickPicksLoading: Boolean,
+    discoverArticles: List<Article>,
+    isDiscoverLoading: Boolean,
+    isDiscoverEnabled: Boolean,
     onShowAllClick: () -> Unit,
+    onDiscoverShowAllClick: () -> Unit,
     onPlaySong: (SongItem) -> Unit,
     onStartRadio: () -> Unit,
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
@@ -493,6 +508,17 @@ private fun IdleContent(
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
+        if (isDiscoverEnabled) {
+            DiscoverView(
+                articles = discoverArticles,
+                isLoading = isDiscoverLoading,
+                textColor = textColor,
+                onShowAllClick = onDiscoverShowAllClick
+            )
+
+            Spacer(modifier = Modifier.height(40.dp))
+        }
+
         RecentsView(
             songs = recentsSongs,
             isLoading = isRecentsLoading,
@@ -2258,6 +2284,164 @@ fun QuickPicksSkeleton() {
                     .background(Color.Gray.copy(alpha = alpha))
             )
         }
+    }
+}
+
+@Composable
+fun DiscoverView(
+    articles: List<Article>,
+    isLoading: Boolean,
+    textColor: Color,
+    onShowAllClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Discover",
+                color = textColor,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(textColor)
+                    .clickable { onShowAllClick() }
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "Show all",
+                    color = MaterialTheme.colorScheme.background,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        if (isLoading) {
+            // Loading skeleton
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(end = 16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(3) {
+                    Column(modifier = Modifier.width(240.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .width(240.dp)
+                                .height(140.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.Gray.copy(alpha = 0.2f))
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.8f)
+                                .height(14.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color.Gray.copy(alpha = 0.15f))
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.5f)
+                                .height(11.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color.Gray.copy(alpha = 0.15f))
+                        )
+                    }
+                }
+            }
+        } else if (articles.isEmpty()) {
+            Text(
+                text = "No discover items.",
+                color = textColor.copy(alpha = 0.4f),
+                fontSize = 14.sp,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(end = 16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(articles.take(10)) { article ->
+                    DiscoverCard(
+                        article = article,
+                        textColor = textColor
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DiscoverCard(
+    article: Article,
+    textColor: Color
+) {
+    val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val playSoundAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
+    Column(
+        modifier = Modifier
+            .width(240.dp)
+            .clickable {
+                playSoundAndHaptic()
+                // Open the article URL in the browser
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse(article.url)
+                )
+                context.startActivity(intent)
+            }
+    ) {
+        AsyncImage(
+            model = article.thumbnail,
+            contentDescription = article.title,
+            modifier = Modifier
+                .width(240.dp)
+                .height(140.dp)
+                .clip(RoundedCornerShape(16.dp)),
+            contentScale = ContentScale.Crop
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = article.title,
+            color = textColor,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = "${article.source} • ${article.timeAgo()}",
+            color = textColor.copy(alpha = 0.55f),
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

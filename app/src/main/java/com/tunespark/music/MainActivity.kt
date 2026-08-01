@@ -35,6 +35,8 @@ import com.tunespark.music.ui.screens.LyricLine
 import com.tunespark.music.ui.screens.cleanYouTubeTitle
 import com.tunespark.music.ui.screens.parseLyricsToLines
 import com.metrolist.lrclib.LrcLib
+import com.tunespark.music.rss.Article
+import com.tunespark.music.rss.RssRepository
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -58,14 +60,16 @@ private fun getScreenDepth(screen: AppScreen): Int {
         AppScreen.SETTINGS,
         AppScreen.RECENTS,
         AppScreen.PLAYLISTS,
-        AppScreen.SEARCH -> 1
+        AppScreen.SEARCH,
+        AppScreen.DISCOVER -> 1
         AppScreen.APPEARANCE,
         AppScreen.AI_VOICE,
         AppScreen.COMMENTARY,
         AppScreen.PLAYER_AUDIO,
         AppScreen.LOCATION,
         AppScreen.UPDATES,
-        AppScreen.ACCOUNT -> 2
+        AppScreen.ACCOUNT,
+        AppScreen.DISCOVER_FEED -> 2
         else -> 1
     }
 }
@@ -155,7 +159,9 @@ enum class AppScreen {
     LOCATION,
     UPDATES,
     PLAYLISTS,
-    RECENTS
+    RECENTS,
+    DISCOVER,
+    DISCOVER_FEED
 }
 
 @Composable
@@ -277,12 +283,12 @@ fun MainPlayerScreen(
             closeLibrary()
         } else if (currentScreen != AppScreen.HOME) {
             when (currentScreen) {
-                AppScreen.SETTINGS, AppScreen.RECENTS -> {
+                AppScreen.SETTINGS, AppScreen.RECENTS, AppScreen.DISCOVER -> {
                     navigateHandler(AppScreen.HOME)
                 }
                 AppScreen.APPEARANCE, AppScreen.AI_VOICE, AppScreen.COMMENTARY,
                 AppScreen.PLAYER_AUDIO, AppScreen.LOCATION, AppScreen.UPDATES,
-                AppScreen.ACCOUNT -> {
+                AppScreen.ACCOUNT, AppScreen.DISCOVER_FEED -> {
                     navigateHandler(AppScreen.SETTINGS)
                 }
                 else -> {
@@ -826,7 +832,6 @@ fun MainPlayerScreen(
                     }.orEmpty()
                     songList.addAll(chartSongs)
                 }
-
                 // 2. Fetch from YouTube Home (editorial / community collections)
                 val homeResult = YouTube.home()
                 if (homeResult.isSuccess) {
@@ -881,6 +886,32 @@ fun MainPlayerScreen(
 
     var homeQuickPicksSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isHomeQuickPicksLoading by remember { mutableStateOf(false) }
+
+    // RSS Discover feed state
+    var discoverArticles by remember { mutableStateOf<List<Article>>(emptyList()) }
+    var isDiscoverLoading by remember { mutableStateOf(false) }
+    var isDiscoverEnabled by remember { mutableStateOf(SessionManager.isDiscoverFeedEnabled(context)) }
+
+    // Re-read the discover enabled state whenever the user navigates back to Home
+    // (e.g., after changing it in the Discover Feed settings screen)
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == AppScreen.HOME) {
+            isDiscoverEnabled = SessionManager.isDiscoverFeedEnabled(context)
+        }
+    }
+
+    LaunchedEffect(homeRefreshTrigger) {
+        isDiscoverLoading = true
+        withContext(Dispatchers.IO) {
+            // Force refresh when the user pulls-to-refresh (homeRefreshTrigger > 0),
+            // otherwise use cached data on initial load
+            val articles = RssRepository.getArticles(context, forceRefresh = homeRefreshTrigger > 0)
+            withContext(Dispatchers.Main) {
+                discoverArticles = articles
+                isDiscoverLoading = false
+            }
+        }
+    }
 
     LaunchedEffect(userSignedIn, localHistorySize, homeRefreshTrigger) {
         isHomeQuickPicksLoading = true
@@ -1397,7 +1428,10 @@ fun MainPlayerScreen(
                                 recentsSongs = homeRecentsSongs,
                                 isRecentsLoading = isHomeRecentsLoading,
                                 quickPicksSongs = homeQuickPicksSongs,
-                                isQuickPicksLoading = isHomeQuickPicksLoading
+                                isQuickPicksLoading = isHomeQuickPicksLoading,
+                                discoverArticles = discoverArticles,
+                                isDiscoverLoading = isDiscoverLoading,
+                                isDiscoverEnabled = isDiscoverEnabled
                             )
                         }
                         AppScreen.SETTINGS -> {
@@ -1507,6 +1541,16 @@ fun MainPlayerScreen(
                                         playSong(song)
                                         openFullPlayer()
                                     },
+                                    onNavigate = navigateHandler
+                                )
+                            }
+                            AppScreen.DISCOVER -> {
+                                DiscoverScreen(
+                                    onNavigate = navigateHandler
+                                )
+                            }
+                            AppScreen.DISCOVER_FEED -> {
+                                DiscoverFeedScreen(
                                     onNavigate = navigateHandler
                                 )
                             }

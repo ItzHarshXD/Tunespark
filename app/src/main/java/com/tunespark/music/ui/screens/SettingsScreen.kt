@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
@@ -58,6 +59,7 @@ fun SettingsScreen(
         val settingsItems = listOf(
             "Appearance" to Icons.Default.Palette,
             "Account" to Icons.Default.AccountCircle,
+            "Discover feed" to Icons.Default.List,
             "AI and Voice" to Icons.Default.Mic,
             "Commentary" to Icons.Default.ChatBubble,
             "Player and Audio" to Icons.Default.MusicNote,
@@ -76,6 +78,7 @@ fun SettingsScreen(
                         val destination = when (item) {
                             "Appearance" -> AppScreen.APPEARANCE
                             "Account" -> AppScreen.ACCOUNT
+                            "Discover feed" -> AppScreen.DISCOVER_FEED
                             "AI and Voice" -> AppScreen.AI_VOICE
                             "Commentary" -> AppScreen.COMMENTARY
                             "Player and Audio" -> AppScreen.PLAYER_AUDIO

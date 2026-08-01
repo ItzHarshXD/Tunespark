@@ -34,6 +34,7 @@ object SessionManager {
     private const val KEY_SELECTED_GEMINI_TEXT_MODEL = "selected_gemini_text_model"
     private const val KEY_SELECTED_GEMINI_TTS_MODEL = "selected_gemini_tts_model"
     private const val KEY_SELECTED_ELEVENLABS_MODEL = "selected_elevenlabs_model"
+    private const val KEY_DISCOVER_FEED_ENABLED = "discover_feed_enabled"
 
     @Volatile
     private var cachedHistory: List<Pair<SongItem, Long>>? = null
@@ -338,5 +339,34 @@ object SessionManager {
 
     fun saveSelectedElevenLabsModel(context: Context, model: String) {
         getPrefs(context).edit().putString(KEY_SELECTED_ELEVENLABS_MODEL, model).apply()
+    }
+
+    fun getDiscoverCategories(context: Context): List<Pair<String, Boolean>> {
+        val categories = listOf(
+            "🤖 AI", "💻 Tech", "🚀 Space", "🔬 Science", "🚗 Cars & EVs", "🎮 Gaming", "🎬 Movies & TV", "💼 Business & Startups", "💰 Finance", "🧠 Mind & Productivity", "🌍 World", "🎵 Music", "⚽ Sports", "👗 Fashion", "🍳 Food", "✈️ Travel"
+        )
+        val prefs = getPrefs(context)
+        return categories.map { category ->
+            category to prefs.getBoolean("discover_category_$category", true)
+        }
+    }
+
+    fun saveDiscoverCategory(context: Context, category: String, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean("discover_category_$category", enabled).apply()
+    }
+
+    /**
+     * Returns whether the Discover feed is enabled (master toggle).
+     * Defaults to true (ON).
+     */
+    fun isDiscoverFeedEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_DISCOVER_FEED_ENABLED, true)
+    }
+
+    /**
+     * Saves the Discover feed master toggle state.
+     */
+    fun saveDiscoverFeedEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_DISCOVER_FEED_ENABLED, enabled).apply()
     }
 }
