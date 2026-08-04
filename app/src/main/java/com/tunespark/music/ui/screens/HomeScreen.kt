@@ -59,6 +59,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import android.media.AudioManager
 import com.metrolist.innertube.YouTube
@@ -196,6 +197,7 @@ fun HomeScreen(
     discoverArticles: List<Article>,
     isDiscoverLoading: Boolean,
     isDiscoverEnabled: Boolean,
+    onAiSummaryClick: (Article) -> Unit = {},
     
     modifier: Modifier = Modifier
 ) {
@@ -454,6 +456,7 @@ fun HomeScreen(
                                 playSoundAndHaptic()
                                 onNavigate(AppScreen.DISCOVER)
                             },
+                            onAiSummaryClick = onAiSummaryClick,
                             onPlaySong = { song ->
                                 playSoundAndHaptic()
                                 onPlaySong(song)
@@ -500,6 +503,7 @@ private fun IdleContent(
     isDiscoverEnabled: Boolean,
     onShowAllClick: () -> Unit,
     onDiscoverShowAllClick: () -> Unit,
+    onAiSummaryClick: (Article) -> Unit = {},
     onPlaySong: (SongItem) -> Unit,
     onStartRadio: () -> Unit,
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
@@ -513,7 +517,8 @@ private fun IdleContent(
                 articles = discoverArticles,
                 isLoading = isDiscoverLoading,
                 textColor = textColor,
-                onShowAllClick = onDiscoverShowAllClick
+                onShowAllClick = onDiscoverShowAllClick,
+                onAiSummaryClick = onAiSummaryClick
             )
 
             Spacer(modifier = Modifier.height(40.dp))
@@ -2292,7 +2297,8 @@ fun DiscoverView(
     articles: List<Article>,
     isLoading: Boolean,
     textColor: Color,
-    onShowAllClick: () -> Unit
+    onShowAllClick: () -> Unit,
+    onAiSummaryClick: (Article) -> Unit = {}
 ) {
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -2335,11 +2341,11 @@ fun DiscoverView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 items(3) {
-                    Column(modifier = Modifier.width(240.dp)) {
+                    Column(modifier = Modifier.width(280.dp)) {
                         Box(
                             modifier = Modifier
-                                .width(240.dp)
-                                .height(140.dp)
+                                .width(280.dp)
+                                .height(160.dp)
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(Color.Gray.copy(alpha = 0.2f))
                         )
@@ -2378,7 +2384,8 @@ fun DiscoverView(
                 items(articles.take(10)) { article ->
                     DiscoverCard(
                         article = article,
-                        textColor = textColor
+                        textColor = textColor,
+                        onAiSummaryClick = { onAiSummaryClick(article) }
                     )
                 }
             }
@@ -2389,7 +2396,8 @@ fun DiscoverView(
 @Composable
 fun DiscoverCard(
     article: Article,
-    textColor: Color
+    textColor: Color,
+    onAiSummaryClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -2401,7 +2409,7 @@ fun DiscoverCard(
 
     Column(
         modifier = Modifier
-            .width(240.dp)
+            .width(280.dp)
             .clickable {
                 playSoundAndHaptic()
                 // Open the article URL in the browser
@@ -2416,22 +2424,51 @@ fun DiscoverCard(
             model = article.thumbnail,
             contentDescription = article.title,
             modifier = Modifier
-                .width(240.dp)
-                .height(140.dp)
+                .width(280.dp)
+                .height(160.dp)
                 .clip(RoundedCornerShape(16.dp)),
             contentScale = ContentScale.Crop
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Text(
-            text = article.title,
-            color = textColor,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
+        // Headline row: title + AI icon button (dedicated space, doesn't affect layout)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top
+        ) {
+            Text(
+                text = article.title,
+                color = textColor,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // AI summary icon button with its own dedicated space
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable {
+                        playSoundAndHaptic()
+                        onAiSummaryClick()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.AutoAwesome,
+                    contentDescription = "Generate AI summary",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(2.dp))
 

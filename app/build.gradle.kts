@@ -58,4 +58,5 @@ dependencies {
     implementation(libs.ktor.serialization.json)
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.github.wendykierp:JTransforms:3.1")
+    implementation("org.jsoup:jsoup:1.17.2")
 }

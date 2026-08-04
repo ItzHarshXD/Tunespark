@@ -4,6 +4,11 @@ import android.content.Context
 import android.media.AudioManager
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -31,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
+import com.tunespark.music.ai.ArticleSummaryService
 import com.tunespark.music.rss.Article
 import com.tunespark.music.rss.RssRepository
 import kotlinx.coroutines.Dispatchers
@@ -43,11 +50,15 @@ fun DiscoverScreen(
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier,
     // Add dummy callback just in case but we don't have to use it
-    onPlaySong: ((Any) -> Unit)? = null
+    onPlaySong: ((Any) -> Unit)? = null,
+    // Pending AI summary article (set when user taps AI icon on Home carousel)
+    pendingAiSummaryArticle: Article? = null,
+    onPendingAiSummaryConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
+    val accentColor = MaterialTheme.colorScheme.primary
 
     val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val view = LocalView.current
@@ -63,6 +74,16 @@ fun DiscoverScreen(
     var isRefreshing by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
+    // AI summary state: set of expanded article URLs (multiple can be open),
+    // generated summaries, loading state
+    var expandedSummaryUrls by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var summaryTexts by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var summaryLoadingUrls by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var summaryError by remember { mutableStateOf<String?>(null) }
+
+    // LazyListState for auto-scrolling to a pending article
+    val listState = rememberLazyListState()
+
     suspend fun loadArticles(forceRefresh: Boolean = false) {
         val articles = withContext(Dispatchers.IO) {
             RssRepository.getArticles(context, forceRefresh)
@@ -77,6 +98,48 @@ fun DiscoverScreen(
         coroutineScope.launch {
             loadArticles()
         }
+    }
+
+    // Auto-scroll to and auto-generate summary for the pending article
+    // (set when the user taps the AI icon on the Home screen carousel)
+    LaunchedEffect(pendingAiSummaryArticle, discoverArticles) {
+        val pending = pendingAiSummaryArticle ?: return@LaunchedEffect
+        if (discoverArticles.isEmpty()) return@LaunchedEffect
+
+        val targetIndex = discoverArticles.indexOfFirst { it.url == pending.url }
+        if (targetIndex == -1) return@LaunchedEffect
+
+        // Scroll to the article (with a small offset so it's nicely positioned)
+        listState.animateScrollToItem(
+            index = targetIndex + 1, // +1 for the "Today's Highlights" header item
+            scrollOffset = -80
+        )
+
+        // Expand the summary and trigger generation
+        expandedSummaryUrls = expandedSummaryUrls + pending.url
+        if (summaryTexts[pending.url] == null && pending.url !in summaryLoadingUrls) {
+            summaryLoadingUrls = summaryLoadingUrls + pending.url
+            summaryError = null
+            coroutineScope.launch {
+                try {
+                    val summary = withContext(Dispatchers.IO) {
+                        ArticleSummaryService.getOrGenerateSummary(
+                            context = context,
+                            articleUrl = pending.url,
+                            articleTitle = pending.title
+                        )
+                    }
+                    summaryTexts = summaryTexts + (pending.url to summary)
+                } catch (e: Exception) {
+                    summaryError = e.message ?: "Failed to generate summary"
+                } finally {
+                    summaryLoadingUrls = summaryLoadingUrls - pending.url
+                }
+            }
+        }
+
+        // Consume the pending article so it doesn't re-trigger
+        onPendingAiSummaryConsumed()
     }
 
     BackHandler {
@@ -157,7 +220,7 @@ fun DiscoverScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 LazyColumn(
-                    state = rememberLazyListState(),
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -221,64 +284,303 @@ fun DiscoverScreen(
                         }
                     } else {
                         items(discoverArticles) { article ->
-                            // Full-width rectangle card (Google Discover style)
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable {
-                                        playSoundAndHaptic()
-                                        // Open the article URL in the browser
-                                        val intent = android.content.Intent(
-                                            android.content.Intent.ACTION_VIEW,
-                                            android.net.Uri.parse(article.url)
-                                        )
-                                        context.startActivity(intent)
-                                    }
-                            ) {
-                                // Big rectangle image on top
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(180.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color.Gray.copy(alpha = 0.2f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (article.thumbnail.isNotEmpty()) {
-                                        AsyncImage(
-                                            model = article.thumbnail,
-                                            contentDescription = article.title,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
+                            ArticleCardWithSummary(
+                                article = article,
+                                textColor = textColor,
+                                accentColor = accentColor,
+                                expandedSummaryUrls = expandedSummaryUrls,
+                                summaryTexts = summaryTexts,
+                                summaryLoadingUrls = summaryLoadingUrls,
+                                summaryError = summaryError,
+                                onToggleSummary = { url ->
+                                    playSoundAndHaptic()
+                                    expandedSummaryUrls = if (url in expandedSummaryUrls) {
+                                        expandedSummaryUrls - url
                                     } else {
-                                        Text("📰", fontSize = 32.sp)
+                                        expandedSummaryUrls + url
                                     }
+                                    if (summaryTexts[url] == null && url !in summaryLoadingUrls) {
+                                        summaryLoadingUrls = summaryLoadingUrls + url
+                                        summaryError = null
+                                        coroutineScope.launch {
+                                            try {
+                                                val summary = withContext(Dispatchers.IO) {
+                                                    ArticleSummaryService.getOrGenerateSummary(
+                                                        context = context,
+                                                        articleUrl = url,
+                                                        articleTitle = article.title
+                                                    )
+                                                }
+                                                summaryTexts = summaryTexts + (url to summary)
+                                            } catch (e: Exception) {
+                                                summaryError = e.message ?: "Failed to generate summary"
+                                            } finally {
+                                                summaryLoadingUrls = summaryLoadingUrls - url
+                                            }
+                                        }
+                                    }
+                                },
+                                onOpenArticle = {
+                                    playSoundAndHaptic()
+                                    val intent = android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(article.url)
+                                    )
+                                    context.startActivity(intent)
                                 }
-
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                // Text below the image - full headline visible
-                                Text(
-                                    text = article.title,
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textColor
-                                )
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                Text(
-                                    text = "${article.source} • ${article.timeAgo()}",
-                                    fontSize = 13.sp,
-                                    color = textColor.copy(alpha = 0.55f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                            )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArticleCardWithSummary(
+    article: Article,
+    textColor: Color,
+    accentColor: Color,
+    expandedSummaryUrls: Set<String>,
+    summaryTexts: Map<String, String>,
+    summaryLoadingUrls: Set<String>,
+    summaryError: String?,
+    onToggleSummary: (String) -> Unit,
+    onOpenArticle: () -> Unit
+) {
+    val isExpanded = article.url in expandedSummaryUrls
+    val summary = summaryTexts[article.url]
+    val isLoading = article.url in summaryLoadingUrls
+    val isUnscraped = summary == ArticleSummaryService.UNABLE_TO_GET_DATA
+
+    // Parse bulleted summary text into individual bullet lines
+    val summaryBullets = remember(summary) {
+        summary?.lines()
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.mapNotNull { line ->
+                line.removePrefix("-").trim().takeIf { it.isNotEmpty() }
+            }
+            .orEmpty()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onOpenArticle() }
+    ) {
+        // Big rectangle image on top
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Gray.copy(alpha = 0.2f)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (article.thumbnail.isNotEmpty()) {
+                AsyncImage(
+                    model = article.thumbnail,
+                    contentDescription = article.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Text("📰", fontSize = 32.sp)
+            }
+        }
+
+        // Padding for all content below the image so it sits nicely inside the card
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 12.dp)
+        ) {
+            // Headline row: title + AI icon button (dedicated space, doesn't affect layout)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = article.title,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = textColor,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // AI summary icon button with high-contrast accent background
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(accentColor)
+                        .clickable { onToggleSummary(article.url) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = "Generate AI summary",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "${article.source} • ${article.timeAgo()}",
+                fontSize = 13.sp,
+                color = textColor.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // Expandable AI summary section - attached to the article tile,
+            // no separate boxed block, just flows naturally below the meta line.
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                ) {
+                if (isLoading) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = accentColor
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Generating summary...",
+                            fontSize = 13.sp,
+                            color = textColor.copy(alpha = 0.6f)
+                        )
+                    }
+                } else if (isUnscraped) {
+                    // Friendly fallback when the article page couldn't be scraped
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("⚠️", fontSize = 16.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Unable to get data for this article.",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textColor
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = "We couldn't read this article's page. You can still open it directly.",
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            color = textColor.copy(alpha = 0.65f)
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Open Article button - solid accent, full clickable area
+                        Button(
+                            onClick = { onOpenArticle() },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = accentColor,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                            modifier = Modifier
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                        ) {
+                            Text(
+                                text = "Open Article",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                } else if (summary != null) {
+                    // Render the summary as a quick takeaway line + scannable points
+                    if (summaryBullets.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            summaryBullets.forEachIndexed { index, bullet ->
+                                if (index == 0) {
+                                    // First line: the quick takeaway, no bullet marker
+                                    Text(
+                                        text = bullet,
+                                        fontSize = 15.sp,
+                                        lineHeight = 21.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = textColor
+                                    )
+                                } else {
+                                    // Remaining lines: short points with a subtle marker
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(top = 2.dp)
+                                                .size(5.dp)
+                                                .clip(CircleShape)
+                                                .background(accentColor)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = bullet,
+                                            fontSize = 14.sp,
+                                            lineHeight = 20.sp,
+                                            color = textColor,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Fallback: plain text if no bullets were detected
+                        Text(
+                            text = summary,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            color = textColor
+                        )
+                    }
+                } else if (summaryError != null && article.url in expandedSummaryUrls) {
+                    Text(
+                        text = summaryError,
+                        fontSize = 13.sp,
+                        color = Color(0xFFE53935)
+                    )
+                }
                 }
             }
         }

@@ -892,6 +892,9 @@ fun MainPlayerScreen(
     var isDiscoverLoading by remember { mutableStateOf(false) }
     var isDiscoverEnabled by remember { mutableStateOf(SessionManager.isDiscoverFeedEnabled(context)) }
 
+    // Pending AI summary article (set when user taps AI icon on Home carousel)
+    var pendingAiSummaryArticle by remember { mutableStateOf<Article?>(null) }
+
     // Re-read the discover enabled state whenever the user navigates back to Home
     // (e.g., after changing it in the Discover Feed settings screen)
     LaunchedEffect(currentScreen) {
@@ -1431,7 +1434,11 @@ fun MainPlayerScreen(
                                 isQuickPicksLoading = isHomeQuickPicksLoading,
                                 discoverArticles = discoverArticles,
                                 isDiscoverLoading = isDiscoverLoading,
-                                isDiscoverEnabled = isDiscoverEnabled
+                                isDiscoverEnabled = isDiscoverEnabled,
+                                onAiSummaryClick = { article ->
+                                    pendingAiSummaryArticle = article
+                                    navigateHandler(AppScreen.DISCOVER)
+                                }
                             )
                         }
                         AppScreen.SETTINGS -> {
@@ -1546,7 +1553,11 @@ fun MainPlayerScreen(
                             }
                             AppScreen.DISCOVER -> {
                                 DiscoverScreen(
-                                    onNavigate = navigateHandler
+                                    onNavigate = navigateHandler,
+                                    pendingAiSummaryArticle = pendingAiSummaryArticle,
+                                    onPendingAiSummaryConsumed = {
+                                        pendingAiSummaryArticle = null
+                                    }
                                 )
                             }
                             AppScreen.DISCOVER_FEED -> {
