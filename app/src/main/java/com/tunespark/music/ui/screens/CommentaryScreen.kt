@@ -41,14 +41,12 @@ fun CommentaryScreen(
 
     var isCommentaryEnabled by remember { mutableStateOf(SessionManager.isCommentaryEnabled(context)) }
 
-    var selectedCommentary by remember { mutableStateOf(setOf("Weather updates", "Session opener", "Song intro", "Artist backstory", "Mood transition", "Skip reaction")) }
+    var selectedCommentary by remember { mutableStateOf(SessionManager.getSelectedCommentary(context)) }
     val commentaryOptions = listOf(
-        "Weather updates",
         "Session opener",
-        "Song intro",
-        "Artist backstory",
-        "Mood transition",
-        "Skip reaction"
+        "Humour",
+        "Briefing",
+        "Music Context"
     )
 
     var commentaryFrequency by remember { mutableStateOf(SessionManager.getCommentaryFrequency(context)) }
@@ -173,19 +171,22 @@ fun CommentaryScreen(
                         .fillMaxWidth()
                         .height(60.dp)
                         .clickable {
-                            selectedCommentary = if (isChecked) {
+                            val newSet = if (isChecked) {
                                 selectedCommentary - option
                             } else {
                                 selectedCommentary + option
                             }
+                            selectedCommentary = newSet
+                            SessionManager.saveSelectedCommentary(context, newSet)
                         },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val checkboxShape = RoundedCornerShape(6.dp)
                     Box(
                         modifier = Modifier
                             .size(28.dp)
-                            .background(if (isChecked) primaryColor else Color.Transparent, CircleShape)
-                            .border(2.dp, if (isChecked) primaryColor else Color.Gray, CircleShape),
+                            .background(if (isChecked) primaryColor else Color.Transparent, checkboxShape)
+                            .border(2.dp, if (isChecked) primaryColor else Color.Gray, checkboxShape),
                         contentAlignment = Alignment.Center
                     ) {
                         if (isChecked) {

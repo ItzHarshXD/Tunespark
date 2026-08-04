@@ -355,6 +355,14 @@ object SessionManager {
         getPrefs(context).edit().putBoolean("discover_category_$category", enabled).apply()
     }
 
+    fun getSelectedCommentary(context: Context): Set<String> {
+        return getPrefs(context).getStringSet("selected_commentary_elements", setOf("Session opener", "Humour", "Briefing", "Music Context")) ?: setOf("Session opener", "Humour", "Briefing", "Music Context")
+    }
+
+    fun saveSelectedCommentary(context: Context, elements: Set<String>) {
+        getPrefs(context).edit().putStringSet("selected_commentary_elements", elements).apply()
+    }
+
     /**
      * Returns whether the Discover feed is enabled (master toggle).
      * Defaults to true (ON).
