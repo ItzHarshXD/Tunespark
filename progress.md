@@ -1,5 +1,5 @@
 # TuneSpark Open-Source Music Streaming Player
-# Task Progress: RSS-Powered Discover Feed
+# Task Progress: Centralized AI Commentary Context System
 
 TuneSpark is a clean Android music streaming app built with Jetpack Compose, AndroidX Media3/ExoPlayer, and Metrolist's `:innertube` module for YouTube Music data.
 
@@ -72,7 +72,95 @@ Key files:
 
 ---
 
-## RSS-Powered Discover Feed (Latest Milestone)
+## Centralized AI Commentary Context System (Latest Milestone)
+
+### 1. `CommentaryContext.kt` — Daily Context Data Model
+- **Single Source of Truth**: A single immutable data class that represents a snapshot of all relevant information for the current day that any AI commentary feature can request.
+- **Daily Scoping**: The context is scoped to the current calendar day (00:00–23:59 in the user's local timezone) via a `dateKey` like `"2026-08-04"`.
+- **Rich Context Fields**:
+  - `dateKey` — Day key used to detect day rollover.
+  - `currentTime` — Human-readable current time like "9:43 PM".
+  - `timeOfDay` — Time-of-day bucket: "morning", "afternoon", "evening", or "night".
+  - `userName` — The signed-in user's display name, if available.
+  - `todaySongs` — Songs listened to today (most recent first), with timestamps.
+  - `weather` — Current weather at the user's saved location, if enabled.
+  - `discoverArticles` — Relevant Discover feed articles for the user's interests.
+  - `sessionStartTime` — Epoch millis when the current listening session started.
+  - `songsPlayedThisSession` — Number of songs played in the current session.
+  - `currentSong` — The currently playing song as "'Title' by Artist", or null.
+  - `upcomingSongs` — Upcoming songs as "'Title' by Artist" strings.
+- **Companion Helpers**: `currentDateKey()`, `currentTimeString()`, and `currentTimeOfDay()` compute the current day/time values in the user's local timezone.
+
+### 2. `CommentaryContextManager.kt` — Centralized Context Service
+- **Single Reusable Service**: The one place that gathers and maintains all relevant information for the current day, acting as the foundation for every AI commentary feature (Session Opener, Humour, Briefing, Music Context).
+- **Automatic Daily Reset**: Detects when a new day begins (via `dateKey` comparison) and automatically resets session metadata (session start time, songs played counter).
+- **Continuous Updates**: The context is refreshed as the user listens. `recordSongPlayed()` is called by the playback pipeline whenever a real song (not a commentary) starts, keeping the session counter and context fresh.
+- **Modular & Scalable**: New context sources can be added as fields on `CommentaryContext` without changing the commentary generation pipeline.
+- **Smart Caching**:
+  - Weather is cached for 10 minutes to avoid excessive API calls.
+  - RSS articles leverage `RssRepository`'s existing 25-minute cache.
+  - Network-backed sources (weather, RSS) are refreshed asynchronously in the background so the returned context is always immediately usable.
+- **Context Prompt Builder**: `buildContextPrompt()` converts the context into a human-readable summary for inclusion in the AI prompt, giving the AI full awareness of the user's day (time, weather, listening history, session metadata, and relevant news headlines).
+
+### 3. Integration into the Commentary Generation Pipeline
+- **`TtsService.kt`**: Added an optional `contextPrompt` parameter to both `generateCommentaryScript()` and `generateCommentaryAudio()`. When provided, the context is injected into the Gemini prompt so the AI host is aware of the user's day.
+- **`PlaybackService.kt`**:
+  - `handleCurrentMediaItem()` now calls `CommentaryContextManager.recordSongPlayed()` whenever a real song (not a commentary) becomes current, keeping the session counter accurate.
+  - Both `checkAndInsertPlaylistCommentary()` (playlist mode) and `createCommentaryItem()` (radio/autoplay mode) now build the centralized daily context and pass it to `TtsService.generateCommentaryAudio()`.
+- **`MainActivity.kt`**: Both the `playPlaylist()` and `playSong()` session opener paths now build the centralized daily context and pass it to `TtsService.generateCommentaryAudio()` for the "AI DJ Welcome" session opener commentary.
+
+### 4. Refined Prompt System — Session Opener vs. Between-Songs (Implemented)
+The AI commentary now uses **two distinct prompt templates** based on the `isSessionOpener` flag, ensuring elements don't mix up:
+
+#### Session Opener Prompt (`isSessionOpener = true`)
+- This is the **first** commentary when the user starts a session — the "AI DJ Welcome".
+- **ONLY here** does the AI:
+  - Greet the user by name (from context)
+  - Mention the time of day with a greeting ("Good morning", "Good evening", etc.)
+  - Mention the weather (if available)
+  - Welcome them to the session
+- The context is provided with instructions to use time, weather, and name for the greeting, and listening history to personalize the opener.
+- **No city name**: The AI is explicitly told to describe weather conditions (e.g. "it's a sunny afternoon") but NOT say the city/location name.
+- Called from `MainActivity.kt` in both `playSong()` and `playPlaylist()` with `isSessionOpener = true`.
+
+#### Between-Songs Prompt (`isSessionOpener = false`)
+- This is a **short transition** between tracks — not a session opener.
+- The AI is **explicitly forbidden** from:
+  - Greeting the user or saying "welcome back/to"
+  - Mentioning or addressing the user by name
+  - Mentioning the time of day or any time-based greeting
+  - Mentioning the weather
+  - Repeating any session-opening language
+- The context is still provided but as **BACKGROUND AWARENESS ONLY** — the AI uses listening history and session metadata to personalize the transition, but does NOT repeat greetings, name, time, or weather.
+- **No "playlist" language**: The AI is explicitly forbidden from calling the upcoming songs a "playlist", "set", "collection", or "queue" — they are simply the next songs playing. The word "playlist" is banned in between-songs commentary.
+- Called from `PlaybackService.kt` in both `checkAndInsertPlaylistCommentary()` and `createCommentaryItem()` with `isSessionOpener = false`.
+
+### 5. Humour Commentary Element — Roasting Style (Implemented)
+- **User-Selectable Element**: The "Humour" commentary element, when toggled ON, adds a **roasting-style** humour to the commentary.
+- **Roasting, Not Mild Jokes**: The prompt now instructs the AI to:
+  - Roast the user's music taste, listening habits, or song/artist choices
+  - Be "a little savage — like a best friend who lovingly mocks you"
+  - Use playful insults about song choices, cheeky observations about listening patterns from the context, or witty jabs at the artists
+  - Keep it fun and never genuinely mean-spirited, but "don't be boring or overly safe either"
+  - Weave the roast naturally into the commentary, not as a separate joke segment
+  - Dark humour is welcome — no restrictions on humour type
+- **Present in Both Types**: The humour element is active in both session opener and between-songs commentary.
+- **Independent & Non-Mixing**: Each element is a separate instruction block in the prompt. The humour instruction is self-contained and doesn't interfere with the session-opener/between-songs structure.
+
+### 6. Resilient Commentary Injection (Bug Fix)
+- **Problem**: When commentary generation failed (API error, timeout, rate limit), the next set of songs was never added to the queue — playback would stop because the old code generated commentary *before* adding songs, and if commentary threw an exception, the song-adding code was never reached.
+- **Fix**: Restructured `seedRecommendations()` in `PlaybackService.kt` into two steps:
+  1. **Songs first**: Songs are added to the ExoPlayer queue **immediately** so playback never stops, regardless of what happens with commentary.
+  2. **Commentary second**: Commentary is generated (if enabled) and then inserted *before* the already-queued songs by finding the first appended song's position. If commentary fails, songs are already in the queue and playback continues seamlessly without commentary.
+- **Result**: Playback is now resilient — even if the Gemini API is down, rate-limited, or times out after 3 retries, the music keeps playing. The user just skips the commentary interlude and goes straight to the next songs.
+
+### 7. What's Implemented vs. What's Coming
+- **Implemented now**: Session opener commentary (with greeting/name/time/weather), typical between-songs commentary (no greeting), the **Humour** roasting element, and resilient commentary injection that never blocks playback — all using the centralized context system with separated prompts.
+- **Not yet implemented** (per user instruction): Briefing and Music Context commentary elements. These will be added later as separate element blocks in the prompt.
+
+---
+
+## RSS-Powered Discover Feed (Previous Milestone)
 
 ### 1. Centralized RSS Configuration (`RssConfig.kt`)
 - **Single Source of Truth**: All RSS feed URLs are centralized in one configuration file. New sources can be added or existing ones changed without touching any other code.

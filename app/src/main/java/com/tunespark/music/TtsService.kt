@@ -282,29 +282,80 @@ object TtsService {
         apiKey: String,
         currentSong: String?,
         upcomingSongs: List<String>,
-        commentaryLength: Float
+        commentaryLength: Float,
+        contextPrompt: String? = null,
+        commentaryElements: Set<String> = emptySet(),
+        isSessionOpener: Boolean = false
     ): String = withContext(Dispatchers.IO) {
         val cleanApiKey = apiKey.trim()
         val modelName = findWorkingTextModel(cleanApiKey)
         val url = "https://generativelanguage.googleapis.com/v1beta/$modelName:generateContent?key=$cleanApiKey"
 
         val prompt = StringBuilder().apply {
-            append("You are a friendly, cool, professional AI radio host for 'TuneSpark AI DJ'.\n")
+            append("You are a friendly, cool, professional AI radio host for 'TuneSpark AI DJ'.\n\n")
+
+            if (isSessionOpener) {
+                // ===== SESSION OPENER PROMPT =====
+                // This is the FIRST commentary when the user starts a session.
+                // ONLY here do we greet, mention name, time, and weather.
+                append("This is the SESSION OPENER — the very first commentary when the user starts listening. This is the ONLY time you should:\n")
+                append("- Greet the user by name (if available in the context below)\n")
+                append("- Mention the time of day with a greeting (e.g. \"Good morning\", \"Good evening\" based on the context)\n")
+                append("- Mention the weather (if available in the context)\n")
+                append("- Welcome them to the session\n\n")
+                append("Make the greeting feel natural and warm, like a radio host opening a show. Then transition into introducing the first song.\n")
+                append("When mentioning the weather, describe the conditions (e.g. \"it's a sunny afternoon\", \"bit cloudy out there\") but do NOT say the city name or location name.\n\n")
+            } else {
+                // ===== BETWEEN-SONGS PROMPT =====
+                // This is a transition between songs. NO greeting, NO name, NO weather, NO time.
+                append("This is a BETWEEN-SONGS commentary — a short transition between tracks. You must NOT:\n")
+                append("- Greet the user or say \"welcome back\", \"welcome to\", or any greeting\n")
+                append("- Mention or address the user by name\n")
+                append("- Mention the time of day, \"good morning/evening\", or any time-based greeting\n")
+                append("- Mention the weather\n")
+                append("- Repeat any session-opening language or welcome message\n\n")
+                append("You are simply transitioning from the song that just played to the next song(s). Keep it focused purely on the music and the transition. Be concise and smooth.\n")
+                append("Do NOT refer to the upcoming songs as a \"playlist\", \"set\", \"collection\", or \"queue\" — they are simply the next songs playing. Never use the word \"playlist\".\n\n")
+            }
+
+            // Context is always provided — the AI has all the data but uses it differently
+            if (contextPrompt != null && contextPrompt.isNotBlank()) {
+                if (isSessionOpener) {
+                    append("Here is the current context about the user's day and session. Use the time, weather, and user's name for your greeting, and use the listening history to personalize the opener:\n")
+                } else {
+                    append("Here is the current context about the user's day and session. Use this as BACKGROUND AWARENESS ONLY to inform your commentary — do NOT repeat greetings, mention the user's name, state the time, or describe the weather. You may use the listening history and session metadata to make the transition feel personalized:\n")
+                }
+                append(contextPrompt).append("\n\n")
+            }
+
+            // Song info
             if (currentSong != null) {
                 append("The user just finished listening to: $currentSong.\n")
             }
             if (upcomingSongs.isNotEmpty()) {
-                append("Coming up next, you are transitioning to these songs: ${upcomingSongs.joinToString(", ")}.\n")
+                if (isSessionOpener) {
+                    append("The user is about to start listening to: ${upcomingSongs.joinToString(", ")}.\n")
+                } else {
+                    append("Coming up next, you are transitioning to: ${upcomingSongs.joinToString(", ")}.\n")
+                }
             }
-            
+            append("\n")
+
+            // ===== HUMOUR ELEMENT =====
+            // Present in BOTH session opener and between-songs. Roasting style.
+            if (commentaryElements.contains("Humour")) {
+                append("HUMOUR ELEMENT (enabled): Add a funny, playful ROAST to your commentary. Roast the user's music taste, their listening habits, or the song/artist choices in a way that's genuinely funny and a little savage — like a best friend who lovingly mocks you. Think playful insults about their song choices, cheeky observations about their listening patterns from the context, or witty jabs at the artists. Dark humour is welcome. Keep it fun and don't be boring or overly safe. The roast should feel natural and woven into the commentary, not like a separate joke segment.\n\n")
+            }
+
+            // ===== LENGTH INSTRUCTIONS =====
             val lengthInstructions = when {
-                commentaryLength < 0.33f -> "Generate a very brief and concise radio host transition or commentary script. Keep it to exactly 1 short sentence, maximum 15-20 words. Keep it extremely quick and snappy."
-                commentaryLength < 0.66f -> "Generate a standard, engaging radio host transition or commentary script. Keep it to 1 to 2 sentences, maximum 25-30 words. Make it flow naturally, mention the transition, and keep it extremely snappy and professional."
-                else -> "Generate a detailed, deeply engaging, and longer radio host commentary or backstory script. Keep it to 3 to 4 sentences, around 50-70 words. Include interesting radio banter, describe the artists or songs, and provide a comprehensive and rich transition."
+                commentaryLength < 0.33f -> "Generate a very brief and concise radio host commentary script. Keep it to exactly 1 short sentence, maximum 15-20 words. Keep it extremely quick and snappy."
+                commentaryLength < 0.66f -> "Generate a standard, engaging radio host commentary script. Keep it to 1 to 2 sentences, maximum 25-30 words. Make it flow naturally and keep it snappy and professional."
+                else -> "Generate a detailed, deeply engaging, and longer radio host commentary script. Keep it to 3 to 4 sentences, around 50-70 words. Include interesting radio banter and provide a comprehensive and rich commentary."
             }
-            append(lengthInstructions).append("\n")
-            
-            append("Output ONLY the spoken text. Do not include any actions, stage directions, sound effects, introductory greetings, markdown, or quotation marks.")
+            append(lengthInstructions).append("\n\n")
+
+            append("Output ONLY the spoken text. Do not include any actions, stage directions, sound effects, markdown, or quotation marks.")
         }.toString()
 
         val requestJson = JSONObject().apply {
@@ -347,7 +398,10 @@ object TtsService {
     suspend fun generateCommentaryAudio(
         context: Context,
         currentSong: String?,
-        upcomingSongs: List<String>
+        upcomingSongs: List<String>,
+        contextPrompt: String? = null,
+        commentaryElements: Set<String> = emptySet(),
+        isSessionOpener: Boolean = false
     ): Pair<File, String> {
         val provider = SessionManager.getActiveTtsProvider(context)
         val geminiKey = SessionManager.getGeminiApiKey(context)
@@ -363,7 +417,7 @@ object TtsService {
         for (attempt in 1..3) {
             try {
                 // 1. Generate the script using Gemini 3.1
-                val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs, commentaryLength)
+                val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs, commentaryLength, contextPrompt, commentaryElements, isSessionOpener)
                 android.util.Log.d("TtsService", "Generated script (Attempt $attempt): $script")
 
                 // 2. Synthesize using the active TTS provider

@@ -143,6 +143,9 @@ class PlaybackService : MediaSessionService() {
             return
         }
 
+        // Record that a real song has been played in the current session
+        CommentaryContextManager.recordSongPlayed(this)
+
         if (isUnresolvedMediaItem(mediaItem)) {
             resolveCurrentMediaItem(exoPlayer, videoId)
         } else {
@@ -205,10 +208,21 @@ class PlaybackService : MediaSessionService() {
                             Toast.makeText(this@PlaybackService, "AI DJ is writing commentary for the playlist...", Toast.LENGTH_SHORT).show()
                         }
 
+                        // Build the centralized daily context for this commentary
+                        val contextPrompt = CommentaryContextManager.buildContextPrompt(
+                            CommentaryContextManager.getCurrentContext(this@PlaybackService)
+                        )
+
+                        // Get the user's selected commentary elements (e.g. Humour)
+                        val selectedElements = SessionManager.getSelectedCommentary(this@PlaybackService)
+
                         val (audioFile, script) = TtsService.generateCommentaryAudio(
                             context = this@PlaybackService,
                             currentSong = currentSongInfo,
-                            upcomingSongs = upcomingSongsList
+                            upcomingSongs = upcomingSongsList,
+                            contextPrompt = contextPrompt,
+                            commentaryElements = selectedElements,
+                            isSessionOpener = false
                         )
 
                         val commentaryItem = buildCommentaryMediaItem(audioFile, script)
@@ -438,19 +452,33 @@ class PlaybackService : MediaSessionService() {
 
                 if (filteredRecs.isNotEmpty()) {
                     val finalSongsToAppend = filteredRecs.take(itemsNeeded)
-                    val commentaryItem = if (!commentaryEnabled || isFirstStart) null else createCommentaryItem(exoPlayer, finalSongsToAppend)
 
+                    // STEP 1: Add songs to the queue IMMEDIATELY so playback never stops,
+                    // even if commentary generation fails or times out later
                     withContext(Dispatchers.Main) {
-                        if (exoPlayer.currentMediaItem?.mediaId == videoId) {
-                            val mediaItems = mutableListOf<MediaItem>()
-                            if (commentaryItem != null) {
-                                mediaItems.add(commentaryItem)
+                        val songMediaItems = finalSongsToAppend.map(::buildUnresolvedMediaItem)
+                        exoPlayer.addMediaItems(songMediaItems)
+                        lastSeededVideoId = videoId
+                        preFetchNextMediaItem(exoPlayer)
+                        android.util.Log.d(PLAYBACK_SERVICE_TAG, "seedRecommendations appended ${songMediaItems.size} songs to ExoPlayer")
+                    }
+
+                    // STEP 2: Generate commentary (if enabled) and insert it before the songs.
+                    // If this fails, songs are already queued — playback continues without commentary.
+                    if (commentaryEnabled && !isFirstStart) {
+                        val commentaryItem = createCommentaryItem(exoPlayer, finalSongsToAppend)
+                        if (commentaryItem != null) {
+                            withContext(Dispatchers.Main) {
+                                // Find the first appended song and insert commentary before it
+                                val firstAppendedId = finalSongsToAppend.first().id
+                                for (i in 0 until exoPlayer.mediaItemCount) {
+                                    if (exoPlayer.getMediaItemAt(i).mediaId == firstAppendedId) {
+                                        exoPlayer.addMediaItem(i, commentaryItem)
+                                        android.util.Log.d(PLAYBACK_SERVICE_TAG, "Commentary inserted at position $i before songs")
+                                        break
+                                    }
+                                }
                             }
-                            mediaItems.addAll(finalSongsToAppend.map(::buildUnresolvedMediaItem))
-                            exoPlayer.addMediaItems(mediaItems)
-                            lastSeededVideoId = videoId
-                            preFetchNextMediaItem(exoPlayer)
-                            android.util.Log.d(PLAYBACK_SERVICE_TAG, "seedRecommendations successfully appended ${mediaItems.size} items to ExoPlayer")
                         }
                     }
                 } else {
@@ -529,10 +557,22 @@ class PlaybackService : MediaSessionService() {
 
         return try {
             android.util.Log.d(PLAYBACK_SERVICE_TAG, "createCommentaryItem: Generating commentary audio...")
+
+            // Build the centralized daily context for this commentary
+            val contextPrompt = CommentaryContextManager.buildContextPrompt(
+                CommentaryContextManager.getCurrentContext(this@PlaybackService)
+            )
+
+            // Get the user's selected commentary elements (e.g. Humour)
+            val selectedElements = SessionManager.getSelectedCommentary(this@PlaybackService)
+
             val (audioFile, script) = TtsService.generateCommentaryAudio(
                 context = this@PlaybackService,
                 currentSong = currentSongInfo,
-                upcomingSongs = upcomingSongsList
+                upcomingSongs = upcomingSongsList,
+                contextPrompt = contextPrompt,
+                commentaryElements = selectedElements,
+                isSessionOpener = false
             )
             android.util.Log.d(PLAYBACK_SERVICE_TAG, "createCommentaryItem: Successfully generated commentary audio: ${audioFile.absolutePath}")
             withContext(Dispatchers.Main) {

@@ -654,10 +654,19 @@ fun MainPlayerScreen(
                         statusMessage = "AI DJ is warming up..."
                         withContext(Dispatchers.IO) {
                             try {
+                                // Build the centralized daily context for the session opener
+                                val contextPrompt = CommentaryContextManager.buildContextPrompt(
+                                    CommentaryContextManager.getCurrentContext(context)
+                                )
+                                // Get the user's selected commentary elements (e.g. Humour)
+                                val selectedElements = SessionManager.getSelectedCommentary(context)
                                 val (audioFile, script) = TtsService.generateCommentaryAudio(
                                     context = context,
                                     currentSong = null,
-                                    upcomingSongs = listOf("'${targetSong.title}' by ${targetSong.artists.joinToString(", ") { it.name }}")
+                                    upcomingSongs = listOf("'${targetSong.title}' by ${targetSong.artists.joinToString(", ") { it.name }}"),
+                                    contextPrompt = contextPrompt,
+                                    commentaryElements = selectedElements,
+                                    isSessionOpener = true
                                 )
                                 MediaItem.Builder()
                                     .setUri(android.net.Uri.fromFile(audioFile))
@@ -757,10 +766,19 @@ fun MainPlayerScreen(
                         statusMessage = "AI DJ is warming up..."
                         withContext(Dispatchers.IO) {
                             try {
+                                // Build the centralized daily context for the session opener
+                                val contextPrompt = CommentaryContextManager.buildContextPrompt(
+                                    CommentaryContextManager.getCurrentContext(context)
+                                )
+                                // Get the user's selected commentary elements (e.g. Humour)
+                                val selectedElements = SessionManager.getSelectedCommentary(context)
                                 val (audioFile, script) = TtsService.generateCommentaryAudio(
                                     context = context,
                                     currentSong = null,
-                                    upcomingSongs = listOf("'${song.title}' by ${song.artists.joinToString(", ") { it.name }}")
+                                    upcomingSongs = listOf("'${song.title}' by ${song.artists.joinToString(", ") { it.name }}"),
+                                    contextPrompt = contextPrompt,
+                                    commentaryElements = selectedElements,
+                                    isSessionOpener = true
                                 )
                                 MediaItem.Builder()
                                     .setUri(android.net.Uri.fromFile(audioFile))
