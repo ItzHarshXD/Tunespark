@@ -181,15 +181,26 @@ object TtsService {
     suspend fun generateElevenLabsTts(context: Context, apiKey: String, text: String, voiceId: String): File = withContext(Dispatchers.IO) {
         val cleanApiKey = apiKey.trim()
         val url = "https://api.elevenlabs.io/v1/text-to-speech/$voiceId"
-        
+
+        // Use the user-selected model ID (defaults to eleven_multilingual_v2)
+        val modelId = SessionManager.getSelectedElevenLabsModelId(context)
+
+        // Voice settings are tuned per-model. Eleven v3 benefits from slightly higher stability
+        // for consistent emotional delivery; Flash/Multilingual use the balanced defaults.
+        val (stability, similarityBoost, style) = when (modelId) {
+            "eleven_v3" -> Triple(0.50, 0.80, 0.30)
+            "eleven_flash_v2_5" -> Triple(0.35, 0.75, 0.40)
+            else -> Triple(0.38, 0.78, 0.38) // eleven_multilingual_v2 and fallback
+        }
+
         // Build the request body for ElevenLabs
         val requestJson = JSONObject().apply {
             put("text", text)
-            put("model_id", "eleven_multilingual_v2")
+            put("model_id", modelId)
             put("voice_settings", JSONObject().apply {
-                put("stability", 0.38)
-                put("similarity_boost", 0.78)
-                put("style", 0.38)
+                put("stability", stability)
+                put("similarity_boost", similarityBoost)
+                put("style", style)
                 put("use_speaker_boost", true)
             })
         }

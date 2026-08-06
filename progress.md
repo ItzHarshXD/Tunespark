@@ -1,5 +1,5 @@
 # TuneSpark Open-Source Music Streaming Player
-# Task Progress: Centralized AI Commentary Context System
+# Task Progress: Centralized AI Commentary Context System + ElevenLabs Advanced Model/Language/Voice Selection
 
 TuneSpark is a clean Android music streaming app built with Jetpack Compose, AndroidX Media3/ExoPlayer, and Metrolist's `:innertube` module for YouTube Music data.
 
@@ -157,6 +157,67 @@ The AI commentary now uses **two distinct prompt templates** based on the `isSes
 ### 7. What's Implemented vs. What's Coming
 - **Implemented now**: Session opener commentary (with greeting/name/time/weather), typical between-songs commentary (no greeting), the **Humour** roasting element, and resilient commentary injection that never blocks playback — all using the centralized context system with separated prompts.
 - **Not yet implemented** (per user instruction): Briefing and Music Context commentary elements. These will be added later as separate element blocks in the prompt.
+
+---
+
+## ElevenLabs Advanced Model / Language / Voice Selection (Latest Milestone)
+
+The ElevenLabs section of the **AI and Voice** settings screen was overhauled from a simple hardcoded model dropdown + manual Voice ID text field into a fully API-driven, advanced selection experience.
+
+### 1. Three Supported Models with Descriptions
+- The old hardcoded list of 7 models was replaced with exactly **3 supported models**, each shown with its display name and a short description below the selection:
+  1. **Eleven v3** (`eleven_v3`) — Flagship model, 70+ languages, 5000 char limit, supports emotional audio tags like `[excited, laughing]`, `[pause]`, `[sighs]`. Best for expressive, lifelike voice synthesis.
+  2. **Eleven Multilingual v2** (`eleven_multilingual_v2`) — Stable, lifelike model, 29 languages, 10000 char limit. Great for long-form content with consistent quality.
+  3. **Eleven Flash v2.5** (`eleven_flash_v2_5`) — Fastest model, ~75ms latency, 32 languages, 40000 char limit, 50% cheaper. Ideal for real-time applications.
+- The selected model's description is rendered below the dropdown so the user understands the trade-offs.
+- When **Eleven v3** is selected, an extra amber tip line is shown describing v3-specific features (emotional audio tags, punctuation cheat codes for pacing, and the auto-tuned stability slider).
+
+### 2. Searchable Multi-Select Language Dropdown (API-Driven)
+- A new **Language** dropdown was added that is populated by querying the ElevenLabs `GET /v1/models` endpoint and extracting the `languages` array for the currently selected model.
+- The dropdown includes a **search field** (with a search icon) that filters languages by name or language ID in real time.
+- Users can **select one or multiple languages** via checkboxes (red accent). Selected languages are shown as a comma-separated list in the field.
+- If no language is selected, the field displays "Auto-detect (no language selected)" and the `language_code` parameter is omitted from the TTS request so the API auto-detects.
+- When the user switches models, the language list is re-fetched and any previously selected languages that are no longer supported by the new model are automatically pruned.
+- Loading and error states are handled gracefully inside the dropdown.
+
+### 3. API-Driven Voice Selection with Free/Paid Classification
+- The manual Voice ID text field was replaced with a **Voice** dropdown that queries the ElevenLabs `GET /v2/voices` endpoint.
+- Each voice row displays:
+  - **Voice name** (bold)
+  - **Voice ID** (gray, small)
+  - **Category** (gray, smaller — e.g. `premade`, `cloned`, `generated`, `professional`, `default`, `community`)
+  - A **FREE** (green) or **PAID** (amber) badge on the right
+- **Voice classification rule** (in `TtsService.classifyVoiceAsFree`):
+  - `premade` / `default` → **FREE**
+  - `cloned` / `professional` → **PAID** (requires Starter+)
+  - `generated` / `community` / other → **FREE** if `"free"` is in `available_for_tiers`, else **PAID**
+- The dropdown includes a **search field** that filters voices by name, voice ID, or category.
+- Voices auto-load the first time the dropdown is opened (if not already loaded and no prior error). A "Tap to retry" option is shown if the fetch fails.
+- Selecting a voice saves its `voice_id` to `SessionManager` (same key as before, so existing selections carry over).
+
+### 4. TtsService Updates
+- **New data classes**: `ElevenLanguage`, `ElevenModel`, `ElevenVoice` (all inside `TtsService`).
+- **New API helpers**:
+  - `fetchElevenLabsModels(apiKey)` — GET `https://api.elevenlabs.io/v1/models` with `xi-api-key` header, parses model_id, name, description, and languages array.
+  - `fetchElevenLabsVoices(apiKey)` — GET `https://api.elevenlabs.io/v2/voices` with `xi-api-key` header, parses voice_id, name, category, available_for_tiers, and computes `isFree`.
+- **`generateElevenLabsTts()`** now:
+  - Uses the user-selected model ID from `SessionManager.getSelectedElevenLabsModelId()` instead of the hardcoded `"eleven_multilingual_v2"`.
+  - Sends `language_code` (the first selected language) when the user has selected one or more languages; omits it otherwise for auto-detection.
+  - Applies **per-model voice settings tuning**:
+    - `eleven_v3` → stability 0.50, similarity_boost 0.80, style 0.30 (higher stability for consistent emotional delivery)
+    - `eleven_flash_v2_5` → stability 0.35, similarity_boost 0.75, style 0.40 (slightly lower stability for speed)
+    - `eleven_multilingual_v2` / fallback → stability 0.38, similarity_boost 0.78, style 0.38 (original balanced defaults)
+
+### 5. SessionManager Updates
+- New keys and methods:
+  - `KEY_SELECTED_ELEVENLABS_MODEL_ID` + `getSelectedElevenLabsModelId()` / `saveSelectedElevenLabsModelId()` — persists the model ID (e.g. `eleven_v3`).
+  - `KEY_SELECTED_ELEVENLABS_LANGUAGES` + `getSelectedElevenLabsLanguages()` / `saveSelectedElevenLabsLanguages()` — persists the set of selected language IDs as a `StringSet`.
+- The existing `getSelectedElevenLabsModel()` / `saveSelectedElevenLabsModel()` (display name) methods are kept for backward compatibility and updated alongside the new model ID methods when the user selects a model.
+
+### 6. UI / UX Details
+- All new dropdowns follow the existing screen styling: `OutlinedTextField` with transparent background, `RoundedCornerShape(30.dp)`, red accent color `Color(0xFFFF0000)` for checkboxes/selections, and haptic feedback + sound effects on every interaction.
+- The language and voice dropdowns are capped at `400.dp` max height with internal scrolling.
+- The voice dropdown auto-loads voices on first open; the language dropdown auto-loads whenever the model or API key changes via a `LaunchedEffect`.
 
 ---
 

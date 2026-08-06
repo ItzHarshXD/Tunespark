@@ -34,6 +34,8 @@ object SessionManager {
     private const val KEY_SELECTED_GEMINI_TEXT_MODEL = "selected_gemini_text_model"
     private const val KEY_SELECTED_GEMINI_TTS_MODEL = "selected_gemini_tts_model"
     private const val KEY_SELECTED_ELEVENLABS_MODEL = "selected_elevenlabs_model"
+    private const val KEY_SELECTED_ELEVENLABS_MODEL_ID = "selected_elevenlabs_model_id"
+    private const val KEY_SELECTED_ELEVENLABS_LANGUAGES = "selected_elevenlabs_languages"
     private const val KEY_DISCOVER_FEED_ENABLED = "discover_feed_enabled"
 
     @Volatile
@@ -339,6 +341,30 @@ object SessionManager {
 
     fun saveSelectedElevenLabsModel(context: Context, model: String) {
         getPrefs(context).edit().putString(KEY_SELECTED_ELEVENLABS_MODEL, model).apply()
+    }
+
+    /**
+     * Returns the selected ElevenLabs model ID (e.g. "eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5").
+     * Defaults to "eleven_multilingual_v2".
+     */
+    fun getSelectedElevenLabsModelId(context: Context): String {
+        return getPrefs(context).getString(KEY_SELECTED_ELEVENLABS_MODEL_ID, "eleven_multilingual_v2") ?: "eleven_multilingual_v2"
+    }
+
+    fun saveSelectedElevenLabsModelId(context: Context, modelId: String) {
+        getPrefs(context).edit().putString(KEY_SELECTED_ELEVENLABS_MODEL_ID, modelId).apply()
+    }
+
+    /**
+     * Returns the set of selected ElevenLabs language IDs (e.g. "en", "hi", "es").
+     * Defaults to an empty set (let the API auto-detect).
+     */
+    fun getSelectedElevenLabsLanguages(context: Context): Set<String> {
+        return getPrefs(context).getStringSet(KEY_SELECTED_ELEVENLABS_LANGUAGES, emptySet()) ?: emptySet()
+    }
+
+    fun saveSelectedElevenLabsLanguages(context: Context, languages: Set<String>) {
+        getPrefs(context).edit().putStringSet(KEY_SELECTED_ELEVENLABS_LANGUAGES, languages).apply()
     }
 
     fun getDiscoverCategories(context: Context): List<Pair<String, Boolean>> {

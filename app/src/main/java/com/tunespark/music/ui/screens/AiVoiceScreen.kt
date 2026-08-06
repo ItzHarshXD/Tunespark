@@ -206,6 +206,7 @@ fun AiVoiceScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp),
+                singleLine = true,
                 shape = RoundedCornerShape(30.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
@@ -215,6 +216,9 @@ fun AiVoiceScreen(
                     unfocusedTextColor = textColor,
                     focusedTextColor = textColor
                 ),
+                label = {
+                    Text("Gemini API Key", color = textColor)
+                },
                 trailingIcon = {
                     IconButton(
                         onClick = {
@@ -554,6 +558,7 @@ fun AiVoiceScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp),
+                singleLine = true,
                 shape = RoundedCornerShape(30.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
@@ -563,6 +568,9 @@ fun AiVoiceScreen(
                     unfocusedTextColor = textColor,
                     focusedTextColor = textColor
                 ),
+                label = {
+                    Text("ElevenLabs API Key", color = textColor)
+                },
                 trailingIcon = {
                     IconButton(
                         onClick = {
@@ -587,63 +595,44 @@ fun AiVoiceScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            OutlinedTextField(
-                value = elevenLabsVoiceId,
-                onValueChange = {
-                    elevenLabsVoiceId = it
-                    SessionManager.saveElevenLabsVoiceId(context, it)
-                },
-                placeholder = {
-                    Text(
-                        "Enter Voice ID (e.g. EXAVITQu4vr4xnSDxMaL)",
-                        color = Color.Gray
-                    )
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp),
-                shape = RoundedCornerShape(30.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedBorderColor = textColor,
-                    focusedBorderColor = textColor,
-                    unfocusedTextColor = textColor,
-                    focusedTextColor = textColor
-                ),
-                label = {
-                    Text("Voice ID", color = textColor)
-                }
-            )
+            // ===== ElevenLabs Model Selection (exactly 3 supported models) =====
+            var elevenLabsModelDropdownExpanded by remember { mutableStateOf(false) }
+            var selectedElevenLabsModelId by remember { mutableStateOf(SessionManager.getSelectedElevenLabsModelId(context)) }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ElevenLabs Model Dropdown
-            var elevenLabsDropdownExpanded by remember { mutableStateOf(false) }
-            var selectedElevenLabsModel by remember { mutableStateOf(SessionManager.getSelectedElevenLabsModel(context)) }
-
-            val elevenLabsModels = remember {
+            // The 3 supported models: (displayName, modelId, description)
+            val supportedElevenLabsModels = remember {
                 listOf(
-                    "Eleven Multilingual v2",
-                    "Eleven Multilingual v1",
-                    "Eleven Monolingual v1",
-                    "Eleven Turbo v2",
-                    "Eleven Turbo v2.5",
-                    "Eleven Flash v2",
-                    "Eleven Flash v2.5"
+                    Triple(
+                        "Eleven v3",
+                        "eleven_v3",
+                        "The most expressive and emotionally nuanced synthesis model. Built for dramatic delivery and natural multi-speaker dialogue. Supports over 70 languages with a 5,000-character single-request limit."
+                    ),
+                    Triple(
+                        "Eleven Multilingual v2",
+                        "eleven_multilingual_v2",
+                        "The default fallback model. It delivers highly consistent, lifelike quality and excels at long-form prose or audiobook generation. Supports 29 languages with a 10,000-character limit."
+                    ),
+                    Triple(
+                        "Eleven Flash v2.5",
+                        "eleven_flash_v2_5",
+                        "The fastest and most cost-effective option. Engineered for real-time conversational agents with ultra-low latency (~75ms). Supports 32 languages and accommodates up to 40,000 characters per call."
+                    )
                 )
             }
 
+            val selectedModelOption = supportedElevenLabsModels.find { it.second == selectedElevenLabsModelId }
+                ?: supportedElevenLabsModels[1]
+
             Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                 OutlinedTextField(
-                    value = selectedElevenLabsModel,
+                    value = selectedModelOption.first,
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("ElevenLabs TTS Model", color = textColor) },
                     trailingIcon = {
-                        IconButton(onClick = { elevenLabsDropdownExpanded = !elevenLabsDropdownExpanded }) {
+                        IconButton(onClick = { elevenLabsModelDropdownExpanded = !elevenLabsModelDropdownExpanded }) {
                             Icon(
-                                imageVector = if (elevenLabsDropdownExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                imageVector = if (elevenLabsModelDropdownExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
                                 contentDescription = "Toggle Dropdown",
                                 tint = textColor
                             )
@@ -665,28 +654,63 @@ fun AiVoiceScreen(
                         .clickable {
                             audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            elevenLabsDropdownExpanded = true
+                            elevenLabsModelDropdownExpanded = true
                         }
                 )
                 DropdownMenu(
-                    expanded = elevenLabsDropdownExpanded,
-                    onDismissRequest = { elevenLabsDropdownExpanded = false },
+                    expanded = elevenLabsModelDropdownExpanded,
+                    onDismissRequest = { elevenLabsModelDropdownExpanded = false },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    elevenLabsModels.forEach { model ->
+                    supportedElevenLabsModels.forEach { (displayName, modelId, description) ->
                         DropdownMenuItem(
-                            text = { Text(model) },
+                            text = { Text(displayName) },
                             onClick = {
                                 audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                selectedElevenLabsModel = model
-                                SessionManager.saveSelectedElevenLabsModel(context, model)
-                                elevenLabsDropdownExpanded = false
+                                selectedElevenLabsModelId = modelId
+                                SessionManager.saveSelectedElevenLabsModel(context, displayName)
+                                SessionManager.saveSelectedElevenLabsModelId(context, modelId)
+                                elevenLabsModelDropdownExpanded = false
                             }
                         )
                     }
                 }
             }
+
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ===== Voice ID (simple editable text field) =====
+            OutlinedTextField(
+                value = elevenLabsVoiceId,
+                onValueChange = {
+                    elevenLabsVoiceId = it
+                    SessionManager.saveElevenLabsVoiceId(context, it)
+                },
+                placeholder = {
+                    Text(
+                        "Enter Voice ID (e.g. EXAVITQu4vr4xnSDxMaL)",
+                        color = Color.Gray
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                singleLine = true,
+                shape = RoundedCornerShape(30.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedBorderColor = textColor,
+                    focusedBorderColor = textColor,
+                    unfocusedTextColor = textColor,
+                    focusedTextColor = textColor
+                ),
+                label = {
+                    Text("Voice ID", color = textColor)
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
