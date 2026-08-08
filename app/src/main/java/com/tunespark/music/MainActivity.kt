@@ -393,12 +393,12 @@ fun MainPlayerScreen(
     var hoistedIsLyricsLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(currentSongTitle, currentSongArtist) {
-        if (currentSongTitle.startsWith("AI DJ") || currentSongTitle.startsWith("commentary_") || currentSongTitle.startsWith("AI DJ Welcome") || currentSongTitle.startsWith("AI DJ Commentary")) {
+        if (currentSongTitle.startsWith("AI") || currentSongTitle.startsWith("commentary_")) {
             val description = exoPlayer.currentMediaItem?.mediaMetadata?.description?.toString() ?: ""
             if (description.isNotBlank()) {
                 hoistedLyricsLines = listOf(LyricLine(-1L, description))
             } else {
-                hoistedLyricsLines = listOf(LyricLine(-1L, "AI DJ is speaking..."))
+                hoistedLyricsLines = listOf(LyricLine(-1L, "AI is speaking..."))
             }
             hoistedIsLyricsLoading = false
             return@LaunchedEffect
@@ -474,9 +474,9 @@ fun MainPlayerScreen(
     LaunchedEffect(currentSongTitle, currentSongArtist) {
         if (currentSongTitle != "No Track Loaded" &&
             currentSongTitle.isNotBlank() &&
-            !currentSongTitle.startsWith("AI DJ") &&
+            !currentSongTitle.startsWith("AI") &&
             !currentSongTitle.startsWith("commentary_") &&
-            currentSongArtist != "TuneSpark AI DJ") {
+            currentSongArtist != "Tunespark Radio") {
             
             var secondsPlayed = 0
             while (secondsPlayed < 10) {
@@ -498,7 +498,7 @@ fun MainPlayerScreen(
                     !mediaId.startsWith("commentary_") &&
                     title != "No Track Loaded" &&
                     title.isNotBlank() &&
-                    artist != "TuneSpark AI DJ" &&
+                    artist != "Tunespark Radio" &&
                     title == currentSongTitle) { // Ensure same song is still playing
                     
                     val artistList = artist.split(", ").map {
@@ -650,8 +650,8 @@ fun MainPlayerScreen(
                 try {
                     var commentaryException: Exception? = null
                     val geminiKey = SessionManager.getGeminiApiKey(context)
-                    val startCommentaryItem = if (geminiKey.isNotBlank() && SessionManager.isCommentaryEnabled(context)) {
-                        statusMessage = "AI DJ is warming up..."
+                    val startCommentaryItem = if (geminiKey.isNotBlank() && SessionManager.isCommentaryEnabled(context) && SessionManager.isSessionOpenerEnabled(context)) {
+                        statusMessage = "AI is warming up..."
                         withContext(Dispatchers.IO) {
                             try {
                                 // Build the centralized daily context for the session opener
@@ -668,13 +668,16 @@ fun MainPlayerScreen(
                                     commentaryElements = selectedElements,
                                     isSessionOpener = true
                                 )
+                                // Record the session opener so the AI has context
+                                // about what was already covered today.
+                                CommentaryContextManager.recordCommentary(context, script)
                                 MediaItem.Builder()
                                     .setUri(android.net.Uri.fromFile(audioFile))
                                     .setMediaId("commentary_${System.currentTimeMillis()}")
                                     .setMediaMetadata(
                                         MediaMetadata.Builder()
-                                            .setTitle("AI DJ Welcome")
-                                            .setArtist("TuneSpark AI DJ")
+                                            .setTitle("AI Welcome")
+                                            .setArtist("Tunespark Radio")
                                             .setDescription(script)
                                             .build()
                                     )
@@ -687,7 +690,7 @@ fun MainPlayerScreen(
                     } else null
 
                     if (commentaryException != null) {
-                        Toast.makeText(context, "AI DJ Commentary failed: ${commentaryException?.message}", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "AI Commentary failed: ${commentaryException?.message}", Toast.LENGTH_LONG).show()
                     }
 
                     exoPlayer.stop()
@@ -761,9 +764,10 @@ fun MainPlayerScreen(
             if (fetchedUrl != null) {
                 try {
                     // Generate introductory start commentary if Gemini key is present
+                    // and the "Session opener" element is checked
                     val geminiKey = SessionManager.getGeminiApiKey(context)
-                    val startCommentaryItem = if (geminiKey.isNotBlank() && SessionManager.isCommentaryEnabled(context)) {
-                        statusMessage = "AI DJ is warming up..."
+                    val startCommentaryItem = if (geminiKey.isNotBlank() && SessionManager.isCommentaryEnabled(context) && SessionManager.isSessionOpenerEnabled(context)) {
+                        statusMessage = "AI is warming up..."
                         withContext(Dispatchers.IO) {
                             try {
                                 // Build the centralized daily context for the session opener
@@ -780,13 +784,16 @@ fun MainPlayerScreen(
                                     commentaryElements = selectedElements,
                                     isSessionOpener = true
                                 )
+                                // Record the session opener so the AI has context
+                                // about what was already covered today.
+                                CommentaryContextManager.recordCommentary(context, script)
                                 MediaItem.Builder()
                                     .setUri(android.net.Uri.fromFile(audioFile))
                                     .setMediaId("commentary_${System.currentTimeMillis()}")
                                     .setMediaMetadata(
                                         MediaMetadata.Builder()
-                                            .setTitle("AI DJ Welcome")
-                                            .setArtist("TuneSpark AI DJ")
+                                            .setTitle("AI Welcome")
+                                            .setArtist("Tunespark Radio")
                                             .setDescription(script)
                                             .build()
                                     )

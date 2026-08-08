@@ -37,6 +37,7 @@ object SessionManager {
     private const val KEY_SELECTED_ELEVENLABS_MODEL_ID = "selected_elevenlabs_model_id"
     private const val KEY_SELECTED_ELEVENLABS_LANGUAGES = "selected_elevenlabs_languages"
     private const val KEY_DISCOVER_FEED_ENABLED = "discover_feed_enabled"
+    private const val KEY_USED_BRIEFING_ARTICLE_URLS = "used_briefing_article_urls"
 
     @Volatile
     private var cachedHistory: List<Pair<SongItem, Long>>? = null
@@ -390,6 +391,24 @@ object SessionManager {
     }
 
     /**
+     * Returns whether the "Session opener" commentary element is enabled.
+     * The session opener is the only commentary that plays at the start of a
+     * music session. It should only be spoken when this element is checked.
+     */
+    fun isSessionOpenerEnabled(context: Context): Boolean {
+        return "Session opener" in getSelectedCommentary(context)
+    }
+
+    /**
+     * Returns whether any between-songs commentary elements (Humour, Briefing,
+     * Music Context) are enabled. If none are selected, no between-songs
+     * commentary should be generated at all.
+     */
+    fun hasBetweenSongsCommentaryElements(context: Context): Boolean {
+        return getSelectedCommentary(context).any { it != "Session opener" }
+    }
+
+    /**
      * Returns whether the Discover feed is enabled (master toggle).
      * Defaults to true (ON).
      */
@@ -402,5 +421,30 @@ object SessionManager {
      */
     fun saveDiscoverFeedEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_DISCOVER_FEED_ENABLED, enabled).apply()
+    }
+
+    /**
+     * Returns the set of article URLs that have already been used in a
+     * Briefing commentary, so the same article is never repeated.
+     */
+    fun getUsedBriefingArticleUrls(context: Context): Set<String> {
+        return getPrefs(context).getStringSet(KEY_USED_BRIEFING_ARTICLE_URLS, emptySet()) ?: emptySet()
+    }
+
+    /**
+     * Marks an article URL as used in a Briefing commentary.
+     */
+    fun addUsedBriefingArticleUrl(context: Context, url: String) {
+        val current = getUsedBriefingArticleUrls(context).toMutableSet()
+        current.add(url)
+        getPrefs(context).edit().putStringSet(KEY_USED_BRIEFING_ARTICLE_URLS, current).apply()
+    }
+
+    /**
+     * Clears all used briefing article URLs. Called when every article in the
+     * feed has been used, so the cycle can start over.
+     */
+    fun clearUsedBriefingArticleUrls(context: Context) {
+        getPrefs(context).edit().remove(KEY_USED_BRIEFING_ARTICLE_URLS).apply()
     }
 }

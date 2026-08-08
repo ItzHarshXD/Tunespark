@@ -28,6 +28,15 @@ object ArticleSummaryService {
     const val UNABLE_TO_GET_DATA = "Unable to get data"
 
     /**
+     * Minimum meaningful article content length (in characters) before we
+     * consider the scrape successful. If the extracted text is shorter than
+     * this, it's almost certainly boilerplate (nav labels, "Loading...",
+     * cookie banners, etc.) and not real article content — so we skip the AI
+     * call entirely and return the unscraped sentinel instead.
+     */
+    private const val MIN_MEANINGFUL_LENGTH = 200
+
+    /**
      * Returns a summary for the given article.
      *
      * If a cached summary exists, it is returned immediately without any API call.
@@ -56,9 +65,12 @@ object ArticleSummaryService {
         // 2. Fetch the article webpage and extract main content
         val articleText = ArticleContentExtractor.extractArticleText(articleUrl)
 
-        // 3. If the page could not be scraped, return the fixed sentinel
-        //    (and cache it so we don't retry every time).
-        if (articleText.isNullOrBlank()) {
+        // 3. If the page could not be scraped (null/blank), OR the extracted
+        //    content is too short to be meaningful (e.g. just a nav label or
+        //    "Loading..." text), return the fixed sentinel directly WITHOUT
+        //    calling the AI model. This avoids wasting tokens on content we
+        //    already know is unusable.
+        if (articleText.isNullOrBlank() || articleText.trim().length < MIN_MEANINGFUL_LENGTH) {
             ArticleSummaryCache.saveSummary(context, articleUrl, UNABLE_TO_GET_DATA)
             return UNABLE_TO_GET_DATA
         }

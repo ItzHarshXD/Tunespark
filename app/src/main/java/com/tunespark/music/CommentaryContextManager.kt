@@ -35,6 +35,8 @@ object CommentaryContextManager {
     private const val KEY_CONTEXT_DATE = "context_date"
     private const val KEY_SESSION_START = "session_start_time"
     private const val KEY_SESSION_SONGS = "session_songs_played"
+    private const val KEY_PREVIOUS_COMMENTARIES = "previous_commentaries"
+    private const val MAX_PREVIOUS_COMMENTARIES = 10
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -91,6 +93,42 @@ object CommentaryContextManager {
     }
 
     /**
+     * Records a generated commentary script so the AI has awareness of what
+     * was already covered during the day. This prevents the briefing (and
+     * other elements) from repeating the same topics or articles.
+     *
+     * Called by the playback pipeline after a commentary is generated.
+     */
+    fun recordCommentary(context: Context, script: String) {
+        val prefs = getPrefs(context)
+        val todayKey = CommentaryContext.currentDateKey()
+        val storedDate = prefs.getString(KEY_CONTEXT_DATE, null)
+        if (storedDate != todayKey) return // Only track within the current day
+
+        val current = prefs.getString(KEY_PREVIOUS_COMMENTARIES, null)
+        val list = mutableListOf<String>()
+        if (current != null) {
+            try {
+                val jsonArray = org.json.JSONArray(current)
+                for (i in 0 until jsonArray.length()) {
+                    list.add(jsonArray.getString(i))
+                }
+            } catch (e: Exception) {
+                // Ignore corrupt data
+            }
+        }
+        list.add(0, script)
+        // Keep only the most recent N commentaries
+        while (list.size > MAX_PREVIOUS_COMMENTARIES) {
+            list.removeAt(list.size - 1)
+        }
+        val jsonArray = org.json.JSONArray()
+        list.forEach { jsonArray.put(it) }
+        prefs.edit().putString(KEY_PREVIOUS_COMMENTARIES, jsonArray.toString()).apply()
+        cachedContext = null // Invalidate so next call picks up the new commentary
+    }
+
+    /**
      * Records that a song has been played in the current session. Called by
      * the playback pipeline whenever a real song (not a commentary) starts.
      */
@@ -139,6 +177,9 @@ object CommentaryContextManager {
         val sessionStart = prefs.getLong(KEY_SESSION_START, System.currentTimeMillis())
         val songsThisSession = prefs.getInt(KEY_SESSION_SONGS, 0)
 
+        // 6. Previous commentaries from today (so the AI doesn't repeat topics)
+        val previousCommentaries = getPreviousCommentaries(prefs)
+
         return CommentaryContext(
             dateKey = todayKey,
             currentTime = CommentaryContext.currentTimeString(),
@@ -150,7 +191,8 @@ object CommentaryContextManager {
             sessionStartTime = sessionStart,
             songsPlayedThisSession = songsThisSession,
             currentSong = null,
-            upcomingSongs = emptyList()
+            upcomingSongs = emptyList(),
+            previousCommentaries = previousCommentaries
         )
     }
 
@@ -308,6 +350,31 @@ object CommentaryContextManager {
             }
         }
 
+        // Previous commentaries from today (so the AI doesn't repeat topics)
+        if (context.previousCommentaries.isNotEmpty()) {
+            sb.append("\nPrevious AI commentaries from today (do NOT repeat these topics or articles):\n")
+            context.previousCommentaries.forEachIndexed { index, script ->
+                sb.append("  ${index + 1}. $script\n")
+            }
+        }
+
         return sb.toString()
+    }
+
+    /**
+     * Returns the most recent commentary scripts from today, most recent first.
+     */
+    private fun getPreviousCommentaries(prefs: SharedPreferences): List<String> {
+        val current = prefs.getString(KEY_PREVIOUS_COMMENTARIES, null) ?: return emptyList()
+        val list = mutableListOf<String>()
+        try {
+            val jsonArray = org.json.JSONArray(current)
+            for (i in 0 until jsonArray.length()) {
+                list.add(jsonArray.getString(i))
+            }
+        } catch (e: Exception) {
+            // Ignore corrupt data
+        }
+        return list
     }
 }

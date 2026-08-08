@@ -167,6 +167,13 @@ class PlaybackService : MediaSessionService() {
             return
         }
 
+        // Only generate between-songs commentary if at least one between-songs
+        // element (Humour, Briefing, Music Context) is checked. If all elements
+        // are unchecked, no commentary should be spoken at all.
+        if (!SessionManager.hasBetweenSongsCommentaryElements(this)) {
+            return
+        }
+
         val geminiKey = SessionManager.getGeminiApiKey(this)
         if (geminiKey.isBlank()) {
             android.util.Log.w(PLAYBACK_SERVICE_TAG, "checkAndInsertPlaylistCommentary: Gemini API Key is blank! Skipping commentary.")
@@ -205,7 +212,7 @@ class PlaybackService : MediaSessionService() {
                 serviceScope.launch(Dispatchers.IO) {
                     try {
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(this@PlaybackService, "AI DJ is writing commentary for the playlist...", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@PlaybackService, "AI is writing commentary for the playlist...", Toast.LENGTH_SHORT).show()
                         }
 
                         // Build the centralized daily context for this commentary
@@ -216,27 +223,39 @@ class PlaybackService : MediaSessionService() {
                         // Get the user's selected commentary elements (e.g. Humour)
                         val selectedElements = SessionManager.getSelectedCommentary(this@PlaybackService)
 
+                        // If the Briefing element is enabled, pick a random scrapable
+                        // article from the Discover feed to potentially include.
+                        val briefingArticle = if ("Briefing" in selectedElements) {
+                            BriefingArticleSelector.selectBriefingArticle(this@PlaybackService)
+                        } else null
+
                         val (audioFile, script) = TtsService.generateCommentaryAudio(
                             context = this@PlaybackService,
                             currentSong = currentSongInfo,
                             upcomingSongs = upcomingSongsList,
                             contextPrompt = contextPrompt,
                             commentaryElements = selectedElements,
-                            isSessionOpener = false
+                            isSessionOpener = false,
+                            briefingArticle = briefingArticle
                         )
 
-                        val commentaryItem = buildCommentaryMediaItem(audioFile, script)
+                        val commentaryItem = buildCommentaryMediaItem(audioFile, script, briefingArticle)
+
+                        // Record the commentary so the AI has context about what
+                        // was already covered today (prevents topic repetition).
+                        CommentaryContextManager.recordCommentary(this@PlaybackService, script)
+
                         withContext(Dispatchers.Main) {
                             if (exoPlayer.currentMediaItemIndex == currentIndex) {
                                 exoPlayer.addMediaItem(currentIndex + 1, commentaryItem)
                                 playlistSongsPlayedSinceCommentary = 0
-                                Toast.makeText(this@PlaybackService, "AI DJ Commentary generated successfully!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this@PlaybackService, "AI Commentary generated successfully!", Toast.LENGTH_SHORT).show()
                             }
                         }
                     } catch (e: Exception) {
                         android.util.Log.e(PLAYBACK_SERVICE_TAG, "Failed to create playlist commentary: ${e.message}", e)
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(this@PlaybackService, "AI DJ Commentary failed: ${e.message}", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@PlaybackService, "AI Commentary failed: ${e.message}", Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -349,7 +368,8 @@ class PlaybackService : MediaSessionService() {
         if (videoId == lastSeededVideoId) return
         if (!seedingVideoIds.add(videoId)) return
 
-        val commentaryEnabled = SessionManager.isCommentaryEnabled(this)
+        val commentaryEnabled = SessionManager.isCommentaryEnabled(this) &&
+            SessionManager.hasBetweenSongsCommentaryElements(this)
         val N = if (commentaryEnabled) SessionManager.getCommentaryBlockSize(this) else 50
 
         var totalSongsCount = 0
@@ -520,18 +540,31 @@ class PlaybackService : MediaSessionService() {
             .build()
     }
 
-    private fun buildCommentaryMediaItem(audioFile: java.io.File, script: String): MediaItem {
+    private fun buildCommentaryMediaItem(
+        audioFile: java.io.File,
+        script: String,
+        briefingArticle: BriefingArticle? = null
+    ): MediaItem {
         val commentaryId = "commentary_${System.currentTimeMillis()}"
+        val metadataBuilder = MediaMetadata.Builder()
+            .setTitle(if (briefingArticle != null) "AI Briefing" else "AI Commentary")
+            .setArtist("Tunespark Radio")
+            .setDescription(script)
+
+        // If this commentary includes a briefing, store the article metadata
+        // in the MediaItem so the Radio screen can show the "Open Article" card.
+        if (briefingArticle != null) {
+            metadataBuilder
+                .setSubtitle(briefingArticle.url)
+                .setAlbumTitle(briefingArticle.title)
+                .setAlbumArtist(briefingArticle.source)
+                .setArtworkUri(android.net.Uri.parse(briefingArticle.thumbnail))
+        }
+
         return MediaItem.Builder()
             .setUri(android.net.Uri.fromFile(audioFile))
             .setMediaId(commentaryId)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle("AI DJ Commentary")
-                    .setArtist("TuneSpark AI DJ")
-                    .setDescription(script)
-                    .build()
-            )
+            .setMediaMetadata(metadataBuilder.build())
             .build()
     }
 
@@ -552,7 +585,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         withContext(Dispatchers.Main) {
-            Toast.makeText(this@PlaybackService, "AI DJ is writing commentary for the next set of songs...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@PlaybackService, "AI is writing commentary for the next set of songs...", Toast.LENGTH_SHORT).show()
         }
 
         return try {
@@ -566,23 +599,35 @@ class PlaybackService : MediaSessionService() {
             // Get the user's selected commentary elements (e.g. Humour)
             val selectedElements = SessionManager.getSelectedCommentary(this@PlaybackService)
 
+            // If the Briefing element is enabled, pick a random scrapable
+            // article from the Discover feed to potentially include.
+            val briefingArticle = if ("Briefing" in selectedElements) {
+                BriefingArticleSelector.selectBriefingArticle(this@PlaybackService)
+            } else null
+
             val (audioFile, script) = TtsService.generateCommentaryAudio(
                 context = this@PlaybackService,
                 currentSong = currentSongInfo,
                 upcomingSongs = upcomingSongsList,
                 contextPrompt = contextPrompt,
                 commentaryElements = selectedElements,
-                isSessionOpener = false
+                isSessionOpener = false,
+                briefingArticle = briefingArticle
             )
             android.util.Log.d(PLAYBACK_SERVICE_TAG, "createCommentaryItem: Successfully generated commentary audio: ${audioFile.absolutePath}")
+
+            // Record the commentary so the AI has context about what was
+            // already covered today (prevents topic repetition).
+            CommentaryContextManager.recordCommentary(this@PlaybackService, script)
+
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@PlaybackService, "AI DJ Commentary generated successfully!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@PlaybackService, "AI Commentary generated successfully!", Toast.LENGTH_SHORT).show()
             }
-            buildCommentaryMediaItem(audioFile, script)
+            buildCommentaryMediaItem(audioFile, script, briefingArticle)
         } catch (e: Exception) {
             android.util.Log.e(PLAYBACK_SERVICE_TAG, "createCommentaryItem failed: ${e.message}", e)
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@PlaybackService, "AI DJ Commentary failed: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@PlaybackService, "AI Commentary failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
             null
         }

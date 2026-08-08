@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit
  * Reusable Gemini text generation pipeline.
  *
  * Mirrors the exact same API key, model discovery, and generation approach
- * already used by [com.tunespark.music.TtsService] for AI DJ commentary, so
- * future features (AI DJ commentary, "Why this matters", etc.) can share one
+ * already used by [com.tunespark.music.TtsService] for AI commentary, so
+ * future features (AI commentary, "Why this matters", etc.) can share one
  * consistent pipeline.
  */
 object GeminiTextGenerator {

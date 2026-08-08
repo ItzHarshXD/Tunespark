@@ -1,6 +1,7 @@
 package com.tunespark.music.ui.screens
 
 import android.content.Context
+import android.content.Intent
 import android.media.AudioManager
 import android.os.Vibrator
 import android.os.VibrationEffect
@@ -62,6 +63,17 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.animation.core.animateDpAsState
 
 data class LyricLine(val timestampMs: Long, val text: String)
+
+/**
+ * Briefing article metadata extracted from a commentary MediaItem.
+ * Shown as an "Open Article" card while the briefing commentary plays.
+ */
+data class BriefingArticleUi(
+    val url: String,
+    val title: String,
+    val source: String,
+    val thumbnail: String
+)
 
 fun formatDuration(ms: Long): String {
     val totalSeconds = ms / 1000
@@ -342,6 +354,27 @@ fun RadioScreen(
             }
             bestIndex
         }
+    }
+
+    // Detect if the current media item is a briefing commentary. The briefing
+    // article metadata is stored in the MediaItem's MediaMetadata fields:
+    //   subtitle    -> article URL
+    //   albumTitle  -> article headline
+    //   albumArtist -> article source
+    //   artworkUri  -> article thumbnail
+    val briefingArticle = remember(exoPlayer, currentTrackIndex) {
+        val item = exoPlayer.currentMediaItem ?: return@remember null
+        if (!item.mediaId.startsWith("commentary_")) return@remember null
+        val url = item.mediaMetadata.subtitle?.toString()?.takeIf { it.isNotBlank() } ?: return@remember null
+        val title = item.mediaMetadata.albumTitle?.toString()?.takeIf { it.isNotBlank() } ?: return@remember null
+        val source = item.mediaMetadata.albumArtist?.toString()?.takeIf { it.isNotBlank() } ?: ""
+        val thumbnail = item.mediaMetadata.artworkUri?.toString() ?: ""
+        BriefingArticleUi(
+            url = url,
+            title = title,
+            source = source,
+            thumbnail = thumbnail
+        )
     }
 
     val backgroundColor = MaterialTheme.colorScheme.background
@@ -711,57 +744,75 @@ fun RadioScreen(
             )
             Spacer(modifier = Modifier.height(spacerHeight))
 
-            // 3. Current Song Details Row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 0.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
+            // 3. Current Song Details Row — replaced by the article card when a
+            // briefing commentary is playing. The slider, tabs, and content
+            // area below remain visible as usual.
+            if (briefingArticle != null) {
+                BriefingArticleCard(
+                    article = briefingArticle,
+                    textColor = textColor,
+                    primaryColor = primaryColor,
+                    onPrimaryColor = onPrimaryColor,
+                    secondaryColor = secondaryColor,
+                    onOpenArticle = {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(briefingArticle.url))
+                        context.startActivity(intent)
+                    }
+                )
+            } else {
+                Row(
                     modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(secondaryColor)
+                        .fillMaxWidth()
+                        .padding(vertical = 0.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (!currentSongArtwork.isNullOrEmpty()) {
-                        AsyncImage(
-                            model = currentSongArtwork,
-                            contentDescription = "Artwork",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("🎵", fontSize = 24.sp)
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(secondaryColor)
+                    ) {
+                        if (!currentSongArtwork.isNullOrEmpty()) {
+                            AsyncImage(
+                                model = currentSongArtwork,
+                                contentDescription = "Artwork",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("🎵", fontSize = 24.sp)
+                            }
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
 
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = currentSongTitle,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = textColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = if (currentSongArtist.isNotEmpty()) currentSongArtist else "TuneSpark",
-                        fontSize = 14.sp,
-                        color = textColor.copy(alpha = 0.6f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = currentSongTitle,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (currentSongArtist.isNotEmpty()) currentSongArtist else "TuneSpark",
+                            fontSize = 14.sp,
+                            color = textColor.copy(alpha = 0.6f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
@@ -1308,6 +1359,96 @@ fun RadioScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun BriefingArticleCard(
+    article: BriefingArticleUi,
+    textColor: Color,
+    primaryColor: Color,
+    onPrimaryColor: Color,
+    secondaryColor: Color,
+    onOpenArticle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Compact horizontal card that takes the place of the song details row
+    // (64dp thumbnail + title/artist subtitle + "Open Article" affordance).
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(secondaryColor)
+            .clickable(onClick = onOpenArticle)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Article thumbnail
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Gray.copy(alpha = 0.2f)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (article.thumbnail.isNotEmpty()) {
+                AsyncImage(
+                    model = article.thumbnail,
+                    contentDescription = article.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Text("📰", fontSize = 24.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // Headline + Source
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = article.title,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = textColor,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = article.source.ifEmpty { "News Briefing" },
+                fontSize = 13.sp,
+                color = textColor.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // "Open Article" tap target
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(primaryColor)
+                .clickable(onClick = onOpenArticle),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.ArrowBack,
+                contentDescription = "Open Article",
+                tint = onPrimaryColor,
+                modifier = Modifier
+                    .size(20.dp)
+                    .graphicsLayer {
+                        rotationZ = 180f // point right
+                    }
+            )
         }
     }
 }

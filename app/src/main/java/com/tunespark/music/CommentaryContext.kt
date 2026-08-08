@@ -40,7 +40,9 @@ data class CommentaryContext(
     /** The currently playing song as "'Title' by Artist", or null. */
     val currentSong: String?,
     /** Upcoming songs as "'Title' by Artist" strings. */
-    val upcomingSongs: List<String>
+    val upcomingSongs: List<String>,
+    /** Previous AI commentary scripts from today (most recent first). */
+    val previousCommentaries: List<String> = emptyList()
 ) {
     companion object {
         /** Returns the current day key in the user's local timezone. */

@@ -155,8 +155,8 @@ The AI commentary now uses **two distinct prompt templates** based on the `isSes
 - **Result**: Playback is now resilient — even if the Gemini API is down, rate-limited, or times out after 3 retries, the music keeps playing. The user just skips the commentary interlude and goes straight to the next songs.
 
 ### 7. What's Implemented vs. What's Coming
-- **Implemented now**: Session opener commentary (with greeting/name/time/weather), typical between-songs commentary (no greeting), the **Humour** roasting element, and resilient commentary injection that never blocks playback — all using the centralized context system with separated prompts.
-- **Not yet implemented** (per user instruction): Briefing and Music Context commentary elements. These will be added later as separate element blocks in the prompt.
+- **Implemented now**: Session opener commentary (with greeting/name/time/weather), typical between-songs commentary (no greeting), the **Humour** roasting element, the **AI Briefing** news summary element (fully isolated from humor, with dedicated scraping filters, repetition avoidance, and "AI Briefing" title), and resilient commentary injection that never blocks playback — all using the centralized context system with separated prompts.
+- **Not yet implemented** (per user instruction): Music Context commentary element. This will be added later as a separate element block in the prompt.
 
 ---
 

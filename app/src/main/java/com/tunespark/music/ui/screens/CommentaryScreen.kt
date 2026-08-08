@@ -110,7 +110,7 @@ fun CommentaryScreen(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = "Enable AI DJ Commentary",
+                    text = "Enable AI Commentary",
                     color = textColor,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold

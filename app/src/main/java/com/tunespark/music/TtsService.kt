@@ -296,66 +296,86 @@ object TtsService {
         commentaryLength: Float,
         contextPrompt: String? = null,
         commentaryElements: Set<String> = emptySet(),
-        isSessionOpener: Boolean = false
+        isSessionOpener: Boolean = false,
+        briefingArticle: BriefingArticle? = null
     ): String = withContext(Dispatchers.IO) {
         val cleanApiKey = apiKey.trim()
         val modelName = findWorkingTextModel(cleanApiKey)
         val url = "https://generativelanguage.googleapis.com/v1beta/$modelName:generateContent?key=$cleanApiKey"
 
         val prompt = StringBuilder().apply {
-            append("You are a friendly, cool, professional AI radio host for 'TuneSpark AI DJ'.\n\n")
+            append("You are a friendly, cool, professional AI radio host for 'Tunespark Radio'.\n\n")
 
-            if (isSessionOpener) {
-                // ===== SESSION OPENER PROMPT =====
-                // This is the FIRST commentary when the user starts a session.
-                // ONLY here do we greet, mention name, time, and weather.
-                append("This is the SESSION OPENER — the very first commentary when the user starts listening. This is the ONLY time you should:\n")
-                append("- Greet the user by name (if available in the context below)\n")
-                append("- Mention the time of day with a greeting (e.g. \"Good morning\", \"Good evening\" based on the context)\n")
-                append("- Mention the weather (if available in the context)\n")
-                append("- Welcome them to the session\n\n")
-                append("Make the greeting feel natural and warm, like a radio host opening a show. Then transition into introducing the first song.\n")
-                append("When mentioning the weather, describe the conditions (e.g. \"it's a sunny afternoon\", \"bit cloudy out there\") but do NOT say the city name or location name.\n\n")
+            if (briefingArticle != null && !isSessionOpener) {
+                // ===== AI BRIEFING PROMPT =====
+                // This is a dedicated 'AI Briefing' segment. 
+                // We MUST NOT mix up humour, roasts, jokes, music details or any other elements.
+                append("This is a dedicated 'AI Briefing' segment. You must NOT mix up humour, roasts, jokes, or any other elements. You must NOT talk about the previous or upcoming songs, the user's listening history, or the music at all. Focus 100% on presenting a smooth, engaging radio news briefing based on the article provided below.\n\n")
+                append("Start the segment with a very short, single-sentence radio intro/transition line to naturally introduce the briefing without rushing into the topic directly (e.g., 'Now for a quick update from our news desk...', 'Taking a quick break from the music for some updates...', or similar brief, casual intro).\n\n")
+                append("Here is the news article to present to the listener:\n")
+                append("Article Title: ${briefingArticle.title}\n")
+                append("Source: ${briefingArticle.source}\n")
+                append("Content:\n${briefingArticle.content}\n\n")
+                append("INSTRUCTIONS:\n")
+                append("- You MUST speak up and summarize this news article.\n")
+                append("- Present an engaging spoken summary of the article in a premium radio news briefing style (just like how news briefing happens in between songs on FM radio).\n")
+                append("- Speak casual, conversational, and natural. Keep it professional but easy to listen to.\n")
+                append("- Do NOT read it like a dry, academic news report. Do NOT list bullet points. Do NOT use headers or labels (like 'Summary:' or 'Takeaway:'). Just weave the story in smoothly.\n")
+                append("- Strictly avoid any markdown asterisks (*), hashtags, or formatting. Output only clean, conversational spoken text.\n")
+                append("- Keep it concise and clear, but make sure to fully integrate the story so it stands as a highly effective news briefing.\n\n")
             } else {
-                // ===== BETWEEN-SONGS PROMPT =====
-                // This is a transition between songs. NO greeting, NO name, NO weather, NO time.
-                append("This is a BETWEEN-SONGS commentary — a short transition between tracks. You must NOT:\n")
-                append("- Greet the user or say \"welcome back\", \"welcome to\", or any greeting\n")
-                append("- Mention or address the user by name\n")
-                append("- Mention the time of day, \"good morning/evening\", or any time-based greeting\n")
-                append("- Mention the weather\n")
-                append("- Repeat any session-opening language or welcome message\n\n")
-                append("You are simply transitioning from the song that just played to the next song(s). Keep it focused purely on the music and the transition. Be concise and smooth.\n")
-                append("Do NOT refer to the upcoming songs as a \"playlist\", \"set\", \"collection\", or \"queue\" — they are simply the next songs playing. Never use the word \"playlist\".\n\n")
-            }
-
-            // Context is always provided — the AI has all the data but uses it differently
-            if (contextPrompt != null && contextPrompt.isNotBlank()) {
                 if (isSessionOpener) {
-                    append("Here is the current context about the user's day and session. Use the time, weather, and user's name for your greeting, and use the listening history to personalize the opener:\n")
+                    // ===== SESSION OPENER PROMPT =====
+                    // This is the FIRST commentary when the user starts a session.
+                    // ONLY here do we greet, mention name, time, and weather.
+                    append("This is the SESSION OPENER — the very first commentary when the user starts listening. This is the ONLY time you should:\n")
+                    append("- Greet the user by name (if available in the context below)\n")
+                    append("- Mention the time of day with a greeting (e.g. \"Good morning\", \"Good evening\" based on the context)\n")
+                    append("- Mention the weather (if available in the context)\n")
+                    append("- Welcome them to the session\n\n")
+                    append("Make the greeting feel natural and warm, like a radio host opening a show. Then transition into introducing the first song.\n")
+                    append("When mentioning the weather, describe the conditions (e.g. \"it's a sunny afternoon\", \"bit cloudy out there\") but do NOT say the city name or location name.\n\n")
                 } else {
-                    append("Here is the current context about the user's day and session. Use this as BACKGROUND AWARENESS ONLY to inform your commentary — do NOT repeat greetings, mention the user's name, state the time, or describe the weather. You may use the listening history and session metadata to make the transition feel personalized:\n")
+                    // ===== BETWEEN-SONGS PROMPT =====
+                    // This is a transition between songs. NO greeting, NO name, NO weather, NO time.
+                    append("This is a BETWEEN-SONGS commentary — a short transition between tracks. You must NOT:\n")
+                    append("- Greet the user or say \"welcome back\", \"welcome to\", or any greeting\n")
+                    append("- Mention or address the user by name\n")
+                    append("- Mention the time of day, \"good morning/evening\", or any time-based greeting\n")
+                    append("- Mention the weather\n")
+                    append("- Repeat any session-opening language or welcome message\n\n")
+                    append("You are simply transitioning from the song that just played to the next song(s). Keep it focused purely on the music and the transition. Be concise and smooth.\n")
+                    append("Do NOT refer to the upcoming songs as a \"playlist\", \"set\", \"collection\", or \"queue\" — they are simply the next songs playing. Never use the word \"playlist\".\n\n")
                 }
-                append(contextPrompt).append("\n\n")
-            }
 
-            // Song info
-            if (currentSong != null) {
-                append("The user just finished listening to: $currentSong.\n")
-            }
-            if (upcomingSongs.isNotEmpty()) {
-                if (isSessionOpener) {
-                    append("The user is about to start listening to: ${upcomingSongs.joinToString(", ")}.\n")
-                } else {
-                    append("Coming up next, you are transitioning to: ${upcomingSongs.joinToString(", ")}.\n")
+                // Context is always provided — the AI has all the data but uses it differently
+                if (contextPrompt != null && contextPrompt.isNotBlank()) {
+                    if (isSessionOpener) {
+                        append("Here is the current context about the user's day and session. Use the time, weather, and user's name for your greeting, and use the listening history to personalize the opener:\n")
+                    } else {
+                        append("Here is the current context about the user's day and session. Use this as BACKGROUND AWARENESS ONLY to inform your commentary — do NOT repeat greetings, mention the user's name, state the time, or describe the weather. You may use the listening history and session metadata to make the transition feel personalized:\n")
+                    }
+                    append(contextPrompt).append("\n\n")
                 }
-            }
-            append("\n")
 
-            // ===== HUMOUR ELEMENT =====
-            // Present in BOTH session opener and between-songs. Roasting style.
-            if (commentaryElements.contains("Humour")) {
-                append("HUMOUR ELEMENT (enabled): Add a funny, playful ROAST to your commentary. Roast the user's music taste, their listening habits, or the song/artist choices in a way that's genuinely funny and a little savage — like a best friend who lovingly mocks you. Think playful insults about their song choices, cheeky observations about their listening patterns from the context, or witty jabs at the artists. Dark humour is welcome. Keep it fun and don't be boring or overly safe. The roast should feel natural and woven into the commentary, not like a separate joke segment.\n\n")
+                // Song info
+                if (currentSong != null) {
+                    append("The user just finished listening to: $currentSong.\n")
+                }
+                if (upcomingSongs.isNotEmpty()) {
+                    if (isSessionOpener) {
+                        append("The user is about to start listening to: ${upcomingSongs.joinToString(", ")}.\n")
+                    } else {
+                        append("Coming up next, you are transitioning to: ${upcomingSongs.joinToString(", ")}.\n")
+                    }
+                }
+                append("\n")
+
+                // ===== HUMOUR ELEMENT =====
+                // Present in BOTH session opener and between-songs. Roasting style.
+                if (commentaryElements.contains("Humour")) {
+                    append("HUMOUR ELEMENT (enabled): Add a funny, playful ROAST to your commentary. Roast the user's music taste, their listening habits, or the song/artist choices in a way that's genuinely funny and a little savage — like a best friend who lovingly mocks you. Think playful insults about their song choices, cheeky observations about their listening patterns from the context, or witty jabs at the artists. Dark humour is welcome. Keep it fun and don't be boring or overly safe. The roast should feel natural and woven into the commentary, not like a separate joke segment.\n\n")
+                }
             }
 
             // ===== LENGTH INSTRUCTIONS =====
@@ -365,6 +385,12 @@ object TtsService {
                 else -> "Generate a detailed, deeply engaging, and longer radio host commentary script. Keep it to 3 to 4 sentences, around 50-70 words. Include interesting radio banter and provide a comprehensive and rich commentary."
             }
             append(lengthInstructions).append("\n\n")
+
+            // If the briefing is enabled and an article is present, allow a
+            // slightly longer script so the article summary can fit naturally.
+            if (commentaryElements.contains("Briefing") && briefingArticle != null) {
+                append("If you choose to include the briefing, you may extend the script slightly (by 1-2 sentences) to accommodate the article summary naturally.\n\n")
+            }
 
             append("Output ONLY the spoken text. Do not include any actions, stage directions, sound effects, markdown, or quotation marks.")
         }.toString()
@@ -412,7 +438,8 @@ object TtsService {
         upcomingSongs: List<String>,
         contextPrompt: String? = null,
         commentaryElements: Set<String> = emptySet(),
-        isSessionOpener: Boolean = false
+        isSessionOpener: Boolean = false,
+        briefingArticle: BriefingArticle? = null
     ): Pair<File, String> {
         val provider = SessionManager.getActiveTtsProvider(context)
         val geminiKey = SessionManager.getGeminiApiKey(context)
@@ -428,7 +455,7 @@ object TtsService {
         for (attempt in 1..3) {
             try {
                 // 1. Generate the script using Gemini 3.1
-                val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs, commentaryLength, contextPrompt, commentaryElements, isSessionOpener)
+                val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs, commentaryLength, contextPrompt, commentaryElements, isSessionOpener, briefingArticle)
                 android.util.Log.d("TtsService", "Generated script (Attempt $attempt): $script")
 
                 // 2. Synthesize using the active TTS provider
