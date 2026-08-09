@@ -275,6 +275,56 @@ fun CommentaryScreen(
                     inactiveTrackColor = Color.Gray
                 )
             )
+
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider(color = textColor.copy(alpha = 0.1f), thickness = 1.dp)
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Custom Instructions
+            Text(
+                text = "Custom Instructions",
+                color = textColor,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+            Text(
+                text = "Customize your AI Radio's personality, tone, humor, style, or specific guidelines (things you want/don't want). These preferences apply globally across all commentary elements.",
+                color = Color.Gray,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            var customInstructionsText by remember { mutableStateOf(SessionManager.getCustomInstructions(context)) }
+
+            OutlinedTextField(
+                value = customInstructionsText,
+                onValueChange = {
+                    customInstructionsText = it
+                    SessionManager.saveCustomInstructions(context, it)
+                },
+                placeholder = {
+                    Text(
+                        text = "e.g., 'Speak in hinglish language.'",
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp, max = 200.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = textColor,
+                    unfocusedTextColor = textColor,
+                    focusedBorderColor = primaryColor,
+                    unfocusedBorderColor = Color.Gray,
+                    cursorColor = primaryColor,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent
+                ),
+                textStyle = LocalTextStyle.current.copy(fontSize = 15.sp)
+            )
         }
         
         Spacer(modifier = Modifier.height(110.dp))

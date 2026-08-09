@@ -38,6 +38,7 @@ object SessionManager {
     private const val KEY_SELECTED_ELEVENLABS_LANGUAGES = "selected_elevenlabs_languages"
     private const val KEY_DISCOVER_FEED_ENABLED = "discover_feed_enabled"
     private const val KEY_USED_BRIEFING_ARTICLE_URLS = "used_briefing_article_urls"
+    private const val KEY_CUSTOM_INSTRUCTIONS = "custom_instructions"
 
     @Volatile
     private var cachedHistory: List<Pair<SongItem, Long>>? = null
@@ -446,5 +447,19 @@ object SessionManager {
      */
     fun clearUsedBriefingArticleUrls(context: Context) {
         getPrefs(context).edit().remove(KEY_USED_BRIEFING_ARTICLE_URLS).apply()
+    }
+
+    /**
+     * Retrieves the user's custom commentary instructions.
+     */
+    fun getCustomInstructions(context: Context): String {
+        return getPrefs(context).getString(KEY_CUSTOM_INSTRUCTIONS, "") ?: ""
+    }
+
+    /**
+     * Saves the user's custom commentary instructions.
+     */
+    fun saveCustomInstructions(context: Context, instructions: String) {
+        getPrefs(context).edit().putString(KEY_CUSTOM_INSTRUCTIONS, instructions).apply()
     }
 }

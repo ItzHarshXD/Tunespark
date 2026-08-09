@@ -173,9 +173,16 @@ The AI commentary now uses **two distinct prompt templates** based on the `isSes
 - **Lyrics Tab Integration** (`MainActivity.kt`): When the "Music Context" commentary is playing, the AI's spoken script is displayed in the Lyrics tab (just like other commentary elements), and the track is excluded from listening-history capture.
 - **Isolation from Automatic Elements** (`PlaybackService.kt`): "Music Context" is explicitly filtered out of the automatic between-songs commentary element set, so it never triggers on its own. Automatic commentary now only fires when Humour or Briefing is checked.
 
-### 8. What's Implemented vs. What's Coming
-- **Implemented now**: Session opener commentary (with greeting/name/time/weather), typical between-songs commentary (no greeting), the **Humour** roasting element, the **AI Briefing** news summary element (fully isolated from humor, with dedicated scraping filters, repetition avoidance, and "AI Briefing" title), the **Music Context** manual on-demand song-storytelling element (with MusicBrainz/Wikidata/Wikipedia/LrcLib integration, a dedicated Radio-screen trigger button, and Lyrics-tab script display), and resilient commentary injection that never blocks playback — all using the centralized context system with separated prompts.
-- **All four commentary elements are now fully implemented.**
+### 8. Custom Instructions Commentary Styling (Implemented)
+- **User-Defined Guidelines**: Added a "Custom Instructions" text input field in the Commentary settings. Users can input their custom preferences for their commentary style (personality, tone, humor, accent, slang, constraints, etc.).
+- **Real-Time Auto-Save**: Managed automatically as the user types, persisted securely inside `SharedPreferences` via `SessionManager`.
+- **Global Injection & Robust Compliance**: The custom preferences are dynamically injected as a high-priority `CRITICAL USER CUSTOMIZATION PREFERENCES` section at the very beginning of the prompt builder in `TtsService.kt` to define the AI persona. A reinforcing reminder is appended to the end of the prompt to prevent instructions drift.
+- **Flawless Session Opener Override**: Explicitly overrides the default greeting style inside the **Session Opener** (welcome commentary) template. If custom instructions are present, the greeting is custom-tailored to adopt the custom personality (e.g. sarcastic, humorous, specific slang) instead of falling back to a generic warm intro, while maintaining time/weather/name awareness.
+- **Adaptive Commentary Elements Integration**: Applied custom instructions beautifully into the generation flows of AI Briefing summaries and Music Context background stories.
+
+### 9. What's Implemented vs. What's Coming
+- **Implemented now**: Session opener commentary (with greeting/name/time/weather), typical between-songs commentary (no greeting), the **Humour** roasting element, the **AI Briefing** news summary element (fully isolated from humor, with dedicated scraping filters, repetition avoidance, and "AI Briefing" title), the **Music Context** manual on-demand song-storytelling element (with MusicBrainz/Wikidata/Wikipedia/LrcLib integration, a dedicated Radio-screen trigger button, and Lyrics-tab script display), resilient commentary injection that never blocks playback, and a **Custom Instructions** styling override that shapes the AI host's personality across all commentary segments — all using the centralized context system with separated prompts.
+- **All four commentary elements plus global styling customization are now fully implemented.**
 
 ---
 

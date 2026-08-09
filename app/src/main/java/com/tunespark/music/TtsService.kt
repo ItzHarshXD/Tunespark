@@ -299,7 +299,8 @@ object TtsService {
         isSessionOpener: Boolean = false,
         briefingArticle: BriefingArticle? = null,
         musicContextData: MusicContextData? = null,
-        musicContextLyrics: String? = null
+        musicContextLyrics: String? = null,
+        customInstructions: String? = null
     ): String = withContext(Dispatchers.IO) {
         val cleanApiKey = apiKey.trim()
         val modelName = findWorkingTextModel(cleanApiKey)
@@ -307,6 +308,14 @@ object TtsService {
 
         val prompt = StringBuilder().apply {
             append("You are a friendly, cool, professional AI radio host for 'Tunespark Radio'.\n\n")
+
+            if (!customInstructions.isNullOrBlank()) {
+                append("CRITICAL USER CUSTOMIZATION PREFERENCES:\n")
+                append("The user has specified custom instructions and style guidelines for your host persona. You MUST strictly prioritize and adhere to these preferences for personality, tone, humour, style, vocabulary, or constraints. Do NOT break character from these instructions:\n")
+                append("\"\"\"\n")
+                append(customInstructions.trim())
+                append("\n\"\"\"\n\n")
+            }
 
             if (musicContextData != null) {
                 // ===== MUSIC CONTEXT PROMPT =====
@@ -337,7 +346,11 @@ object TtsService {
                 append("- Speak in an engaging, narrative storytelling style. Make it casual and conversational, like an expert DJ sharing trivia between songs.\n")
                 append("- Weave the facts together smoothly. Do NOT present bullet points, raw lists, labels, or dry reports. Just weave the story in naturally.\n")
                 append("- Strictly avoid any markdown asterisks (*), hashtags, stage directions, or formatting. Output only clean, conversational spoken text.\n")
-                append("- Keep it descriptive and flow nicely, fitting a narrative of around 50-80 words so the historical context and meaning can fit naturally.\n\n")
+                append("- Keep it descriptive and flow nicely, fitting a narrative of around 50-80 words so the historical context and meaning can fit naturally.\n")
+                if (!customInstructions.isNullOrBlank()) {
+                    append("- IMPORTANT: Present this background story while fully adopting the personality, tone, and style requested in the custom instructions (e.g. sarcasm, humor, particular slang, etc.).\n")
+                }
+                append("\n")
             } else if (briefingArticle != null && !isSessionOpener) {
                 // ===== AI BRIEFING PROMPT =====
                 // This is a dedicated 'AI Briefing' segment. 
@@ -354,7 +367,11 @@ object TtsService {
                 append("- Speak casual, conversational, and natural. Keep it professional but easy to listen to.\n")
                 append("- Do NOT read it like a dry, academic news report. Do NOT list bullet points. Do NOT use headers or labels (like 'Summary:' or 'Takeaway:'). Just weave the story in smoothly.\n")
                 append("- Strictly avoid any markdown asterisks (*), hashtags, or formatting. Output only clean, conversational spoken text.\n")
-                append("- Keep it concise and clear, but make sure to fully integrate the story so it stands as a highly effective news briefing.\n\n")
+                append("- Keep it concise and clear, but make sure to fully integrate the story so it stands as a highly effective news briefing.\n")
+                if (!customInstructions.isNullOrBlank()) {
+                    append("- IMPORTANT: Deliver this news briefing while fully adopting the personality, tone, and style requested in the custom instructions (e.g. sarcastic, humorous, dry, specific slang, etc.).\n")
+                }
+                append("\n")
             } else {
                 if (isSessionOpener) {
                     // ===== SESSION OPENER PROMPT =====
@@ -365,7 +382,16 @@ object TtsService {
                     append("- Mention the time of day with a greeting (e.g. \"Good morning\", \"Good evening\" based on the context)\n")
                     append("- Mention the weather (if available in the context)\n")
                     append("- Welcome them to the session\n\n")
-                    append("Make the greeting feel natural and warm, like a radio host opening a show. Then transition into introducing the first song.\n")
+                    if (!customInstructions.isNullOrBlank()) {
+                        append("IMPORTANT PERSONALITY & STYLE OVERRIDE FOR SESSION OPENER:\n")
+                        append("While performing this session opening greeting, you MUST fully apply and reflect the user's custom instructions/preferences:\n")
+                        append("\"\"\"\n")
+                        append(customInstructions.trim())
+                        append("\n\"\"\"\n")
+                        append("For example, if the custom instructions ask you to be sarcastic, funny, dry, use specific slang, or have a specific accent/personality, you must open the session in that exact style rather than a generic warm greeting.\n\n")
+                    } else {
+                        append("Make the greeting feel natural and warm, like a radio host opening a show. Then transition into introducing the first song.\n\n")
+                    }
                     append("When mentioning the weather, describe the conditions (e.g. \"it's a sunny afternoon\", \"bit cloudy out there\") but do NOT say the city name or location name.\n\n")
                 } else {
                     // ===== BETWEEN-SONGS PROMPT =====
@@ -425,6 +451,10 @@ object TtsService {
             }
 
             append("Output ONLY the spoken text. Do not include any actions, stage directions, sound effects, markdown, or quotation marks.")
+            
+            if (!customInstructions.isNullOrBlank()) {
+                append("\n\nREMINDER: Strictly respect the user's custom instructions/style preferences (personality, tone, humor, style, etc.) specified above when writing this commentary script.")
+            }
         }.toString()
 
         val requestJson = JSONObject().apply {
@@ -499,7 +529,8 @@ object TtsService {
                     isSessionOpener = isSessionOpener,
                     briefingArticle = briefingArticle,
                     musicContextData = musicContextData,
-                    musicContextLyrics = musicContextLyrics
+                    musicContextLyrics = musicContextLyrics,
+                    customInstructions = SessionManager.getCustomInstructions(context)
                 )
                 android.util.Log.d("TtsService", "Generated script (Attempt $attempt): $script")
 
