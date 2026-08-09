@@ -154,9 +154,28 @@ The AI commentary now uses **two distinct prompt templates** based on the `isSes
   2. **Commentary second**: Commentary is generated (if enabled) and then inserted *before* the already-queued songs by finding the first appended song's position. If commentary fails, songs are already in the queue and playback continues seamlessly without commentary.
 - **Result**: Playback is now resilient — even if the Gemini API is down, rate-limited, or times out after 3 retries, the music keeps playing. The user just skips the commentary interlude and goes straight to the next songs.
 
-### 7. What's Implemented vs. What's Coming
-- **Implemented now**: Session opener commentary (with greeting/name/time/weather), typical between-songs commentary (no greeting), the **Humour** roasting element, the **AI Briefing** news summary element (fully isolated from humor, with dedicated scraping filters, repetition avoidance, and "AI Briefing" title), and resilient commentary injection that never blocks playback — all using the centralized context system with separated prompts.
-- **Not yet implemented** (per user instruction): Music Context commentary element. This will be added later as a separate element block in the prompt.
+### 7. Music Context Commentary Element — Manual, On-Demand Song Storytelling (Implemented)
+- **User-Selectable Element**: The "Music Context" commentary element, when toggled ON in the Commentary settings, enables a dedicated **manual** trigger on the Radio player screen. It is the 4th element on the Commentary screen list.
+- **Manual, Not Automatic**: Unlike Humour and Briefing, Music Context **never plays automatically** after a set of songs. It is only activated when the user explicitly taps the dedicated Music Context button on the Radio screen.
+- **Dedicated Button on Radio Screen**: When AI Commentary is enabled and the "Music Context" checkbox is checked, a premium, theme-aware sparkle button (`✨`) appears gracefully on the far-right of the current song details row (near the song title/artist). Tapping it triggers haptic feedback + click sound and asynchronously generates the segment.
+- **Queued to Play Next**: The generated commentary media item (titled **"Music Context"**) is inserted directly after the currently playing song (`currentIndex + 1`) in the ExoPlayer queue, so it plays immediately after that song ends.
+- **Four Primary Data Sources** (`MusicContextScraper.kt`):
+  1. **MusicBrainz** — Exact release metadata (title, artist, album, release date, record label/publisher info) via the `recording` search endpoint with a proper User-Agent.
+  2. **Wikidata** — Structured entity relationships and descriptions via `wbsearchentities`.
+  3. **Wikipedia** — Rich historical background/story prose via search + page intro extracts (`prop=extracts&exintro&explaintext`).
+  4. **TuneSpark Lyrics (LrcLib)** — The currently displayed lyrics are passed as a theme/meaning fallback so Gemini can deduce the song's context even when external sources are sparse.
+- **Concurrent & Resilient Fetching**: All three external sources are fetched concurrently in the background with per-source try/catch isolation, so one failing source never blocks the others or the commentary.
+- **Dedicated Prompt Path** (`TtsService.kt`): When `musicContextData` is present, a fully isolated prompt is used that:
+  - Focuses 100% on the single song's background story, meaning, release details, and history.
+  - Begins with a short, single-sentence casual radio transition intro (e.g., "Let's take a look at the story behind this track...").
+  - Weaves facts together in a narrative storytelling style (~50-80 words), strictly avoiding bullet points, labels, markdown, or stage directions.
+  - Does NOT mix in humour, roasts, news briefings, greetings, weather, or other elements.
+- **Lyrics Tab Integration** (`MainActivity.kt`): When the "Music Context" commentary is playing, the AI's spoken script is displayed in the Lyrics tab (just like other commentary elements), and the track is excluded from listening-history capture.
+- **Isolation from Automatic Elements** (`PlaybackService.kt`): "Music Context" is explicitly filtered out of the automatic between-songs commentary element set, so it never triggers on its own. Automatic commentary now only fires when Humour or Briefing is checked.
+
+### 8. What's Implemented vs. What's Coming
+- **Implemented now**: Session opener commentary (with greeting/name/time/weather), typical between-songs commentary (no greeting), the **Humour** roasting element, the **AI Briefing** news summary element (fully isolated from humor, with dedicated scraping filters, repetition avoidance, and "AI Briefing" title), the **Music Context** manual on-demand song-storytelling element (with MusicBrainz/Wikidata/Wikipedia/LrcLib integration, a dedicated Radio-screen trigger button, and Lyrics-tab script display), and resilient commentary injection that never blocks playback — all using the centralized context system with separated prompts.
+- **All four commentary elements are now fully implemented.**
 
 ---
 

@@ -60,7 +60,7 @@ class PlaybackService : MediaSessionService() {
                 }
             }
 
-        private var instance: PlaybackService? = null
+        var instance: PlaybackService? = null
         private const val PLAYBACK_SERVICE_TAG = "PlaybackService"
         const val TARGET_UPCOMING_ITEMS = 20
         const val MIN_UPCOMING_ITEMS_BEFORE_REFILL = 5
@@ -167,10 +167,11 @@ class PlaybackService : MediaSessionService() {
             return
         }
 
-        // Only generate between-songs commentary if at least one between-songs
-        // element (Humour, Briefing, Music Context) is checked. If all elements
-        // are unchecked, no commentary should be spoken at all.
-        if (!SessionManager.hasBetweenSongsCommentaryElements(this)) {
+        // Only generate between-songs commentary if at least one automatic between-songs
+        // element (Humour, Briefing) is checked.
+        val selectedCommentary = SessionManager.getSelectedCommentary(this)
+        val hasAutoBetweenSongsElements = "Humour" in selectedCommentary || "Briefing" in selectedCommentary
+        if (!hasAutoBetweenSongsElements) {
             return
         }
 
@@ -220,8 +221,8 @@ class PlaybackService : MediaSessionService() {
                             CommentaryContextManager.getCurrentContext(this@PlaybackService)
                         )
 
-                        // Get the user's selected commentary elements (e.g. Humour)
-                        val selectedElements = SessionManager.getSelectedCommentary(this@PlaybackService)
+                        // Get the user's selected commentary elements (e.g. Humour), excluding manual Music Context
+                        val selectedElements = SessionManager.getSelectedCommentary(this@PlaybackService) - "Music Context"
 
                         // If the Briefing element is enabled, pick a random scrapable
                         // article from the Discover feed to potentially include.
@@ -261,6 +262,71 @@ class PlaybackService : MediaSessionService() {
                 }
             }
         }
+    }
+
+    fun generateAndQueueMusicContextForCurrentSong(lyrics: String) {
+        val player = mediaSession?.player ?: return
+        val currentItem = player.currentMediaItem ?: return
+        val title = currentItem.mediaMetadata.title?.toString() ?: "Unknown Song"
+        val artist = currentItem.mediaMetadata.artist?.toString() ?: "Unknown Artist"
+
+        serviceScope.launch {
+            try {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@PlaybackService, "Gathering context for '$title'...", Toast.LENGTH_SHORT).show()
+                }
+
+                // 1. Fetch context data concurrently
+                val contextData = MusicContextScraper.fetchMusicContext(title, artist)
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@PlaybackService, "AI is generating Music Context script...", Toast.LENGTH_SHORT).show()
+                }
+
+                // 2. Generate the commentary audio
+                val (audioFile, script) = TtsService.generateCommentaryAudio(
+                    context = this@PlaybackService,
+                    currentSong = "'$title' by $artist",
+                    upcomingSongs = emptyList(),
+                    contextPrompt = null,
+                    commentaryElements = setOf("Music Context"),
+                    isSessionOpener = false,
+                    briefingArticle = null,
+                    musicContextData = contextData,
+                    musicContextLyrics = lyrics.ifBlank { null }
+                )
+
+                // 3. Build and insert the commentary item
+                val commentaryItem = buildMusicContextMediaItem(audioFile, script)
+
+                withContext(Dispatchers.Main) {
+                    val currentIndex = player.currentMediaItemIndex
+                    if (currentIndex != -1) {
+                        player.addMediaItem(currentIndex + 1, commentaryItem)
+                        Toast.makeText(this@PlaybackService, "Music Context queued to play next!", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(PLAYBACK_SERVICE_TAG, "generateAndQueueMusicContextForCurrentSong failed: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@PlaybackService, "Failed to generate Music Context: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun buildMusicContextMediaItem(audioFile: java.io.File, script: String): MediaItem {
+        val commentaryId = "commentary_${System.currentTimeMillis()}"
+        val metadataBuilder = MediaMetadata.Builder()
+            .setTitle("Music Context")
+            .setArtist("Tunespark Radio")
+            .setDescription(script)
+
+        return MediaItem.Builder()
+            .setUri(android.net.Uri.fromFile(audioFile))
+            .setMediaId(commentaryId)
+            .setMediaMetadata(metadataBuilder.build())
+            .build()
     }
 
     private fun isCommentaryMediaItem(mediaItem: MediaItem): Boolean {
@@ -368,8 +434,9 @@ class PlaybackService : MediaSessionService() {
         if (videoId == lastSeededVideoId) return
         if (!seedingVideoIds.add(videoId)) return
 
-        val commentaryEnabled = SessionManager.isCommentaryEnabled(this) &&
-            SessionManager.hasBetweenSongsCommentaryElements(this)
+        val selectedCommentary = SessionManager.getSelectedCommentary(this)
+        val hasAutoBetweenSongsElements = "Humour" in selectedCommentary || "Briefing" in selectedCommentary
+        val commentaryEnabled = SessionManager.isCommentaryEnabled(this) && hasAutoBetweenSongsElements
         val N = if (commentaryEnabled) SessionManager.getCommentaryBlockSize(this) else 50
 
         var totalSongsCount = 0
@@ -596,8 +663,8 @@ class PlaybackService : MediaSessionService() {
                 CommentaryContextManager.getCurrentContext(this@PlaybackService)
             )
 
-            // Get the user's selected commentary elements (e.g. Humour)
-            val selectedElements = SessionManager.getSelectedCommentary(this@PlaybackService)
+            // Get the user's selected commentary elements (e.g. Humour), excluding manual Music Context
+            val selectedElements = SessionManager.getSelectedCommentary(this@PlaybackService) - "Music Context"
 
             // If the Briefing element is enabled, pick a random scrapable
             // article from the Discover feed to potentially include.

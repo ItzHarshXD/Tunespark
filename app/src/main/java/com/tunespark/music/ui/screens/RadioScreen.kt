@@ -180,6 +180,8 @@ fun RadioScreen(
     val context = LocalContext.current
     val keepScreenOnSetting = remember(context) { com.tunespark.music.SessionManager.getKeepScreenOn(context) }
     val showVisualizerSetting = remember(context) { com.tunespark.music.SessionManager.getShowVisualizer(context) }
+    val isCommentaryEnabled = remember(context) { com.tunespark.music.SessionManager.isCommentaryEnabled(context) }
+    val isMusicContextChecked = remember(context) { "Music Context" in com.tunespark.music.SessionManager.getSelectedCommentary(context) }
 
     var draggedId by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableStateOf(0f) }
@@ -812,6 +814,27 @@ fun RadioScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                    }
+
+                    if (isCommentaryEnabled && isMusicContextChecked) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        IconButton(
+                            onClick = {
+                                val viewLocal = view
+                                val audioManagerLocal = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+                                audioManagerLocal?.playSoundEffect(android.media.AudioManager.FX_KEY_CLICK, 1f)
+                                viewLocal.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                                val plainTextLyrics = lyricsLines.joinToString("\n") { it.text }
+                                com.tunespark.music.PlaybackService.instance?.generateAndQueueMusicContextForCurrentSong(plainTextLyrics)
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(secondaryColor)
+                        ) {
+                            Text("✨", fontSize = 20.sp)
+                        }
                     }
                 }
             }

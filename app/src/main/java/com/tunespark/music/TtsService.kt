@@ -297,7 +297,9 @@ object TtsService {
         contextPrompt: String? = null,
         commentaryElements: Set<String> = emptySet(),
         isSessionOpener: Boolean = false,
-        briefingArticle: BriefingArticle? = null
+        briefingArticle: BriefingArticle? = null,
+        musicContextData: MusicContextData? = null,
+        musicContextLyrics: String? = null
     ): String = withContext(Dispatchers.IO) {
         val cleanApiKey = apiKey.trim()
         val modelName = findWorkingTextModel(cleanApiKey)
@@ -306,7 +308,37 @@ object TtsService {
         val prompt = StringBuilder().apply {
             append("You are a friendly, cool, professional AI radio host for 'Tunespark Radio'.\n\n")
 
-            if (briefingArticle != null && !isSessionOpener) {
+            if (musicContextData != null) {
+                // ===== MUSIC CONTEXT PROMPT =====
+                append("This is a dedicated 'Music Context' segment. You must focus 100% on presenting the background story, meaning, release details, and interesting historical details of the song specified below. Do NOT talk about previous or other upcoming songs, the user's listening history, current time, or weather.\n\n")
+                append("Start the segment with a very short, single-sentence casual radio transition intro (e.g., 'Let's take a look at the story behind this track...', 'Ever wondered how this song came to be?...', or similar warm, casual DJ intro line).\n\n")
+                append("Here is the gathered context for the song:\n")
+                append("Song Title: ${musicContextData.title}\n")
+                append("Artist: ${musicContextData.artist}\n")
+                if (!musicContextData.musicBrainzAlbum.isNullOrBlank()) {
+                    append("Album: ${musicContextData.musicBrainzAlbum}\n")
+                }
+                if (!musicContextData.musicBrainzReleaseDate.isNullOrBlank()) {
+                    append("Release Date: ${musicContextData.musicBrainzReleaseDate}\n")
+                }
+                if (!musicContextData.musicBrainzInfo.isNullOrBlank()) {
+                    append("MusicBrainz details: ${musicContextData.musicBrainzInfo}\n")
+                }
+                if (!musicContextData.wikidataDescription.isNullOrBlank()) {
+                    append("Wikidata relationship info: ${musicContextData.wikidataDescription}\n")
+                }
+                if (!musicContextData.wikipediaProse.isNullOrBlank()) {
+                    append("Wikipedia History & Story: ${musicContextData.wikipediaProse}\n")
+                }
+                if (!musicContextLyrics.isNullOrBlank()) {
+                    append("Lyrics theme / Fallback:\n$musicContextLyrics\n")
+                }
+                append("\nINSTRUCTIONS:\n")
+                append("- Speak in an engaging, narrative storytelling style. Make it casual and conversational, like an expert DJ sharing trivia between songs.\n")
+                append("- Weave the facts together smoothly. Do NOT present bullet points, raw lists, labels, or dry reports. Just weave the story in naturally.\n")
+                append("- Strictly avoid any markdown asterisks (*), hashtags, stage directions, or formatting. Output only clean, conversational spoken text.\n")
+                append("- Keep it descriptive and flow nicely, fitting a narrative of around 50-80 words so the historical context and meaning can fit naturally.\n\n")
+            } else if (briefingArticle != null && !isSessionOpener) {
                 // ===== AI BRIEFING PROMPT =====
                 // This is a dedicated 'AI Briefing' segment. 
                 // We MUST NOT mix up humour, roasts, jokes, music details or any other elements.
@@ -439,7 +471,9 @@ object TtsService {
         contextPrompt: String? = null,
         commentaryElements: Set<String> = emptySet(),
         isSessionOpener: Boolean = false,
-        briefingArticle: BriefingArticle? = null
+        briefingArticle: BriefingArticle? = null,
+        musicContextData: MusicContextData? = null,
+        musicContextLyrics: String? = null
     ): Pair<File, String> {
         val provider = SessionManager.getActiveTtsProvider(context)
         val geminiKey = SessionManager.getGeminiApiKey(context)
@@ -455,7 +489,18 @@ object TtsService {
         for (attempt in 1..3) {
             try {
                 // 1. Generate the script using Gemini 3.1
-                val script = generateCommentaryScript(geminiKey, currentSong, upcomingSongs, commentaryLength, contextPrompt, commentaryElements, isSessionOpener, briefingArticle)
+                val script = generateCommentaryScript(
+                    apiKey = geminiKey,
+                    currentSong = currentSong,
+                    upcomingSongs = upcomingSongs,
+                    commentaryLength = commentaryLength,
+                    contextPrompt = contextPrompt,
+                    commentaryElements = commentaryElements,
+                    isSessionOpener = isSessionOpener,
+                    briefingArticle = briefingArticle,
+                    musicContextData = musicContextData,
+                    musicContextLyrics = musicContextLyrics
+                )
                 android.util.Log.d("TtsService", "Generated script (Attempt $attempt): $script")
 
                 // 2. Synthesize using the active TTS provider

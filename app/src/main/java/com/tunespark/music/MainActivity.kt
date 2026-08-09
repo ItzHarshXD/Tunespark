@@ -393,7 +393,7 @@ fun MainPlayerScreen(
     var hoistedIsLyricsLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(currentSongTitle, currentSongArtist) {
-        if (currentSongTitle.startsWith("AI") || currentSongTitle.startsWith("commentary_")) {
+        if (currentSongTitle.startsWith("AI") || currentSongTitle == "Music Context" || currentSongTitle.startsWith("commentary_")) {
             val description = exoPlayer.currentMediaItem?.mediaMetadata?.description?.toString() ?: ""
             if (description.isNotBlank()) {
                 hoistedLyricsLines = listOf(LyricLine(-1L, description))
@@ -475,6 +475,7 @@ fun MainPlayerScreen(
         if (currentSongTitle != "No Track Loaded" &&
             currentSongTitle.isNotBlank() &&
             !currentSongTitle.startsWith("AI") &&
+            currentSongTitle != "Music Context" &&
             !currentSongTitle.startsWith("commentary_") &&
             currentSongArtist != "Tunespark Radio") {
             
