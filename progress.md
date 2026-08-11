@@ -19,10 +19,10 @@ Key files and packages:
   - Single-activity entry point. Boots the Jetpack Compose UI, binds to `PlaybackService` via Media3 `MediaController`, initializes `SessionManager`, and hosts global state variables. Delegates screen rendering cleanly to the individual composable screens.
 - `app/src/main/java/com/tunespark/music/ui/screens/`
   - Modularized screens package hosting distinct, clean Jetpack Compose UI screens:
-    - `HomeScreen.kt`: Dynamic, light-themed premium dashboard. Displays current system clock and local weather. Reacts instantly to play state: displays a beautiful spectrum visualizer, a circular play-controller, and compact mini-player when playing, or a personalized greeting with categories and a "Start Radio" button when inactive.
+    - `HomeScreen.kt`: Dynamic, light-themed premium dashboard. Displays current system clock and local weather. Reacts instantly to play state: displays a circular play-controller and compact mini-player when playing, or a personalized greeting with categories and a "Start Radio" button when inactive.
     - `PlaylistsScreen.kt`: Highly-polished 3-column interactive layout supporting Light and Dark themes dynamically. Displays pill tabs ("Playlists", "Albums", "Artists"), sorting triggers, search navigation, and structured playlists: Liked (red with central heart outline) and local lists. Triggers background playlist playback mode with sequential commentary injections.
     - `SearchScreen.kt`: Advanced zero-button interactive search screen. Displays real-time auto-suggestions and reactive song search results side-by-side as you type, matching a clean white minimalist aesthetic.
-    - `RadioScreen.kt`: Audio player view displaying up-next list and control triggers mapped to MediaController commands. Houses the high-accuracy dot-matrix sound visualizer with layout bounds stability, and renders real-time auto-scrolling time-synced lyrics with proximity-based opacity fading.
+    - `RadioScreen.kt`: Audio player view displaying up-next list and control triggers mapped to MediaController commands. Renders real-time auto-scrolling time-synced lyrics with proximity-based opacity fading.
     - `SettingsScreen.kt`: Interactive links leading to dedicated customization options.
     - `AccountScreen.kt`: Manages optional YouTube Music login WebViews, sign-out actions, and live profile details.
     - `AppearanceScreen.kt`: Styled theme selections (Light, Dark, System).
@@ -324,7 +324,6 @@ TuneSpark has been structured into 13 distinct screens for clear separation of c
      - Left: A solid black circle Back button with a white back arrow to return the user to the Home screen without stopping playback.
      - Center: A Row of split Play/Pause and Skip buttons styled as rounded capsule halves that beautifully and independently elongate their outer curved edges with bouncy spring physics and premium haptics when tapped.
      - Right: A solid red circle Close button with a white "X" that features a confirmation expansion animation (expanding into a beautiful "Stop" capsule upon initial click with safety timeout and haptic feedback) as a second re-input to prevent accidental triggers.
-   - Features a central, prominent dot-matrix Equalizer Waveform visualizer located below the top bar and above the song details, which uses physics-simulated bass, mid, and treble components to dance accurately on the song's real-time beats. Stabilized with fixed layout height constraints to prevent content-shaking jitter.
    - Features a Song details section with rounded square artwork on the left, and bold title & artist details on the right.
    - Features a premium, scrollable, styled lyrics block leveraging the integrated `:lrclib` module with microsecond-accurate timestamp parsing. Renders time-synced auto-scrolling using a centered `LazyListState` list, featuring Spotify-style progressive fading (highlighting the currently active spoken line and fading neighboring lines). Hoists lyrics loading in the parent scope for zero-latency in-memory background caching during navigation.
    - Features a capsule Skip button at the very bottom with a white background, black border, a solid black circle on the left containing a skip next icon, and "Skip song" text centered.
@@ -341,7 +340,7 @@ TuneSpark has been structured into 13 distinct screens for clear separation of c
 8. **Commentary Screen**:
    - Dynamic list of option switches ("Weather updates", "Session opener", "Song intro", etc.) with stylized check circle toggle states.
 9. **Player and Audio Screen**:
-    - Controls configuration settings like keeping the screen on and enabling/disabling the real-time beat visualizer.
+    - Controls configuration settings like keeping the screen on.
     - Employs animated toggle switches equipped with premium audio-click and physical keyboard-tap haptics.
 10. **Location Screen**:
     - Features a dynamic root "Enable Location" switch (styled after the custom Player and Audio screen toggle) which completely hides downstream controls when toggled off.

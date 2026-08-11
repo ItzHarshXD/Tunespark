@@ -45,10 +45,6 @@ fun PlayerAndAudioScreen(
         mutableStateOf(SessionManager.getKeepScreenOn(context))
     }
 
-    var showVisualizer by remember {
-        mutableStateOf(SessionManager.getShowVisualizer(context))
-    }
-
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
 
@@ -117,64 +113,6 @@ fun PlayerAndAudioScreen(
 
                     keepScreenOn = it
                     SessionManager.saveKeepScreenOn(context, it)
-                },
-                backgroundColor = backgroundColor,
-                textColor = textColor
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        HorizontalDivider(color = textColor.copy(alpha = 0.1f), thickness = 1.dp)
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .clickable {
-                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-
-                    val newValue = !showVisualizer
-                    showVisualizer = newValue
-                    SessionManager.saveShowVisualizer(context, newValue)
-                }
-                .padding(
-                    horizontal = 10.dp,
-                    vertical = 10.dp
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = "Display visualizer",
-                    color = textColor,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "Show the real-time beat visualizer on the Radio screen.",
-                    color = Color.Gray,
-                    fontSize = 14.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            SimpleToggleSwitch(
-                checked = showVisualizer,
-                onCheckedChange = {
-                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-
-                    showVisualizer = it
-                    SessionManager.saveShowVisualizer(context, it)
                 },
                 backgroundColor = backgroundColor,
                 textColor = textColor

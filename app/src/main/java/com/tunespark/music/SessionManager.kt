@@ -28,7 +28,6 @@ object SessionManager {
     private const val KEY_ACTIVE_TTS_PROVIDER = "active_tts_provider"
     private const val KEY_THEME = "app_theme"
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
-    private const val KEY_SHOW_VISUALIZER = "show_visualizer"
     private const val KEY_COMMENTARY_ENABLED = "commentary_enabled"
     private const val KEY_LOCAL_HISTORY = "local_listening_history"
     private const val KEY_SELECTED_GEMINI_TEXT_MODEL = "selected_gemini_text_model"
@@ -39,6 +38,7 @@ object SessionManager {
     private const val KEY_DISCOVER_FEED_ENABLED = "discover_feed_enabled"
     private const val KEY_USED_BRIEFING_ARTICLE_URLS = "used_briefing_article_urls"
     private const val KEY_CUSTOM_INSTRUCTIONS = "custom_instructions"
+    private const val KEY_RADIO_LAYOUT_STATE = "radio_layout_state"
 
     @Volatile
     private var cachedHistory: List<Pair<SongItem, Long>>? = null
@@ -313,14 +313,6 @@ object SessionManager {
         getPrefs(context).edit().putBoolean(KEY_KEEP_SCREEN_ON, keepOn).apply()
     }
 
-    fun getShowVisualizer(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_SHOW_VISUALIZER, true)
-    }
-
-    fun saveShowVisualizer(context: Context, show: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_SHOW_VISUALIZER, show).apply()
-    }
-
     fun getSelectedGeminiTextModel(context: Context): String {
         return getPrefs(context).getString(KEY_SELECTED_GEMINI_TEXT_MODEL, "Gemini 3.5 Flash Lite") ?: "Gemini 3.5 Flash Lite"
     }
@@ -461,5 +453,20 @@ object SessionManager {
      */
     fun saveCustomInstructions(context: Context, instructions: String) {
         getPrefs(context).edit().putString(KEY_CUSTOM_INSTRUCTIONS, instructions).apply()
+    }
+
+    /**
+     * Retrieves the saved layout state of the Radio screen ("none", "lyrics", "queue").
+     * Defaults to "none" (minimized vinyl disc state) for first-time users.
+     */
+    fun getRadioLayoutState(context: Context): String {
+        return getPrefs(context).getString(KEY_RADIO_LAYOUT_STATE, "none") ?: "none"
+    }
+
+    /**
+     * Saves the active layout state of the Radio screen.
+     */
+    fun saveRadioLayoutState(context: Context, state: String) {
+        getPrefs(context).edit().putString(KEY_RADIO_LAYOUT_STATE, state).apply()
     }
 }

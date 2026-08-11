@@ -6,9 +6,9 @@ import android.media.AudioManager
 import android.os.Vibrator
 import android.os.VibrationEffect
 import android.os.Build
-import com.tunespark.music.VisualizerData
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -179,7 +180,6 @@ fun RadioScreen(
 
     val context = LocalContext.current
     val keepScreenOnSetting = remember(context) { com.tunespark.music.SessionManager.getKeepScreenOn(context) }
-    val showVisualizerSetting = remember(context) { com.tunespark.music.SessionManager.getShowVisualizer(context) }
     val isCommentaryEnabled = remember(context) { com.tunespark.music.SessionManager.isCommentaryEnabled(context) }
     val isMusicContextChecked = remember(context) { "Music Context" in com.tunespark.music.SessionManager.getSelectedCommentary(context) }
 
@@ -316,7 +316,41 @@ fun RadioScreen(
 
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
-    var activeTab by remember { mutableStateOf("lyrics") }
+    var activeTab by remember(context) { mutableStateOf(com.tunespark.music.SessionManager.getRadioLayoutState(context)) }
+
+    val rotation = remember { Animatable(0f) }
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            val degreesPerMs = 360f / 8000f // smooth rotation, 1 rotation per 8 seconds
+            var lastTime = withFrameMillis { it }
+            while (true) {
+                val frameTime = withFrameMillis { it }
+                val elapsed = frameTime - lastTime
+                lastTime = frameTime
+                val delta = elapsed * degreesPerMs
+                val nextRotation = (rotation.value + delta) % 360f
+                rotation.snapTo(nextRotation)
+            }
+        }
+    }
+
+    val swipeThresholdPx = remember(localDensity) { with(localDensity) { 80.dp.toPx() } }
+    val swipeLimitPx = remember(localDensity) { with(localDensity) { 360.dp.toPx() } }
+    val swipeOffsetX = remember { Animatable(0f) }
+    var isSwiping by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentTrackIndex) {
+        if (!isSwiping) {
+            swipeOffsetX.snapTo(swipeLimitPx / 2f)
+            swipeOffsetX.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
 
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -726,220 +760,495 @@ fun RadioScreen(
                 }
             }
 
-            val shouldShowVisualizer = showVisualizerSetting && activeTab != "queue"
-
-            AnimatedVisibility(
-                visible = shouldShowVisualizer,
-                enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
-                exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut()
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    RadioEqualizerWaveform(isPlaying = isPlaying)
-                }
-            }
-
-            val spacerHeight by animateDpAsState(
-                targetValue = if (shouldShowVisualizer) 10.dp else 20.dp,
-                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                label = "VisualizerSpacerHeight"
-            )
-            Spacer(modifier = Modifier.height(spacerHeight))
-
-            // 3. Current Song Details Row — replaced by the article card when a
-            // briefing commentary is playing. The slider, tabs, and content
-            // area below remain visible as usual.
-            if (briefingArticle != null) {
-                BriefingArticleCard(
-                    article = briefingArticle,
-                    textColor = textColor,
-                    primaryColor = primaryColor,
-                    onPrimaryColor = onPrimaryColor,
-                    secondaryColor = secondaryColor,
-                    onOpenArticle = {
-                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(briefingArticle.url))
-                        context.startActivity(intent)
-                    }
-                )
-            } else {
-                Row(
+            if (activeTab == "none") {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 0.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
+                    if (briefingArticle != null) {
+                        BriefingArticleCard(
+                            article = briefingArticle,
+                            textColor = textColor,
+                            primaryColor = primaryColor,
+                            onPrimaryColor = onPrimaryColor,
+                            secondaryColor = secondaryColor,
+                            onOpenArticle = {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(briefingArticle.url))
+                                context.startActivity(intent)
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+
+                    // Stationary (Unrotated) wrapper Box to catch clean screen gestures and clicks
                     Box(
                         modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(secondaryColor)
-                    ) {
-                        if (!currentSongArtwork.isNullOrEmpty()) {
-                            AsyncImage(
-                                model = currentSongArtwork,
-                                contentDescription = "Artwork",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
+                            .size(240.dp)
+                            .pointerInput(hasNextTrack, hasPreviousTrack, swipeThresholdPx, swipeLimitPx) {
+                                detectHorizontalDragGestures(
+                                    onDragStart = {
+                                        isSwiping = true
+                                    },
+                                    onDragEnd = {
+                                        scope.launch {
+                                            if (swipeOffsetX.value < -swipeThresholdPx && hasNextTrack) {
+                                                // Swipe Left -> Next song
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                swipeOffsetX.animateTo(
+                                                    targetValue = -swipeLimitPx,
+                                                    animationSpec = tween(durationMillis = 200, easing = LinearOutSlowInEasing)
+                                                )
+                                                exoPlayer.seekToNext()
+                                                swipeOffsetX.snapTo(swipeLimitPx)
+                                                swipeOffsetX.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                                        stiffness = Spring.StiffnessMediumLow
+                                                    )
+                                                )
+                                            } else if (swipeOffsetX.value > swipeThresholdPx && hasPreviousTrack) {
+                                                // Swipe Right -> Previous song
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                swipeOffsetX.animateTo(
+                                                    targetValue = swipeLimitPx,
+                                                    animationSpec = tween(durationMillis = 200, easing = LinearOutSlowInEasing)
+                                                )
+                                                exoPlayer.seekToPrevious()
+                                                swipeOffsetX.snapTo(-swipeLimitPx)
+                                                swipeOffsetX.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                                        stiffness = Spring.StiffnessMediumLow
+                                                    )
+                                                )
+                                            } else {
+                                                // Bounce back
+                                                swipeOffsetX.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                        stiffness = Spring.StiffnessMedium
+                                                    )
+                                                )
+                                            }
+                                            isSwiping = false
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        scope.launch {
+                                            swipeOffsetX.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                            isSwiping = false
+                                        }
+                                    },
+                                    onHorizontalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        scope.launch {
+                                            swipeOffsetX.snapTo(swipeOffsetX.value + dragAmount)
+                                        }
+                                    }
+                                )
+                            }
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
                             ) {
-                                Text("🎵", fontSize = 24.sp)
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Sliding and Rotating Vinyl Disc body
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    translationX = swipeOffsetX.value
+                                    rotationZ = rotation.value
+                                }
+                                .clip(CircleShape)
+                                .background(Color(0xFF181818)), // Vinyl body
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Concentric grooves
+                            Box(
+                                modifier = Modifier
+                                    .size(210.dp)
+                                    .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(170.dp)
+                                    .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                            )
+
+                            // Song Artwork
+                            Box(
+                                modifier = Modifier
+                                    .size(110.dp)
+                                    .clip(CircleShape)
+                                    .background(secondaryColor)
+                            ) {
+                                if (!currentSongArtwork.isNullOrEmpty()) {
+                                    AsyncImage(
+                                        model = currentSongArtwork,
+                                        contentDescription = "Vinyl Artwork",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("🎵", fontSize = 32.sp)
+                                    }
+                                }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
+                    // Center-aligned title and artist
                     Column(
-                        modifier = Modifier.weight(1f)
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
                     ) {
                         Text(
                             text = currentSongTitle,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
                             color = textColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            textAlign = TextAlign.Center,
+                            lineHeight = 28.sp
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = if (currentSongArtist.isNotEmpty()) currentSongArtist else "TuneSpark",
-                            fontSize = 14.sp,
+                            fontSize = 17.sp,
                             color = textColor.copy(alpha = 0.6f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            textAlign = TextAlign.Center
                         )
                     }
+                }
 
-                    if (isCommentaryEnabled && isMusicContextChecked) {
-                        Spacer(modifier = Modifier.width(12.dp))
-                        IconButton(
-                            onClick = {
-                                val viewLocal = view
-                                val audioManagerLocal = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
-                                audioManagerLocal?.playSoundEffect(android.media.AudioManager.FX_KEY_CLICK, 1f)
-                                viewLocal.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                // Music Progress Slider and Times
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Slider(
+                        value = currentPosition.toFloat().coerceIn(0f, if (duration > 0) duration.toFloat() else 1f),
+                        onValueChange = { newValue ->
+                            currentPosition = newValue.toLong()
+                            exoPlayer.seekTo(currentPosition)
+                        },
+                        valueRange = 0f..(if (duration > 0) duration.toFloat() else 1f),
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = primaryColor,
+                            inactiveTrackColor = secondaryColor,
+                            thumbColor = primaryColor
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
-                                val plainTextLyrics = lyricsLines.joinToString("\n") { it.text }
-                                com.tunespark.music.PlaybackService.instance?.generateAndQueueMusicContextForCurrentSong(plainTextLyrics)
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(secondaryColor)
-                        ) {
-                            Text("✨", fontSize = 20.sp)
-                        }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = formatDuration(currentPosition),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = formatDuration(duration),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor.copy(alpha = 0.6f)
+                        )
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // 3.5. Music Progress Slider and Times
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-            ) {
-                Slider(
-                    value = currentPosition.toFloat().coerceIn(0f, if (duration > 0) duration.toFloat() else 1f),
-                    onValueChange = { newValue ->
-                        currentPosition = newValue.toLong()
-                        exoPlayer.seekTo(currentPosition)
-                    },
-                    valueRange = 0f..(if (duration > 0) duration.toFloat() else 1f),
-                    colors = SliderDefaults.colors(
-                        activeTrackColor = primaryColor,
-                        inactiveTrackColor = secondaryColor,
-                        thumbColor = primaryColor
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
+                // Tab Selector
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .padding(vertical = 8.dp)
+                        .height(40.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = formatDuration(currentPosition),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = textColor.copy(alpha = 0.6f)
-                    )
-                    Text(
-                        text = formatDuration(duration),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = textColor.copy(alpha = 0.6f)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
+                            .clickable {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                val newTab = if (activeTab == "lyrics") "none" else "lyrics"
+                                activeTab = newTab
+                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                            }
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Lyrics",
+                            color = if (activeTab == "lyrics") onPrimaryColor else onSecondaryColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (activeTab == "queue") primaryColor else secondaryColor)
+                            .clickable {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                val newTab = if (activeTab == "queue") "none" else "queue"
+                                activeTab = newTab
+                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                            }
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Up Next",
+                            color = if (activeTab == "queue") onPrimaryColor else onSecondaryColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
-            }
+            } else {
+                Spacer(modifier = Modifier.height(20.dp))
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 4. Tab Selector
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp)
-                    .height(40.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
-                        .clickable {
+                // 3. Current Song Details Row — replaced by the article card when a
+                // briefing commentary is playing. The slider, tabs, and content
+                // area below remain visible as usual.
+                if (briefingArticle != null) {
+                    BriefingArticleCard(
+                        article = briefingArticle,
+                        textColor = textColor,
+                        primaryColor = primaryColor,
+                        onPrimaryColor = onPrimaryColor,
+                        secondaryColor = secondaryColor,
+                        onOpenArticle = {
                             audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            activeTab = "lyrics"
+                            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(briefingArticle.url))
+                            context.startActivity(intent)
                         }
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Lyrics",
-                        color = if (activeTab == "lyrics") onPrimaryColor else onSecondaryColor,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
                     )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 0.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(secondaryColor)
+                        ) {
+                            if (!currentSongArtwork.isNullOrEmpty()) {
+                                AsyncImage(
+                                    model = currentSongArtwork,
+                                    contentDescription = "Artwork",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("🎵", fontSize = 24.sp)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = currentSongTitle,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = textColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (currentSongArtist.isNotEmpty()) currentSongArtist else "TuneSpark",
+                                fontSize = 14.sp,
+                                color = textColor.copy(alpha = 0.6f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        if (isCommentaryEnabled && isMusicContextChecked) {
+                            Spacer(modifier = Modifier.width(12.dp))
+                            IconButton(
+                                onClick = {
+                                    val viewLocal = view
+                                    val audioManagerLocal = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+                                    audioManagerLocal?.playSoundEffect(android.media.AudioManager.FX_KEY_CLICK, 1f)
+                                    viewLocal.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                                    val plainTextLyrics = lyricsLines.joinToString("\n") { it.text }
+                                    com.tunespark.music.PlaybackService.instance?.generateAndQueueMusicContextForCurrentSong(plainTextLyrics)
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(secondaryColor)
+                            ) {
+                                Text("✨", fontSize = 20.sp)
+                            }
+                        }
+                    }
                 }
 
-                Box(
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 3.5. Music Progress Slider and Times
+                Column(
                     modifier = Modifier
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (activeTab == "queue") primaryColor else secondaryColor)
-                        .clickable {
-                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            activeTab = "queue"
-                        }
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
                 ) {
-                    Text(
-                        text = "Up Next",
-                        color = if (activeTab == "queue") onPrimaryColor else onSecondaryColor,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                    Slider(
+                        value = currentPosition.toFloat().coerceIn(0f, if (duration > 0) duration.toFloat() else 1f),
+                        onValueChange = { newValue ->
+                            currentPosition = newValue.toLong()
+                            exoPlayer.seekTo(currentPosition)
+                        },
+                        valueRange = 0f..(if (duration > 0) duration.toFloat() else 1f),
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = primaryColor,
+                            inactiveTrackColor = secondaryColor,
+                            thumbColor = primaryColor
+                        ),
+                        modifier = Modifier.fillMaxWidth()
                     )
-                }
-            }
 
-            // 5. Content Area (Lyrics or Queue)
-            if (activeTab == "lyrics") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = formatDuration(currentPosition),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = formatDuration(duration),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 4. Tab Selector
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .height(40.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
+                            .clickable {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                val newTab = if (activeTab == "lyrics") "none" else "lyrics"
+                                activeTab = newTab
+                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                            }
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Lyrics",
+                            color = if (activeTab == "lyrics") onPrimaryColor else onSecondaryColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (activeTab == "queue") primaryColor else secondaryColor)
+                            .clickable {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                val newTab = if (activeTab == "queue") "none" else "queue"
+                                activeTab = newTab
+                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                            }
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Up Next",
+                            color = if (activeTab == "queue") onPrimaryColor else onSecondaryColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // 5. Content Area (Lyrics or Queue)
+                if (activeTab == "lyrics") {
                 if (isLyricsLoading) {
                     Box(
                         modifier = Modifier
@@ -1382,6 +1691,7 @@ fun RadioScreen(
                     }
                 }
             }
+            } // closes the else block of activeTab == "none"
         }
     }
 }
@@ -1476,169 +1786,3 @@ private fun BriefingArticleCard(
     }
 }
 
-@Composable
-fun RadioEqualizerWaveform(isPlaying: Boolean) {
-    val barCount = 21
-    val maxDots = 7
-    val bandLevels by VisualizerData.bandLevels.collectAsState()
-
-    var peaks by remember { mutableStateOf(FloatArray(barCount) { 0f }) }
-    var fallVelocity by remember { mutableStateOf(FloatArray(barCount) { 0f }) }
-    var sensitivity by remember { mutableStateOf(1f) }
-
-    // Tuned values
-    val gravity = 0.020f
-    val smoothingStrength = 1.60f
-
-    val centerBias = remember {
-        FloatArray(barCount) { i ->
-            val center = (barCount - 1) / 2f
-            val distanceRatio = kotlin.math.abs(i - center) / center
-            val bias = kotlin.math.cos(distanceRatio * (Math.PI / 2)).toFloat()
-
-            // Slight, natural center emphasis
-            0.94f + 0.06f * bias
-        }
-    }
-
-    LaunchedEffect(bandLevels, isPlaying) {
-        if (isPlaying) {
-            val frameMax = bandLevels.maxOrNull() ?: 0f
-
-            if (frameMax * sensitivity > 0.96f) {
-                sensitivity = (sensitivity - 0.010f).coerceAtLeast(0.45f)
-            } else if (frameMax * sensitivity < 0.38f) {
-                sensitivity = (sensitivity + 0.006f).coerceAtMost(2.8f)
-            }
-
-            val rawTargets = FloatArray(barCount)
-
-            for (i in 0 until barCount) {
-                val raw = bandLevels.getOrElse(i) { 0f }.coerceIn(0f, 1f)
-
-                val expanded = Math.pow(raw.toDouble(), 0.58).toFloat()
-
-                val withSensitivity =
-                    (expanded * sensitivity).coerceIn(0f, 1f)
-
-                rawTargets[i] = withSensitivity * maxDots
-            }
-
-            val smoothed = applyMonstercatSmoothing(
-                rawTargets,
-                strength = smoothingStrength
-            )
-
-            val shaped = FloatArray(barCount) { i ->
-                (smoothed[i] * centerBias[i])
-                    .coerceIn(0f, maxDots.toFloat())
-            }
-
-            val newPeaks = FloatArray(barCount)
-            val newVelocity = fallVelocity.copyOf()
-
-            for (i in shaped.indices) {
-                val yValue = shaped[i]
-
-                if (yValue >= peaks[i]) {
-                    newPeaks[i] = yValue
-                    newVelocity[i] = 0f
-                } else {
-                    newVelocity[i] += gravity
-                    newPeaks[i] =
-                        (peaks[i] - newVelocity[i]).coerceAtLeast(0f)
-                }
-            }
-
-            peaks = newPeaks
-            fallVelocity = newVelocity
-        }
-    }
-
-    val primaryColor = MaterialTheme.colorScheme.primary
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.Bottom,
-        modifier = Modifier
-            .height(86.dp)
-            .padding(vertical = 12.dp)
-    ) {
-        peaks.forEach { mag ->
-            val height = kotlin.math.round(mag).toInt().coerceIn(1, maxDots)
-
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                repeat(height) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(primaryColor)
-                    )
-                }
-            }
-        }
-    }
-}
-
-fun applyMonstercatSmoothing(
-    values: FloatArray,
-    strength: Float = 1.60f
-): FloatArray {
-    val result = values.copyOf()
-
-    for (i in result.indices) {
-        for (j in result.indices) {
-            if (i != j) {
-                val distance = kotlin.math.abs(i - j)
-
-                val allowed =
-                    result[i] /
-                            Math.pow(
-                                strength.toDouble(),
-                                distance.toDouble()
-                            ).toFloat()
-
-                if (result[j] < allowed) {
-                    result[j] = allowed
-                }
-            }
-        }
-    }
-
-    return result
-}
-
-// These are the best knobs for tuning it further:
-
-// gravity
-// Higher = faster, livelier drop.
-// Lower = smoother, floatier decay.
-
-// smoothingStrength
-// Lower = wider connected wave.
-// Higher = more separated bars.
-
-// maxDots
-// 6 = tighter, cleaner.
-// 7 = best balance.
-// 8+ = more expressive but less compact.
-
-// centerBias
-// Stronger bias = more centered crest.
-// Lower bias = more natural spectrum shape.
-
-// Autosens thresholds
-// Controls how aggressively quiet or loud tracks get corrected.
-
-// FFT band mapping
-// You can remap bins to emphasize bass, mids, or vocals differently.
-
-// First-bin dampening
-// Useful if the left-most columns still dominate too much.
-
-// Row spacing / dot size / column spacing
-// Purely visual but changes the perceived feel a lot.
