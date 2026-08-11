@@ -593,3 +593,13 @@ We have successfully refined and completed the premium user experience across al
 - **Seamless Inline Card Integration**: Redesigned the summary container to sit natively inside the article card flow as a natural extension, rather than as a separate boxed card background. All content inside the article card is cleanly aligned with standard `12.dp` padding.
 - **Enhanced AI Action Buttons**: Upgraded the AI summary action buttons across the Home screen's Discover carousel and the full Discover screen. They now feature a high-contrast primary red accent circle with `onPrimary` icons, and their sizes have been boosted (from 28dp/32dp to 36dp with 20dp icon size) for excellent touch targets and premium aesthetics.
 - **Enlarged Home Screen Discover Carousel Cards**: Increased the dimensions of the Discover article cards on the Home Screen carousel from 240dp width & 140dp height to a more striking 280dp width & 160dp height (with updated shimmer skeleton states), giving the imagery and text headlines breathing room.
+
+### 9. Interactive, Gesture-Responsive Vinyl Disc on Radio Screen
+- **Smooth Swipe-to-Skip Gesture Handling**: Added a premium swipe-to-skip experience on the rotating vinyl disc. Users can swipe left to go to the next song, or swipe right to return to the previous song, with real-time horizontal tracking.
+- **Stationary Gesture Isolation Box**: Designed a stationary, unrotated outer wrapper `Box` to register gestures and click actions. This completely separates the touch coordinate calculations from the visual spinning representation (`rotationZ = rotation.value`), preventing any directional inversion glitches when the disc is rotating upside down.
+- **Seamless Spring Transitions & Snap Animations**: 
+  - Integrated beautiful spring-based snap-back animations when a swipe does not cross the skip threshold.
+  - Implemented dynamic slide-out and slide-in spring physics when skip transitions are triggered, bringing new track artwork smoothly into center position.
+  - Added a buttery-smooth auto-slide animation on natural or button-triggered track changes, making the vinyl slide in elegantly from the right.
+- **Micro-Haptics Integration**: Incorporated tactile vibration effects (`HapticFeedbackConstants.KEYBOARD_TAP`) on swipe triggers for premium physical feedback.
+- **Aesthetic Hover and Tap Refinement**: Set custom `MutableInteractionSource` with a `null` click indication, completely removing the default gray selection box and ugly rectangular click-ripple/flicker overlay on tap or hover, aligning with a premium minimalist pure-black music player aesthetic.

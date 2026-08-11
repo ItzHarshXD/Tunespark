@@ -921,7 +921,7 @@ fun RadioScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(28.dp))
 
                     // Center-aligned title and artist
                     Column(
