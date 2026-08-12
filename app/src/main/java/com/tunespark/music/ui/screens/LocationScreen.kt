@@ -24,6 +24,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -412,15 +414,27 @@ fun LocationScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
+            val isDarkTheme = isSystemInDarkTheme()
+            val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+            val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+            val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+
             // LOCATION AND WEATHER CARD (Shown in BOTH States under `locationEnabled`)
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = surfaceColor),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, textColor.copy(alpha = 0.15f))
+            Surface(
+                shape = RoundedCornerShape(30.dp),
+                color = weatherBgColor,
+                contentColor = weatherTextColor,
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        width = 1.dp,
+                        color = weatherBorderColor,
+                        shape = RoundedCornerShape(30.dp)
+                    )
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
@@ -437,13 +451,13 @@ fun LocationScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = if (autoLocation) "Current Auto Location" else "Saved Manual Location",
-                                color = Color.Gray,
+                                color = weatherTextColor.copy(alpha = 0.55f),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = locationDisplay,
-                                color = textColor,
+                                color = weatherTextColor,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -477,7 +491,7 @@ fun LocationScreen(
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
                                     contentDescription = "Refresh GPS",
-                                    tint = textColor
+                                    tint = weatherTextColor
                                 )
                             }
                         }
@@ -492,7 +506,7 @@ fun LocationScreen(
                         )
                     }
 
-                    HorizontalDivider(color = textColor.copy(alpha = 0.1f))
+                    HorizontalDivider(color = weatherTextColor.copy(alpha = 0.1f))
 
                     // Show Weather for locationDisplay
                     if (isWeatherLoading) {
@@ -515,13 +529,13 @@ fun LocationScreen(
                             Column {
                                 Text(
                                     text = "${weatherInfo?.temperature?.toInt()}°C",
-                                    color = textColor,
+                                    color = weatherTextColor,
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
                                     text = weatherInfo?.description ?: "Unknown",
-                                    color = Color.Gray,
+                                    color = weatherTextColor.copy(alpha = 0.55f),
                                     fontSize = 14.sp
                                 )
                             }
@@ -529,7 +543,7 @@ fun LocationScreen(
                     } else {
                         Text(
                             text = "Unable to load live weather for coordinates",
-                            color = Color.Gray,
+                            color = weatherTextColor.copy(alpha = 0.55f),
                             fontSize = 13.sp
                         )
                     }

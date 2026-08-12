@@ -7,6 +7,7 @@ import android.os.Vibrator
 import android.os.VibrationEffect
 import android.os.Build
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
@@ -49,9 +50,10 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -321,7 +323,7 @@ fun RadioScreen(
     val rotation = remember { Animatable(0f) }
     LaunchedEffect(isPlaying) {
         if (isPlaying) {
-            val degreesPerMs = 360f / 8000f // smooth rotation, 1 rotation per 8 seconds
+            val degreesPerMs = 360f / 16000f // smooth rotation, 1 rotation per 16 seconds (slower and more relaxing)
             var lastTime = withFrameMillis { it }
             while (true) {
                 val frameTime = withFrameMillis { it }
@@ -358,6 +360,7 @@ fun RadioScreen(
 
     val playPauseExtraWidth = remember { Animatable(0f) }
     val skipExtraWidth = remember { Animatable(0f) }
+    val artworkScale = remember { Animatable(1f) }
     var isStopExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(isStopExpanded) {
@@ -412,6 +415,11 @@ fun RadioScreen(
             thumbnail = thumbnail
         )
     }
+
+    val isDarkTheme = isSystemInDarkTheme()
+    val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+    val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+    val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
 
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
@@ -559,7 +567,8 @@ fun RadioScreen(
                         .align(Alignment.CenterStart)
                         .size(56.dp)
                         .clip(CircleShape)
-                        .background(primaryColor)
+                        .background(weatherBgColor)
+                        .border(1.dp, weatherBorderColor, CircleShape)
                         .clickable {
                             audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -570,7 +579,7 @@ fun RadioScreen(
                     Icon(
                         imageVector = Icons.Default.ArrowBack,
                         contentDescription = "Back",
-                        tint = onPrimaryColor,
+                        tint = weatherTextColor,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -594,20 +603,20 @@ fun RadioScreen(
                                 .width(119.dp)
                                 .align(Alignment.CenterStart)
                         ) {
+                            val playPauseShape = RoundedCornerShape(
+                                topStart = 28.dp,
+                                bottomStart = 28.dp,
+                                topEnd = 8.dp,
+                                bottomEnd = 8.dp
+                            )
                             Box(
                                 modifier = Modifier
                                     .height(56.dp)
                                     .width(80.dp + playPauseExtraWidth.value.coerceAtLeast(0f).dp)
                                     .align(Alignment.CenterEnd)
-                                    .clip(
-                                        RoundedCornerShape(
-                                            topStart = 28.dp,
-                                            bottomStart = 28.dp,
-                                            topEnd = 8.dp,
-                                            bottomEnd = 8.dp
-                                        )
-                                    )
-                                    .background(primaryColor)
+                                    .clip(playPauseShape)
+                                    .background(weatherBgColor)
+                                    .border(1.dp, weatherBorderColor, playPauseShape)
                                     .clickable {
                                         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -637,10 +646,10 @@ fun RadioScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                     contentDescription = if (isPlaying) "Pause" else "Play",
-                                    tint = onPrimaryColor,
-                                    modifier = Modifier.size(24.dp)
+                                    tint = weatherTextColor,
+                                    modifier = Modifier.size(26.dp) // Adjusted visual balance
                                 )
                             }
                         }
@@ -652,20 +661,20 @@ fun RadioScreen(
                                 .width(119.dp)
                                 .align(Alignment.CenterEnd)
                         ) {
+                            val skipShape = RoundedCornerShape(
+                                topStart = 8.dp,
+                                bottomStart = 8.dp,
+                                topEnd = 28.dp,
+                                bottomEnd = 28.dp
+                            )
                             Box(
                                 modifier = Modifier
                                     .height(56.dp)
                                     .width(80.dp + skipExtraWidth.value.coerceAtLeast(0f).dp)
                                     .align(Alignment.CenterStart)
-                                    .clip(
-                                        RoundedCornerShape(
-                                            topStart = 8.dp,
-                                            bottomStart = 8.dp,
-                                            topEnd = 28.dp,
-                                            bottomEnd = 28.dp
-                                        )
-                                    )
-                                    .background(primaryColor)
+                                    .clip(skipShape)
+                                    .background(weatherBgColor)
+                                    .border(1.dp, weatherBorderColor, skipShape)
                                     .clickable {
                                         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -693,10 +702,10 @@ fun RadioScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.SkipNext,
+                                    imageVector = Icons.Rounded.SkipNext,
                                     contentDescription = "Skip Next",
-                                    tint = onPrimaryColor,
-                                    modifier = Modifier.size(24.dp)
+                                    tint = weatherTextColor,
+                                    modifier = Modifier.size(26.dp) // Matched size for perfect balance
                                 )
                             }
                         }
@@ -867,6 +876,19 @@ fun RadioScreen(
                             ) {
                                 audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                scope.launch {
+                                    artworkScale.animateTo(
+                                        targetValue = 0.88f,
+                                        animationSpec = tween(durationMillis = 80, easing = LinearEasing)
+                                    )
+                                    artworkScale.animateTo(
+                                        targetValue = 1f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    )
+                                }
                                 if (isPlaying) exoPlayer.pause() else exoPlayer.play()
                             },
                         contentAlignment = Alignment.Center
@@ -896,9 +918,18 @@ fun RadioScreen(
                             )
 
                             // Song Artwork
+                            val overlayAlpha by animateFloatAsState(
+                                targetValue = if (artworkScale.value < 0.95f) 0.3f else 0f,
+                                animationSpec = tween(durationMillis = 100),
+                                label = "ArtworkTapOverlay"
+                            )
                             Box(
                                 modifier = Modifier
                                     .size(110.dp)
+                                    .graphicsLayer {
+                                        scaleX = artworkScale.value
+                                        scaleY = artworkScale.value
+                                    }
                                     .clip(CircleShape)
                                     .background(secondaryColor)
                             ) {
@@ -917,6 +948,12 @@ fun RadioScreen(
                                         Text("🎵", fontSize = 32.sp)
                                     }
                                 }
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = overlayAlpha))
+                                )
                             }
                         }
                     }
@@ -945,6 +982,33 @@ fun RadioScreen(
                             color = textColor.copy(alpha = 0.6f),
                             textAlign = TextAlign.Center
                         )
+                        
+                        if (isCommentaryEnabled && isMusicContextChecked) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(secondaryColor)
+                                    .clickable {
+                                        val viewLocal = view
+                                        val audioManagerLocal = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+                                        audioManagerLocal?.playSoundEffect(android.media.AudioManager.FX_KEY_CLICK, 1f)
+                                        viewLocal.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                                        val plainTextLyrics = lyricsLines.joinToString("\n") { it.text }
+                                        com.tunespark.music.PlaybackService.instance?.generateAndQueueMusicContextForCurrentSong(plainTextLyrics)
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.AutoAwesome,
+                                    contentDescription = "Generate Commentary",
+                                    tint = textColor,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -1138,7 +1202,12 @@ fun RadioScreen(
                                     .clip(CircleShape)
                                     .background(secondaryColor)
                             ) {
-                                Text("✨", fontSize = 20.sp)
+                                Icon(
+                                    imageVector = Icons.Rounded.AutoAwesome,
+                                    contentDescription = "Generate Commentary",
+                                    tint = textColor,
+                                    modifier = Modifier.size(22.dp)
+                                )
                             }
                         }
                     }

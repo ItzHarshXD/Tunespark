@@ -127,7 +127,7 @@ class MainActivity : ComponentActivity() {
                                 themeSetting = newTheme
                                 SessionManager.saveTheme(context, newTheme)
                             },
-                            modifier = Modifier.padding(innerPadding)
+                            modifier = Modifier.fillMaxSize()
                         )
                     } ?: Box(
                         modifier = Modifier.fillMaxSize().padding(innerPadding),
@@ -184,6 +184,12 @@ fun MainPlayerScreen(
 
     val openFullPlayer: () -> Unit = {
         coroutineScope.launch {
+            launch {
+                searchProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+            }
+            launch {
+                libraryProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+            }
             fullPlayerProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = spring(
@@ -208,6 +214,12 @@ fun MainPlayerScreen(
 
     val openSearch: () -> Unit = {
         coroutineScope.launch {
+            launch {
+                fullPlayerProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+            }
+            launch {
+                libraryProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+            }
             searchProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = spring(
@@ -232,6 +244,12 @@ fun MainPlayerScreen(
 
     val openLibrary: () -> Unit = {
         coroutineScope.launch {
+            launch {
+                fullPlayerProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+            }
+            launch {
+                searchProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+            }
             libraryProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = spring(
@@ -1413,7 +1431,10 @@ fun MainPlayerScreen(
                                         slideOutHorizontally(animationSpec = tween(300)) { width -> width }
                             }
                         },
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .statusBarsPadding()
+                            .navigationBarsPadding(),
                         label = "ScreenTransition"
                     ) { targetScreen ->
                         when (targetScreen) {
@@ -1598,6 +1619,95 @@ fun MainPlayerScreen(
                 // First BottomDock was deleted to resolve duplicate rendering, misalignment, double-shadows, and to allow the single bottom bar to render natively on top of all overlay screens (Search, Playlists, etc.).
             }
 
+            // SearchScreen premium sliding overlay
+            val searchYOffset = with(LocalDensity.current) { screenHeight * (1f - searchProgress.value) }
+            if (searchProgress.value > 0.001f) {
+                val searchAlpha = (searchProgress.value / 0.5f).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .graphicsLayer {
+                            translationY = searchYOffset.toPx()
+                            alpha = searchAlpha
+                        }
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = {}
+                        )
+                ) {
+                    SearchScreen(
+                        searchQuery = searchQuery,
+                        searchResults = searchResults,
+                        isSearching = isSearching,
+                        onSearchQueryChange = { searchQuery = it },
+                        onTriggerSearch = triggerSearch,
+                        onPlaySong = { song ->
+                            playSong(song)
+                            openFullPlayer()
+                        },
+                        onNavigate = navigateHandler
+                    )
+                }
+            }
+
+            // PlaylistsScreen premium sliding overlay
+            val libraryYOffset = with(LocalDensity.current) { screenHeight * (1f - libraryProgress.value) }
+            if (libraryProgress.value > 0.001f) {
+                val libraryAlpha = (libraryProgress.value / 0.5f).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .graphicsLayer {
+                            translationY = libraryYOffset.toPx()
+                            alpha = libraryAlpha
+                        }
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = {}
+                        )
+                ) {
+                    PlaylistsScreen(
+                        initialPlaylistId = initialPlaylistId,
+                        initialPlaylistName = initialPlaylistName,
+                        initialPlaylistThumbnail = initialPlaylistThumbnail,
+                        initialPlaylistSongCountText = initialPlaylistSongCountText,
+                        initialPlaylistIsLiked = initialPlaylistIsLiked,
+                        initialPlaylistRawItem = initialPlaylistRawItem,
+                        initialPlaylistAuthorName = initialPlaylistAuthorName,
+                        initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
+                        initialPlaylistSongs = initialPlaylistSongs,
+                        onPlayPlaylist = { name, songs, startIndex ->
+                            playPlaylist(name, songs, startIndex)
+                            openFullPlayer()
+                        },
+                        onNavigate = { screen ->
+                            if (screen != AppScreen.PLAYLISTS) {
+                                initialPlaylistId = null
+                                initialPlaylistName = ""
+                                initialPlaylistThumbnail = null
+                                initialPlaylistSongCountText = ""
+                                initialPlaylistIsLiked = false
+                                initialPlaylistRawItem = null
+                                initialPlaylistAuthorName = null
+                                initialPlaylistAuthorAvatarUrl = null
+                                initialPlaylistSongs = emptyList()
+                            }
+                            if (screen == AppScreen.RADIO) {
+                                openFullPlayer()
+                            } else {
+                                navigateHandler(screen)
+                            }
+                        }
+                    )
+                }
+            }
+
             // RadioScreen premium sliding overlay
             val yOffset = with(LocalDensity.current) { screenHeight * (1f - fullPlayerProgress.value) }
             if (fullPlayerProgress.value > 0.001f) {
@@ -1605,6 +1715,8 @@ fun MainPlayerScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
                         .graphicsLayer {
                             translationY = yOffset.toPx()
                             alpha = radioAlpha
@@ -1654,92 +1766,7 @@ fun MainPlayerScreen(
                 }
             }
 
-            // SearchScreen premium sliding overlay
-            val searchYOffset = with(LocalDensity.current) { screenHeight * (1f - searchProgress.value) }
-            if (searchProgress.value > 0.001f) {
-                val searchAlpha = (searchProgress.value / 0.5f).coerceIn(0f, 1f)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            translationY = searchYOffset.toPx()
-                            alpha = searchAlpha
-                        }
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null,
-                            onClick = {}
-                        )
-                ) {
-                    SearchScreen(
-                        searchQuery = searchQuery,
-                        searchResults = searchResults,
-                        isSearching = isSearching,
-                        onSearchQueryChange = { searchQuery = it },
-                        onTriggerSearch = triggerSearch,
-                        onPlaySong = { song ->
-                            playSong(song)
-                            openFullPlayer()
-                        },
-                        onNavigate = navigateHandler
-                    )
-                }
-            }
-
-            // PlaylistsScreen premium sliding overlay
-            val libraryYOffset = with(LocalDensity.current) { screenHeight * (1f - libraryProgress.value) }
-            if (libraryProgress.value > 0.001f) {
-                val libraryAlpha = (libraryProgress.value / 0.5f).coerceIn(0f, 1f)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            translationY = libraryYOffset.toPx()
-                            alpha = libraryAlpha
-                        }
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null,
-                            onClick = {}
-                        )
-                ) {
-                    PlaylistsScreen(
-                        initialPlaylistId = initialPlaylistId,
-                        initialPlaylistName = initialPlaylistName,
-                        initialPlaylistThumbnail = initialPlaylistThumbnail,
-                        initialPlaylistSongCountText = initialPlaylistSongCountText,
-                        initialPlaylistIsLiked = initialPlaylistIsLiked,
-                        initialPlaylistRawItem = initialPlaylistRawItem,
-                        initialPlaylistAuthorName = initialPlaylistAuthorName,
-                        initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
-                        initialPlaylistSongs = initialPlaylistSongs,
-                        onPlayPlaylist = { name, songs, startIndex ->
-                            playPlaylist(name, songs, startIndex)
-                            openFullPlayer()
-                        },
-                        onNavigate = { screen ->
-                            if (screen != AppScreen.PLAYLISTS) {
-                                initialPlaylistId = null
-                                initialPlaylistName = ""
-                                initialPlaylistThumbnail = null
-                                initialPlaylistSongCountText = ""
-                                initialPlaylistIsLiked = false
-                                initialPlaylistRawItem = null
-                                initialPlaylistAuthorName = null
-                                initialPlaylistAuthorAvatarUrl = null
-                                initialPlaylistSongs = emptyList()
-                            }
-                            if (screen == AppScreen.RADIO) {
-                                openFullPlayer()
-                            } else {
-                                navigateHandler(screen)
-                            }
-                        }
-                    )
-                }
-            }
-
-            if (!(currentScreen == AppScreen.ACCOUNT && isAccountWebViewShowing)) {
+            if (!(currentScreen == AppScreen.ACCOUNT && isAccountWebViewShowing) && fullPlayerProgress.value < 0.99f) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1747,11 +1774,11 @@ fun MainPlayerScreen(
                         .graphicsLayer {
                             alpha = 1f - fullPlayerProgress.value
                         }
-                        .offset(y = 14.dp) // Pushed slightly down to eliminate empty space below
-                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
+                        .offset(y = (-10).dp) // Moved slightly up to give a beautiful floating look
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)
                 ) {
                     val touchEnabled = fullPlayerProgress.value < 0.1f
-                    Box(modifier = if (touchEnabled) Modifier else Modifier.graphicsLayer { alpha = 0f }.clickable(enabled = false) {}) {
+                    Box(modifier = if (touchEnabled) Modifier else Modifier.graphicsLayer { alpha = 0f }) {
                         val nextSong = playQueue.getOrNull(currentTrackIndex + 1)
                         val prevSong = playQueue.getOrNull(currentTrackIndex - 1)
                         BottomDock(

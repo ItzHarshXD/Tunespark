@@ -15,6 +15,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountCircle
@@ -204,23 +206,37 @@ fun AccountScreen(
 
                         Spacer(modifier = Modifier.height(32.dp))
 
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = secondaryColor)
+                        val isDarkTheme = isSystemInDarkTheme()
+                        val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+                        val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+                        val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+
+                        Surface(
+                            shape = RoundedCornerShape(30.dp),
+                            color = weatherBgColor,
+                            contentColor = weatherTextColor,
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(
+                                    width = 1.dp,
+                                    color = weatherBorderColor,
+                                    shape = RoundedCornerShape(30.dp)
+                                )
                         ) {
                             Column(
-                                modifier = Modifier.padding(16.dp)
+                                modifier = Modifier.padding(20.dp)
                             ) {
                                 Text(
                                     text = "Subscription Status",
-                                    color = Color.Gray,
+                                    color = weatherTextColor.copy(alpha = 0.55f),
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = "Linked to YouTube Music via active session",
-                                    color = onSecondaryColor,
+                                    color = weatherTextColor,
                                     fontSize = 16.sp
                                 )
                             }
@@ -331,40 +347,12 @@ fun YouTubeSignInWebView(
             .fillMaxSize()
             .background(backgroundColor)
     ) {
-        // Clean Premium Top App Bar matching standard SettingsHeader design perfectly
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(backgroundColor)
-                .padding(horizontal = 24.dp, vertical = 24.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(top = 24.dp, start = 24.dp, end = 24.dp)
         ) {
-            IconButton(
-                onClick = {
-                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    onCancel()
-                },
-                modifier = Modifier
-                    .size(60.dp)
-                    .background(Color(0xFFFF0000), shape = CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ArrowBack,
-                    contentDescription = "Cancel and Back",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Text(
-                text = "Sign In",
-                color = textColor,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold
-            )
+            SettingsHeader(title = "Sign In", onBack = onCancel)
         }
 
         // Web page loading indicator

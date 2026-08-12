@@ -531,14 +531,21 @@ fun AiVoiceScreen(
             )
 
             Text(
-                text = "3. Create or copy your API key",
+                text = "3. Enable Text to Speech setting",
                 color = textColor,
                 fontSize = 16.sp,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
             Text(
-                text = "4. Paste it here",
+                text = "4. Create or copy your API key",
+                color = textColor,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Text(
+                text = "5. Paste it here",
                 color = textColor,
                 fontSize = 16.sp,
                 modifier = Modifier.padding(bottom = 8.dp)

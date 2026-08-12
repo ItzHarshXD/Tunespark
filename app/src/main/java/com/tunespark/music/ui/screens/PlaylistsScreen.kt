@@ -541,14 +541,14 @@ fun PlaylistsScreen(
                                 searchQuery = ""
                             },
                             modifier = Modifier
-                                .size(60.dp)
+                                .size(44.dp)
                                 .background(textColor, CircleShape)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "Back",
                                 tint = backgroundColor,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -600,14 +600,14 @@ fun PlaylistsScreen(
                                 playlistSongs = emptyList()
                             },
                             modifier = Modifier
-                                .size(60.dp)
+                                .size(44.dp)
                                 .background(textColor, CircleShape)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "Back",
                                 tint = backgroundColor,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -967,12 +967,19 @@ fun PlaylistsScreen(
                             isSearchActive = false
                             searchQuery = ""
                         },
-                        modifier = Modifier.size(60.dp)
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(textColor, CircleShape)
                     ) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", tint = textColor, modifier = Modifier.size(24.dp))
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = backgroundColor,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
 
                     TextField(
                         value = searchQuery,

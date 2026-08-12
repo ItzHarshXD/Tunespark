@@ -50,7 +50,6 @@ import com.tunespark.music.AppScreen
 import com.tunespark.music.WeatherInfo
 import com.tunespark.music.WeatherService
 import com.tunespark.music.rss.Article
-import com.tunespark.music.ui.theme.BitcountSingleFontFamily
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Sensors
@@ -319,8 +318,7 @@ fun HomeScreen(
                             Text(
                                 text = "Tunespark",
                                 fontSize = 24.sp,
-                                fontWeight = FontWeight.Normal,
-                                fontFamily = BitcountSingleFontFamily,
+                                fontWeight = FontWeight.Bold,
                                 color = textColor
                             )
 
@@ -328,15 +326,18 @@ fun HomeScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                val buttonBg = if (isSystemInDarkTheme()) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
-                                val buttonBorder = if (isSystemInDarkTheme()) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.15f)
+                                val isDarkTheme = isSystemInDarkTheme()
+                                val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+                                val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+                                val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
 
                                 Box(
                                     modifier = Modifier
                                         .size(40.dp)
+                                        .shadow(elevation = 6.dp, shape = CircleShape)
                                         .clip(CircleShape)
-                                        .background(textColor)
-                                        .border(1.dp, buttonBorder, CircleShape)
+                                        .background(weatherBgColor)
+                                        .border(1.dp, weatherBorderColor, CircleShape)
                                         .clickable {
                                             playSoundAndHaptic()
                                             onNavigate(AppScreen.ACCOUNT)
@@ -346,7 +347,7 @@ fun HomeScreen(
                                     Icon(
                                         imageVector = Icons.Default.AccountCircle,
                                         contentDescription = "Account",
-                                        tint = backgroundColor,
+                                        tint = weatherTextColor,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
@@ -354,8 +355,10 @@ fun HomeScreen(
                                 Box(
                                     modifier = Modifier
                                         .size(40.dp)
+                                        .shadow(elevation = 6.dp, shape = CircleShape)
                                         .clip(CircleShape)
-                                        .background(textColor)
+                                        .background(weatherBgColor)
+                                        .border(1.dp, weatherBorderColor, CircleShape)
                                         .clickable {
                                             playSoundAndHaptic()
                                             onNavigate(AppScreen.SETTINGS)
@@ -365,84 +368,91 @@ fun HomeScreen(
                                     Icon(
                                         imageVector = Icons.Default.Settings,
                                         contentDescription = "Settings",
-                                        tint = backgroundColor,
+                                        tint = weatherTextColor,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        val showTimeWeather = SessionManager.getShowTimeWeather(context)
 
-                        // Hero block
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = timeString,
-                                fontSize = 76.sp,
-                                lineHeight = 84.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = (-2).sp,
-                                color = textColor,
-                                textAlign = TextAlign.Center
-                            )
+                        if (showTimeWeather) {
+                            Spacer(modifier = Modifier.height(16.dp))
 
-                            if (locationEnabled) {
-                                Spacer(modifier = Modifier.height(18.dp))
+                            // Hero block - Time and Weather aligned horizontally and left-aligned
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Start
+                            ) {
+                                Text(
+                                    text = timeString,
+                                    fontSize = 64.sp,
+                                    lineHeight = 72.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = (-2).sp,
+                                    color = textColor,
+                                    textAlign = TextAlign.Start
+                                )
 
-                                val isDarkTheme = isSystemInDarkTheme()
-                                val offWhiteColor = Color(0xFFF2F2F5)
-                                val offBlackColor = Color(0xFF16161A)
-                                val weatherBgColor = if (isDarkTheme) offBlackColor else offWhiteColor
-                                val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
-                                Surface(
-                                    shape = RoundedCornerShape(30.dp),
-                                    color = weatherBgColor,
-                                    contentColor = weatherTextColor,
-                                    shadowElevation = 6.dp,
-                                    modifier = Modifier.border(
-                                        width = 1.dp,
-                                        color = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
-                                        shape = RoundedCornerShape(30.dp)
-                                    )
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .height(60.dp)
-                                            .padding(horizontal = 16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = weatherInfo?.emoji ?: "☁️",
-                                            fontSize = 28.sp
+                                if (locationEnabled) {
+                                    Spacer(modifier = Modifier.width(16.dp))
+
+                                    val isDarkTheme = isSystemInDarkTheme()
+                                    val offWhiteColor = Color(0xFFF2F2F5)
+                                    val offBlackColor = Color(0xFF16161A)
+                                    val weatherBgColor = if (isDarkTheme) offBlackColor else offWhiteColor
+                                    val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+                                    Surface(
+                                        shape = RoundedCornerShape(30.dp),
+                                        color = weatherBgColor,
+                                        contentColor = weatherTextColor,
+                                        shadowElevation = 6.dp,
+                                        modifier = Modifier.border(
+                                            width = 1.dp,
+                                            color = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
+                                            shape = RoundedCornerShape(30.dp)
                                         )
-
-                                        Spacer(modifier = Modifier.width(8.dp))
-
-                                        Column {
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .height(60.dp)
+                                                .padding(horizontal = 16.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             Text(
-                                                text = "${weatherInfo?.temperature?.toInt() ?: 35}°",
-                                                fontSize = 20.sp,
-                                                color = weatherTextColor,
-                                                fontWeight = FontWeight.Bold
+                                                text = weatherInfo?.emoji ?: "☁️",
+                                                fontSize = 28.sp
                                             )
 
-                                            Text(
-                                                text = weatherInfo?.description ?: "Cloudy",
-                                                fontSize = 12.sp,
-                                                color = weatherTextColor.copy(alpha = 0.60f)
-                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+
+                                            Column {
+                                                Text(
+                                                    text = "${weatherInfo?.temperature?.toInt() ?: 35}°",
+                                                    fontSize = 20.sp,
+                                                    color = weatherTextColor,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+
+                                                Text(
+                                                    text = weatherInfo?.description ?: "Cloudy",
+                                                    fontSize = 12.sp,
+                                                    color = weatherTextColor.copy(alpha = 0.60f)
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        Spacer(modifier = Modifier.height(24.dp))
+                            Spacer(modifier = Modifier.height(24.dp))
+                        } else {
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
 
                         IdleContent(
                             textColor = textColor,
@@ -2189,16 +2199,23 @@ fun QuickPicksView(
             )
 
             if (songs.isNotEmpty() && !isLoading) {
+                val isDarkTheme = isSystemInDarkTheme()
+                val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+                val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+                val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+
                 Box(
                     modifier = Modifier
+                        .shadow(elevation = 6.dp, shape = CircleShape)
                         .clip(CircleShape)
-                        .background(textColor)
+                        .background(weatherBgColor)
+                        .border(1.dp, weatherBorderColor, CircleShape)
                         .clickable { onPlayPlaylist("Quick Picks", songs, 0) }
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Text(
                         text = "Play all",
-                        color = MaterialTheme.colorScheme.background,
+                        color = weatherTextColor,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -2414,16 +2431,23 @@ fun DiscoverView(
                 fontWeight = FontWeight.Bold
             )
 
+            val isDarkTheme = isSystemInDarkTheme()
+            val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+            val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+            val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+
             Box(
                 modifier = Modifier
+                    .shadow(elevation = 6.dp, shape = CircleShape)
                     .clip(CircleShape)
-                    .background(textColor)
+                    .background(weatherBgColor)
+                    .border(1.dp, weatherBorderColor, CircleShape)
                     .clickable { onShowAllClick() }
                     .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = "Show all",
-                    color = MaterialTheme.colorScheme.background,
+                    color = weatherTextColor,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -2546,12 +2570,19 @@ fun DiscoverCard(
 
             Spacer(modifier = Modifier.width(8.dp))
 
+            val isDarkTheme = isSystemInDarkTheme()
+            val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+            val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+            val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+
             // AI summary icon button with its own dedicated space
             Box(
                 modifier = Modifier
                     .size(36.dp)
+                    .shadow(elevation = 6.dp, shape = CircleShape)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
+                    .background(weatherBgColor)
+                    .border(1.dp, weatherBorderColor, CircleShape)
                     .clickable {
                         playSoundAndHaptic()
                         onAiSummaryClick()
@@ -2561,7 +2592,7 @@ fun DiscoverCard(
                 Icon(
                     imageVector = Icons.Outlined.AutoAwesome,
                     contentDescription = "Generate AI summary",
-                    tint = MaterialTheme.colorScheme.onPrimary,
+                    tint = weatherTextColor,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -2605,16 +2636,23 @@ fun RecentsView(
                 fontWeight = FontWeight.Bold
             )
 
+            val isDarkTheme = isSystemInDarkTheme()
+            val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+            val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+            val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+
             Box(
                 modifier = Modifier
+                    .shadow(elevation = 6.dp, shape = CircleShape)
                     .clip(CircleShape)
-                    .background(textColor)
+                    .background(weatherBgColor)
+                    .border(1.dp, weatherBorderColor, CircleShape)
                     .clickable { onShowAllClick() }
                     .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = "Show all",
-                    color = MaterialTheme.colorScheme.background,
+                    color = weatherTextColor,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )

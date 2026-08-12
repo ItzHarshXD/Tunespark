@@ -13,13 +13,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -97,12 +99,23 @@ fun DiscoverFeedScreen(
             modifier = Modifier.padding(bottom = 24.dp)
         )
 
+        val isDarkTheme = isSystemInDarkTheme()
+        val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+        val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+        val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+
         // Master toggle row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(textColor.copy(alpha = 0.05f))
+                .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
+                .clip(RoundedCornerShape(30.dp))
+                .background(weatherBgColor)
+                .border(
+                    width = 1.dp,
+                    color = weatherBorderColor,
+                    shape = RoundedCornerShape(30.dp)
+                )
                 .clickable {
                     playSoundAndHaptic()
                     val newValue = !isDiscoverEnabled
@@ -110,7 +123,7 @@ fun DiscoverFeedScreen(
                     SessionManager.saveDiscoverFeedEnabled(context, newValue)
                     RssRepository.clearCache(context)
                 }
-                .padding(vertical = 16.dp, horizontal = 16.dp),
+                .padding(vertical = 16.dp, horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -118,13 +131,13 @@ fun DiscoverFeedScreen(
                 Text(
                     text = "Discover feed",
                     fontSize = 18.sp,
-                    color = textColor,
+                    color = weatherTextColor,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = if (isDiscoverEnabled) "Enabled" else "Disabled",
                     fontSize = 13.sp,
-                    color = textColor.copy(alpha = 0.55f)
+                    color = weatherTextColor.copy(alpha = 0.55f)
                 )
             }
 

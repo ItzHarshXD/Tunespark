@@ -10,10 +10,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunespark.music.AppScreen
+import com.tunespark.music.SessionManager
 
 @Composable
 fun AppearanceScreen(
@@ -39,6 +43,12 @@ fun AppearanceScreen(
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
 
+    val scrollState = rememberScrollState()
+
+    var showTimeWeather by remember {
+        mutableStateOf(SessionManager.getShowTimeWeather(context))
+    }
+
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
 
@@ -46,6 +56,7 @@ fun AppearanceScreen(
         modifier = modifier
             .fillMaxSize()
             .background(backgroundColor)
+            .verticalScroll(scrollState)
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
@@ -131,9 +142,131 @@ fun AppearanceScreen(
             }
         }
     }
-    
-    Spacer(modifier = Modifier.height(110.dp))
 }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider(color = textColor.copy(alpha = 0.1f), thickness = 1.dp)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .clickable {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                    val newValue = !showTimeWeather
+                    showTimeWeather = newValue
+                    SessionManager.saveShowTimeWeather(context, newValue)
+                }
+                .padding(
+                    horizontal = 10.dp,
+                    vertical = 10.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "Show Time and Weather on Home Screen",
+                    color = textColor,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Toggle the visibility of the clock and weather widget on the main home screen.",
+                    color = Color.Gray,
+                    fontSize = 14.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            SimpleToggleSwitch(
+                checked = showTimeWeather,
+                onCheckedChange = {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                    showTimeWeather = it
+                    SessionManager.saveShowTimeWeather(context, it)
+                },
+                backgroundColor = backgroundColor,
+                textColor = textColor
+            )
+        }
+    
+        Spacer(modifier = Modifier.height(110.dp))
+    }
+}
+
+@Composable
+private fun SimpleToggleSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    backgroundColor: Color,
+    textColor: Color
+) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val audioManager = remember {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+
+    val trackWidth = 52.dp
+    val trackHeight = 32.dp
+
+    val thumbSize by animateDpAsState(
+        targetValue = if (checked) 24.dp else 20.dp,
+        label = "thumbSize"
+    )
+
+    val thumbOffset by animateDpAsState(
+        targetValue = if (checked) 24.dp else 6.dp,
+        label = "thumbOffset"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(trackWidth, trackHeight)
+            .clip(RoundedCornerShape(100))
+            .background(if (checked) textColor else backgroundColor)
+            .border(
+                width = 1.5.dp,
+                color = textColor,
+                shape = RoundedCornerShape(100)
+            )
+            .clickable { 
+                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onCheckedChange(!checked) 
+            },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .offset(x = thumbOffset)
+                .size(thumbSize)
+                .clip(CircleShape)
+                .background(backgroundColor)
+                .then(
+                    if (!checked) {
+                        Modifier.border(
+                            width = 1.5.dp,
+                            color = textColor,
+                            shape = CircleShape
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
+        )
     }
 }
 

@@ -28,6 +28,7 @@ object SessionManager {
     private const val KEY_ACTIVE_TTS_PROVIDER = "active_tts_provider"
     private const val KEY_THEME = "app_theme"
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
+    private const val KEY_SHOW_TIME_WEATHER = "show_time_weather"
     private const val KEY_COMMENTARY_ENABLED = "commentary_enabled"
     private const val KEY_LOCAL_HISTORY = "local_listening_history"
     private const val KEY_SELECTED_GEMINI_TEXT_MODEL = "selected_gemini_text_model"
@@ -311,6 +312,14 @@ object SessionManager {
 
     fun saveKeepScreenOn(context: Context, keepOn: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_KEEP_SCREEN_ON, keepOn).apply()
+    }
+
+    fun getShowTimeWeather(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_SHOW_TIME_WEATHER, true)
+    }
+
+    fun saveShowTimeWeather(context: Context, show: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_SHOW_TIME_WEATHER, show).apply()
     }
 
     fun getSelectedGeminiTextModel(context: Context): String {

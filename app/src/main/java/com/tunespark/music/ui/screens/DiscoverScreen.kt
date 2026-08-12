@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,8 +21,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -413,12 +417,19 @@ private fun ArticleCardWithSummary(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // AI summary icon button with high-contrast accent background
+                val isDarkTheme = isSystemInDarkTheme()
+                val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+                val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
+                val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+
+                // AI summary icon button styled matching the weather widget / home screen AI button
                 Box(
                     modifier = Modifier
                         .size(36.dp)
+                        .shadow(elevation = 6.dp, shape = CircleShape)
                         .clip(CircleShape)
-                        .background(accentColor)
+                        .background(weatherBgColor)
+                        .border(1.dp, weatherBorderColor, CircleShape)
                         .clickable { onToggleSummary(article.url) },
                     contentAlignment = Alignment.Center
                 ) {
@@ -426,13 +437,13 @@ private fun ArticleCardWithSummary(
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            color = weatherTextColor
                         )
                     } else {
                         Icon(
-                            imageVector = Icons.Outlined.AutoAwesome,
+                            imageVector = if (isExpanded) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome,
                             contentDescription = "Generate AI summary",
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            tint = weatherTextColor,
                             modifier = Modifier.size(20.dp)
                         )
                     }
