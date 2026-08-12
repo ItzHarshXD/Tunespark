@@ -1,6 +1,7 @@
 package com.tunespark.music.ui.screens
 
 import android.content.Context
+import androidx.media3.common.Player
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -393,11 +394,21 @@ fun HomeScreen(
                             if (locationEnabled) {
                                 Spacer(modifier = Modifier.height(18.dp))
 
+                                val isDarkTheme = isSystemInDarkTheme()
+                                val offWhiteColor = Color(0xFFF2F2F5)
+                                val offBlackColor = Color(0xFF16161A)
+                                val weatherBgColor = if (isDarkTheme) offBlackColor else offWhiteColor
+                                val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
                                 Surface(
                                     shape = RoundedCornerShape(30.dp),
-                                    color = textColor,
-                                    contentColor = textColor,
-                                    shadowElevation = 6.dp
+                                    color = weatherBgColor,
+                                    contentColor = weatherTextColor,
+                                    shadowElevation = 6.dp,
+                                    modifier = Modifier.border(
+                                        width = 1.dp,
+                                        color = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
+                                        shape = RoundedCornerShape(30.dp)
+                                    )
                                 ) {
                                     Row(
                                         modifier = Modifier
@@ -410,20 +421,20 @@ fun HomeScreen(
                                             fontSize = 28.sp
                                         )
 
-//                                        Spacer(modifier = Modifier.width(5.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
 
                                         Column {
                                             Text(
                                                 text = "${weatherInfo?.temperature?.toInt() ?: 35}°",
                                                 fontSize = 20.sp,
-                                                color = backgroundColor,
+                                                color = weatherTextColor,
                                                 fontWeight = FontWeight.Bold
                                             )
 
                                             Text(
                                                 text = weatherInfo?.description ?: "Cloudy",
                                                 fontSize = 12.sp,
-                                                color = backgroundColor.copy(alpha = 0.60f)
+                                                color = weatherTextColor.copy(alpha = 0.60f)
                                             )
                                         }
                                     }
@@ -788,6 +799,8 @@ fun TileSongContent(
     artist: String?,
     artwork: String?,
     onPrimaryColor: Color,
+    progressFraction: Float = 0f,
+    onPlayPauseClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val displayTitle = title ?: ""
@@ -798,24 +811,50 @@ fun TileSongContent(
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (!artwork.isNullOrEmpty()) {
-            AsyncImage(
-                model = artwork,
-                contentDescription = "Artwork",
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color.DarkGray),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("🎵", fontSize = 18.sp)
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    onClick = { onPlayPauseClick() }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = 2.dp.toPx()
+                drawCircle(
+                    color = onPrimaryColor.copy(alpha = 0.15f),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
+                )
+                drawArc(
+                    color = Color(0xFFFF0000), // Premium Red Accent Progress Outline
+                    startAngle = -90f,
+                    sweepAngle = 360f * progressFraction,
+                    useCenter = false,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                )
+            }
+
+            if (!artwork.isNullOrEmpty()) {
+                AsyncImage(
+                    model = artwork,
+                    contentDescription = "Artwork",
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.DarkGray),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🎵", fontSize = 14.sp)
+                }
             }
         }
 
@@ -865,7 +904,8 @@ fun BottomDock(
     searchProgress: Animatable<Float, *>,
     onOpenSearch: () -> Unit = {},
     libraryProgress: Animatable<Float, *>,
-    onOpenLibrary: () -> Unit = {}
+    onOpenLibrary: () -> Unit = {},
+    exoPlayer: Player
 ) {
     val context = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -875,6 +915,28 @@ fun BottomDock(
     val playSoundAndHaptic = {
         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
+    val isDark = isSystemInDarkTheme()
+    val dockBgColor = if (isDark) Color(0xFF141414) else Color(0xFFF2F2F5)
+    val dockContentColor = if (isDark) Color.White else Color.Black
+
+    var currentPosition by remember { mutableStateOf(0L) }
+    var duration by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(exoPlayer, isTrackLoaded) {
+        if (isTrackLoaded) {
+            while (true) {
+                currentPosition = exoPlayer.currentPosition
+                val d = exoPlayer.duration
+                duration = if (d < 0) 0L else d
+                delay(500)
+            }
+        }
+    }
+
+    val progressFraction = remember(currentPosition, duration) {
+        if (duration > 0) currentPosition.toFloat() / duration.toFloat() else 0f
     }
 
     // Animation states
@@ -919,7 +981,12 @@ fun BottomDock(
                     .width(searchWidth)
                     .height(60.dp)
                     .clip(CircleShape)
-                    .background(primaryColor)
+                    .background(dockBgColor)
+                    .border(
+                        width = 1.dp,
+                        color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
+                        shape = CircleShape
+                    )
                     .pointerInput(isTrackLoaded) {
                         val thresholdPx = 15f * density
                         awaitPointerEventScope {
@@ -1005,7 +1072,7 @@ fun BottomDock(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = "Search",
-                        tint = onPrimaryColor,
+                        tint = dockContentColor,
                         modifier = Modifier.size(if (isTrackLoaded) 24.dp else 20.dp)
                     )
                     AnimatedVisibility(
@@ -1017,7 +1084,7 @@ fun BottomDock(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Search",
-                                color = onPrimaryColor,
+                                color = dockContentColor,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1
@@ -1040,7 +1107,12 @@ fun BottomDock(
                         .width(tileWidth)
                         .height(60.dp)
                         .clip(RoundedCornerShape(30.dp))
-                        .background(primaryColor)
+                        .background(dockBgColor)
+                        .border(
+                            width = 1.dp,
+                            color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
+                            shape = RoundedCornerShape(30.dp)
+                        )
                         .onGloballyPositioned { coords ->
                             tileWidthPx = coords.size.width.toFloat()
                         }
@@ -1201,7 +1273,17 @@ fun BottomDock(
                                     translationX = contentOffsetX.value
                                 }
                         ) {
-                            TileSongContent(currentSongTitle, currentSongArtist, currentSongArtwork, onPrimaryColor)
+                            TileSongContent(
+                                title = currentSongTitle,
+                                artist = currentSongArtist,
+                                artwork = currentSongArtwork,
+                                onPrimaryColor = dockContentColor,
+                                progressFraction = progressFraction,
+                                onPlayPauseClick = {
+                                    playSoundAndHaptic()
+                                    if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                }
+                            )
                         }
 
                         if (nextSongTitle != null) {
@@ -1212,7 +1294,12 @@ fun BottomDock(
                                         translationX = contentOffsetX.value + tileWidthPx
                                     }
                             ) {
-                                TileSongContent(nextSongTitle, nextSongArtist, nextSongArtwork, onPrimaryColor)
+                                TileSongContent(
+                                    title = nextSongTitle,
+                                    artist = nextSongArtist,
+                                    artwork = nextSongArtwork,
+                                    onPrimaryColor = dockContentColor
+                                )
                             }
                         }
 
@@ -1224,7 +1311,12 @@ fun BottomDock(
                                         translationX = contentOffsetX.value - tileWidthPx
                                     }
                             ) {
-                                TileSongContent(prevSongTitle, prevSongArtist, prevSongArtwork, onPrimaryColor)
+                                TileSongContent(
+                                    title = prevSongTitle,
+                                    artist = prevSongArtist,
+                                    artwork = prevSongArtwork,
+                                    onPrimaryColor = dockContentColor
+                                )
                             }
                         }
                     }
@@ -1240,7 +1332,12 @@ fun BottomDock(
                     .width(libraryWidth)
                     .height(60.dp)
                     .clip(CircleShape)
-                    .background(primaryColor)
+                    .background(dockBgColor)
+                    .border(
+                        width = 1.dp,
+                        color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
+                        shape = CircleShape
+                    )
                     .pointerInput(isTrackLoaded) {
                         val thresholdPx = 15f * density
                         awaitPointerEventScope {
@@ -1326,7 +1423,7 @@ fun BottomDock(
                     Icon(
                         imageVector = Icons.Outlined.LibraryMusic,
                         contentDescription = "Library",
-                        tint = onPrimaryColor,
+                        tint = dockContentColor,
                         modifier = Modifier.size(if (isTrackLoaded) 24.dp else 20.dp)
                     )
                     AnimatedVisibility(
@@ -1338,7 +1435,7 @@ fun BottomDock(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Library",
-                                color = onPrimaryColor,
+                                color = dockContentColor,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1

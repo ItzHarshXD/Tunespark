@@ -564,19 +564,23 @@ We have successfully refined and completed the premium user experience across al
 ### 7. Floating Bottom Bar (Dock) Architecture & Subtle Shadows
 - **Directory and Architecture**:
   - The floating bottom dock component is declared as `BottomDock` in `app/src/main/java/com/tunespark/music/ui/screens/HomeScreen.kt`.
-  - It is hosted globally in `app/src/main/java/com/tunespark/music/MainActivity.kt` inside the root content view container overlay, meaning it hovers/floats over any active screen view (except when the expanded `RadioScreen` player is active).
-  - It aligns seamlessly at `Alignment.BottomCenter`, styled with local system navigation bar insets and custom paddings.
+  - It is hosted globally as a single, unified overlay in `app/src/main/java/com/tunespark/music/MainActivity.kt` inside the root content view container overlay, meaning it hovers/floats over any active screen view (except when the expanded `RadioScreen` player is active).
+  - It aligns seamlessly at `Alignment.BottomCenter`, styled with local system navigation bar insets, custom paddings, and is pushed slightly down with an elegant `offset(y = 14.dp)` to perfectly eliminate any awkward blank spaces below.
 - **Dynamic Playback-State Responsive Layouts**:
   - **Inactive Playback Mode (`isTrackLoaded` is false)**:
     - Renders a horizontal `Row` containing two beautiful `BottomActionButton`s: "Search" (redirects to `AppScreen.SEARCH`) and "Library" (redirects to `AppScreen.PLAYLISTS`), each set to exactly `56.dp` height with capsule shapes (`RoundedCornerShape(30.dp)`).
   - **Active Playback Mode (`isTrackLoaded` is true)**:
     - Renders a horizontal `Row` containing a compact `CircularDockButton` on the left for quick Search access, a central music-playing tile displaying the current track artwork/title/artist (clickable to instantly open the player view `AppScreen.RADIO`), and a compact `CircularDockButton` on the right for Library access.
-- **Subtle Shadow Refinement**:
+- **Subtle Shadow, Theme-Aware Off-White/Off-Black, and Border Refinements**:
   - To make the floating bar stand out against its backdrops with a clean, high-fidelity premium aesthetic, all components inside the dock are elevated with subtle drop shadows using Jetpack Compose's `.shadow(elevation = 6.dp, shape = ...)` modifier.
-  - These shadows are applied explicitly to:
-    - `CircularDockButton` with a `CircleShape` shadow boundary.
-    - `BottomActionButton` with a `RoundedCornerShape(30.dp)` capsule boundary.
-    - The active music-playing tile with a `RoundedCornerShape(30.dp)` capsule boundary.
+  - The backgrounds of the Search/Library buttons and middle song tile utilize premium, theme-aware colors: soft **off-white** (`Color(0xFFF2F2F5)`) on Light theme, and sleek **off-black** (`Color(0xFF141414)`) on Dark theme, with high-contrast text and icon tints mapping natively.
+  - High-precision outline borders (`1.dp` with alpha) are wrapped around buttons and tiles to ensure perfect, beautiful separation against solid backdrops.
+  - Same premium off-white/off-black colors, shadow, and borders were styled on the Home screen's **Weather Widget** to create unified visual harmony across the app.
+- **Circular Play Progress Outer Outline & Play/Pause Click Handler**:
+  - The small circular track artwork thumbnail in the center Now Playing tile features a high-end outer outline denoting exact track playback progress. A Canvas dynamically computes and draws a circular progress path (Red Accent `Color(0xFFFF0000)`) over a soft baseline stroke that gradually completes as the track plays.
+  - Tapping directly on the artwork thumbnail triggers instant play/pause toggle with click sounds and micro-haptic haptic keyboard feedback, mirroring premium standard music players.
+- **Overlay Persistence Resolution**:
+  - Removed duplicate BottomDock layout containers, implementing a single-source-of-truth overlay drawn *after* sliding screen overlays. This completely resolved double-drawing, overlapping shadows, and visibility loss, making the floating bottom bar persist natively and work flawlessly on top of the Search Screen and Playlists Screen.
 
 ### 8. RSS-Powered Discover Feed (Current Milestone)
 - **Centralized RSS Configuration**: All 64 RSS feed URLs across 16 interest categories are centralized in `RssConfig.kt`.

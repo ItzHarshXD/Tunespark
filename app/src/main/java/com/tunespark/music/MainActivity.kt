@@ -1595,65 +1595,7 @@ fun MainPlayerScreen(
                     }
                 }
 
-                if (!(currentScreen == AppScreen.ACCOUNT && isAccountWebViewShowing)) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .windowInsetsPadding(WindowInsets.navigationBars)
-                            .graphicsLayer {
-                                alpha = 1f - maxOf(fullPlayerProgress.value, searchProgress.value, libraryProgress.value)
-                            }
-                            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
-                    ) {
-                        val touchEnabled = fullPlayerProgress.value < 0.1f && searchProgress.value < 0.1f && libraryProgress.value < 0.1f
-                        Box(modifier = if (touchEnabled) Modifier else Modifier.graphicsLayer { alpha = 0f }.clickable(enabled = false) {}) {
-                            val nextSong = playQueue.getOrNull(currentTrackIndex + 1)
-                            val prevSong = playQueue.getOrNull(currentTrackIndex - 1)
-                            BottomDock(
-                                isTrackLoaded = currentSongTitle != "No Track Loaded",
-                                currentSongTitle = currentSongTitle,
-                                currentSongArtist = currentSongArtist,
-                                currentSongArtwork = currentSongArtwork,
-                                primaryColor = MaterialTheme.colorScheme.primary,
-                                onPrimaryColor = MaterialTheme.colorScheme.onPrimary,
-                                onNavigate = navigateHandler,
-                                nextSongTitle = nextSong?.mediaMetadata?.title?.toString(),
-                                nextSongArtist = nextSong?.mediaMetadata?.artist?.toString(),
-                                nextSongArtwork = nextSong?.mediaMetadata?.artworkUri?.toString(),
-                                prevSongTitle = prevSong?.mediaMetadata?.title?.toString(),
-                                prevSongArtist = prevSong?.mediaMetadata?.artist?.toString(),
-                                prevSongArtwork = prevSong?.mediaMetadata?.artworkUri?.toString(),
-                                onNextSong = {
-                                    if (exoPlayer.hasNextMediaItem()) {
-                                        exoPlayer.seekToNextMediaItem()
-                                    }
-                                },
-                                onPreviousSong = {
-                                    if (exoPlayer.hasPreviousMediaItem()) {
-                                        exoPlayer.seekToPreviousMediaItem()
-                                    }
-                                },
-                                onDismiss = {
-                                    exoPlayer.stop()
-                                    exoPlayer.clearMediaItems()
-                                    currentSongTitle = "No Track Loaded"
-                                    currentSongArtist = ""
-                                    currentSongArtwork = null
-                                    playQueue = emptyList()
-                                    currentTrackIndex = -1
-                                    hasPreviousTrack = false
-                                    hasNextTrack = false
-                                },
-                                fullPlayerProgress = fullPlayerProgress,
-                                onOpenFullPlayer = openFullPlayer,
-                                searchProgress = searchProgress,
-                                onOpenSearch = openSearch,
-                                libraryProgress = libraryProgress,
-                                onOpenLibrary = openLibrary
-                            )
-                        }
-                    }
-                }
+                // First BottomDock was deleted to resolve duplicate rendering, misalignment, double-shadows, and to allow the single bottom bar to render natively on top of all overlay screens (Search, Playlists, etc.).
             }
 
             // RadioScreen premium sliding overlay
@@ -1794,6 +1736,68 @@ fun MainPlayerScreen(
                             }
                         }
                     )
+                }
+            }
+
+            if (!(currentScreen == AppScreen.ACCOUNT && isAccountWebViewShowing)) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .graphicsLayer {
+                            alpha = 1f - fullPlayerProgress.value
+                        }
+                        .offset(y = 14.dp) // Pushed slightly down to eliminate empty space below
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
+                ) {
+                    val touchEnabled = fullPlayerProgress.value < 0.1f
+                    Box(modifier = if (touchEnabled) Modifier else Modifier.graphicsLayer { alpha = 0f }.clickable(enabled = false) {}) {
+                        val nextSong = playQueue.getOrNull(currentTrackIndex + 1)
+                        val prevSong = playQueue.getOrNull(currentTrackIndex - 1)
+                        BottomDock(
+                            isTrackLoaded = currentSongTitle != "No Track Loaded",
+                            currentSongTitle = currentSongTitle,
+                            currentSongArtist = currentSongArtist,
+                            currentSongArtwork = currentSongArtwork,
+                            primaryColor = MaterialTheme.colorScheme.primary,
+                            onPrimaryColor = MaterialTheme.colorScheme.onPrimary,
+                            onNavigate = navigateHandler,
+                            nextSongTitle = nextSong?.mediaMetadata?.title?.toString(),
+                            nextSongArtist = nextSong?.mediaMetadata?.artist?.toString(),
+                            nextSongArtwork = nextSong?.mediaMetadata?.artworkUri?.toString(),
+                            prevSongTitle = prevSong?.mediaMetadata?.title?.toString(),
+                            prevSongArtist = prevSong?.mediaMetadata?.artist?.toString(),
+                            prevSongArtwork = prevSong?.mediaMetadata?.artworkUri?.toString(),
+                            onNextSong = {
+                                if (exoPlayer.hasNextMediaItem()) {
+                                    exoPlayer.seekToNextMediaItem()
+                                }
+                            },
+                            onPreviousSong = {
+                                if (exoPlayer.hasPreviousMediaItem()) {
+                                    exoPlayer.seekToPreviousMediaItem()
+                                }
+                            },
+                            onDismiss = {
+                                exoPlayer.stop()
+                                exoPlayer.clearMediaItems()
+                                currentSongTitle = "No Track Loaded"
+                                currentSongArtist = ""
+                                currentSongArtwork = null
+                                playQueue = emptyList()
+                                currentTrackIndex = -1
+                                hasPreviousTrack = false
+                                hasNextTrack = false
+                            },
+                            fullPlayerProgress = fullPlayerProgress,
+                            onOpenFullPlayer = openFullPlayer,
+                            searchProgress = searchProgress,
+                            onOpenSearch = openSearch,
+                            libraryProgress = libraryProgress,
+                            onOpenLibrary = openLibrary,
+                            exoPlayer = exoPlayer
+                        )
+                    }
                 }
             }
         }
