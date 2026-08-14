@@ -236,7 +236,6 @@ fun SearchScreen(
                             .fillMaxWidth()
                             .clickable {
                                 onPlaySong(song)
-                                onNavigate(AppScreen.RADIO)
                             }
                             .padding(vertical = 6.dp, horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
