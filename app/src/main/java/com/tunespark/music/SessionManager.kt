@@ -56,6 +56,22 @@ object SessionManager {
     fun initialize(context: Context) {
         val cookie = getPrefs(context).getString(KEY_COOKIE, null)
         YouTube.cookie = cookie
+
+        // Migrate/override old default values for first-time or existing installations
+        val prefs = getPrefs(context)
+        if (!prefs.contains("migrated_to_new_defaults_v2")) {
+            val editor = prefs.edit()
+            
+            // Keep screen on should be off (false) by default
+            editor.putBoolean(KEY_KEEP_SCREEN_ON, false)
+            
+            // ElevenLabs default model should be Eleven v3 (eleven_v3)
+            editor.putString(KEY_SELECTED_ELEVENLABS_MODEL_ID, "eleven_v3")
+            editor.putString(KEY_SELECTED_ELEVENLABS_MODEL, "Eleven v3")
+            
+            editor.putBoolean("migrated_to_new_defaults_v2", true)
+            editor.apply()
+        }
     }
 
     /**
@@ -307,7 +323,7 @@ object SessionManager {
     }
 
     fun getKeepScreenOn(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_KEEP_SCREEN_ON, true)
+        return getPrefs(context).getBoolean(KEY_KEEP_SCREEN_ON, false)
     }
 
     fun saveKeepScreenOn(context: Context, keepOn: Boolean) {
@@ -339,7 +355,7 @@ object SessionManager {
     }
 
     fun getSelectedElevenLabsModel(context: Context): String {
-        return getPrefs(context).getString(KEY_SELECTED_ELEVENLABS_MODEL, "Eleven Multilingual v2") ?: "Eleven Multilingual v2"
+        return getPrefs(context).getString(KEY_SELECTED_ELEVENLABS_MODEL, "Eleven v3") ?: "Eleven v3"
     }
 
     fun saveSelectedElevenLabsModel(context: Context, model: String) {
@@ -351,7 +367,7 @@ object SessionManager {
      * Defaults to "eleven_multilingual_v2".
      */
     fun getSelectedElevenLabsModelId(context: Context): String {
-        return getPrefs(context).getString(KEY_SELECTED_ELEVENLABS_MODEL_ID, "eleven_multilingual_v2") ?: "eleven_multilingual_v2"
+        return getPrefs(context).getString(KEY_SELECTED_ELEVENLABS_MODEL_ID, "eleven_v3") ?: "eleven_v3"
     }
 
     fun saveSelectedElevenLabsModelId(context: Context, modelId: String) {

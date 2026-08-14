@@ -23,6 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -628,7 +629,7 @@ fun AiVoiceScreen(
             }
 
             val selectedModelOption = supportedElevenLabsModels.find { it.second == selectedElevenLabsModelId }
-                ?: supportedElevenLabsModels[1]
+                ?: supportedElevenLabsModels[0]
 
             Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                 OutlinedTextField(
@@ -781,6 +782,68 @@ fun AiVoiceScreen(
                 fontSize = 16.sp,
                 color = if (isGenerating) Color.White else onPrimaryColor
             )
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Commentary Screen Navigation Info Card
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .border(
+                    width = 1.dp,
+                    color = textColor.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .background(if (MaterialTheme.colorScheme.background == Color.White) Color(0xFFF9F9FA) else Color(0xFF111111))
+                .clickable {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onNavigate(AppScreen.COMMENTARY)
+                }
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "Fine-Tune Your Commentary",
+                color = textColor,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+
+            Text(
+                text = "Now that your API key and voice preferences are set, customize the commentary elements! Toggle weather updates, playlist roasts, local briefing segments, and song context stories to perfect your personalized AI Radio host experience.",
+                color = Color.Gray,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                modifier = Modifier.padding(bottom = 16.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+
+            Button(
+                onClick = {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onNavigate(AppScreen.COMMENTARY)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent,
+                    contentColor = textColor
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.5.dp, textColor),
+                shape = RoundedCornerShape(60.dp)
+            ) {
+                Text(
+                    text = "Configure Commentary Elements",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+            }
         }
         
         Spacer(modifier = Modifier.height(110.dp))
