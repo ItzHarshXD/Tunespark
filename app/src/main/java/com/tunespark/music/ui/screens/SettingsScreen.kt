@@ -1,5 +1,4 @@
 package com.tunespark.music.ui.screens
-
 import android.content.Context
 import android.media.AudioManager
 import android.view.HapticFeedbackConstants
@@ -7,14 +6,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.ChatBubble
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -57,14 +56,14 @@ fun SettingsScreen(
         )
 
         val settingsItems = listOf(
-            "Appearance" to Icons.Default.Palette,
-            "Account" to Icons.Default.AccountCircle,
-            "Discover feed" to Icons.Default.List,
-            "AI and Voice" to Icons.Default.Mic,
-            "Commentary" to Icons.Default.ChatBubble,
-            "Player and Audio" to Icons.Default.MusicNote,
-            "Location" to Icons.Default.LocationOn,
-            "Updates" to Icons.Default.Info
+            "Appearance" to Icons.Outlined.Palette,
+            "Account" to Icons.Outlined.AccountCircle,
+            "Discover feed" to Icons.AutoMirrored.Outlined.List,
+            "AI and Voice" to Icons.Outlined.Mic,
+            "Commentary" to Icons.Outlined.ChatBubbleOutline,
+            "Player and Audio" to Icons.Outlined.MusicNote,
+            "Location" to Icons.Outlined.LocationOn,
+            "Updates" to Icons.Outlined.Info
         )
 
         settingsItems.forEach { (item, icon) ->
@@ -102,7 +101,7 @@ fun SettingsScreen(
                 Text(
                     text = item,
                     color = textColor,
-                    fontSize = 24.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Normal
                 )
             }

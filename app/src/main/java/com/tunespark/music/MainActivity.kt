@@ -1789,6 +1789,7 @@ fun MainPlayerScreen(
                             primaryColor = MaterialTheme.colorScheme.primary,
                             onPrimaryColor = MaterialTheme.colorScheme.onPrimary,
                             onNavigate = navigateHandler,
+                            currentScreen = currentScreen,
                             nextSongTitle = nextSong?.mediaMetadata?.title?.toString(),
                             nextSongArtist = nextSong?.mediaMetadata?.artist?.toString(),
                             nextSongArtwork = nextSong?.mediaMetadata?.artworkUri?.toString(),

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.LibraryMusic
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -815,6 +816,9 @@ fun TileSongContent(
 ) {
     val displayTitle = title ?: ""
     val displayArtist = artist ?: ""
+    val coroutineScope = rememberCoroutineScope()
+    val scale = remember { Animatable(1f) }
+
     Row(
         modifier = modifier
             .fillMaxSize()
@@ -824,10 +828,36 @@ fun TileSongContent(
         Box(
             modifier = Modifier
                 .size(44.dp)
+                .graphicsLayer {
+                    scaleX = scale.value
+                    scaleY = scale.value
+                }
                 .clickable(
                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                     indication = null,
-                    onClick = { onPlayPauseClick() }
+                    onClick = {
+                        coroutineScope.launch {
+                            scale.animateTo(
+                                targetValue = 0.88f,
+                                animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing)
+                            )
+                            scale.animateTo(
+                                targetValue = 1.15f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            )
+                            scale.animateTo(
+                                targetValue = 1f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            )
+                        }
+                        onPlayPauseClick()
+                    }
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -899,6 +929,7 @@ fun BottomDock(
     primaryColor: Color,
     onPrimaryColor: Color,
     onNavigate: (AppScreen) -> Unit,
+    currentScreen: AppScreen = AppScreen.HOME,
     // Interactive gestures parameters
     nextSongTitle: String? = null,
     nextSongArtist: String? = null,
@@ -1431,7 +1462,7 @@ fun BottomDock(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.LibraryMusic,
+                        imageVector = if (currentScreen == AppScreen.PLAYLISTS || libraryProgress.value > 0.5f) Icons.Filled.LibraryMusic else Icons.Outlined.LibraryMusic,
                         contentDescription = "Library",
                         tint = dockContentColor,
                         modifier = Modifier.size(if (isTrackLoaded) 24.dp else 20.dp)
