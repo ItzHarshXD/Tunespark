@@ -23,6 +23,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density"
             android:label="@string/app_name"
             android:theme="@style/Theme.Tunespark">
             <intent-filter>

@@ -178,11 +178,18 @@ fun MainPlayerScreen(
     var currentScreen by rememberSaveable { mutableStateOf(AppScreen.HOME) }
     var isAccountWebViewShowing by remember { mutableStateOf(false) }
 
-    val fullPlayerProgress = remember { Animatable(0f) }
-    val searchProgress = remember { Animatable(0f) }
-    val libraryProgress = remember { Animatable(0f) }
+    var isFullPlayerOpen by rememberSaveable { mutableStateOf(false) }
+    var isSearchOpen by rememberSaveable { mutableStateOf(false) }
+    var isLibraryOpen by rememberSaveable { mutableStateOf(false) }
+
+    val fullPlayerProgress = remember { Animatable(if (isFullPlayerOpen) 1f else 0f) }
+    val searchProgress = remember { Animatable(if (isSearchOpen) 1f else 0f) }
+    val libraryProgress = remember { Animatable(if (isLibraryOpen) 1f else 0f) }
 
     val openFullPlayer: () -> Unit = {
+        isFullPlayerOpen = true
+        isSearchOpen = false
+        isLibraryOpen = false
         coroutineScope.launch {
             launch {
                 searchProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
@@ -201,6 +208,7 @@ fun MainPlayerScreen(
     }
 
     val closeFullPlayer: () -> Unit = {
+        isFullPlayerOpen = false
         coroutineScope.launch {
             fullPlayerProgress.animateTo(
                 targetValue = 0f,
@@ -213,6 +221,9 @@ fun MainPlayerScreen(
     }
 
     val openSearch: () -> Unit = {
+        isFullPlayerOpen = false
+        isSearchOpen = true
+        isLibraryOpen = false
         coroutineScope.launch {
             launch {
                 fullPlayerProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
@@ -231,6 +242,7 @@ fun MainPlayerScreen(
     }
 
     val closeSearch: () -> Unit = {
+        isSearchOpen = false
         coroutineScope.launch {
             searchProgress.animateTo(
                 targetValue = 0f,
@@ -243,6 +255,9 @@ fun MainPlayerScreen(
     }
 
     val openLibrary: () -> Unit = {
+        isFullPlayerOpen = false
+        isSearchOpen = false
+        isLibraryOpen = true
         coroutineScope.launch {
             launch {
                 fullPlayerProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
@@ -261,6 +276,7 @@ fun MainPlayerScreen(
     }
 
     val closeLibrary: () -> Unit = {
+        isLibraryOpen = false
         coroutineScope.launch {
             libraryProgress.animateTo(
                 targetValue = 0f,

@@ -2,6 +2,7 @@ package com.tunespark.music.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.media.AudioManager
 import android.os.Vibrator
 import android.os.VibrationEffect
@@ -11,6 +12,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -33,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -181,6 +185,8 @@ fun RadioScreen(
     }
 
     val context = LocalContext.current
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val nowPlayingScrollState = rememberScrollState()
     val keepScreenOnSetting = remember(context) { com.tunespark.music.SessionManager.getKeepScreenOn(context) }
     val isCommentaryEnabled = remember(context) { com.tunespark.music.SessionManager.isCommentaryEnabled(context) }
     val isMusicContextChecked = remember(context) { "Music Context" in com.tunespark.music.SessionManager.getSelectedCommentary(context) }
@@ -219,13 +225,13 @@ fun RadioScreen(
 
     val updateHoverIndex = {
         val layoutInfo = queueListState.layoutInfo
-                val draggedItemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.key == draggedId }
-                if (draggedItemInfo != null) {
-                    val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
-                    val minOffset = -draggedItemInfo.offset.toFloat()
-                    val maxOffset = (viewportHeight - draggedItemInfo.size - draggedItemInfo.offset).toFloat()
-                    dragOffset = dragOffset.coerceIn(minOffset, maxOffset)
-                }
+        val draggedItemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.key == draggedId }
+        if (draggedItemInfo != null) {
+            val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+            val minOffset = -draggedItemInfo.offset.toFloat()
+            val maxOffset = (viewportHeight - draggedItemInfo.size - draggedItemInfo.offset).toFloat()
+            dragOffset = dragOffset.coerceIn(minOffset, maxOffset)
+        }
 
         val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
         if (viewportHeight > 0) {
@@ -523,6 +529,657 @@ fun RadioScreen(
         Modifier
     }
 
+    val LyricsView = @Composable { contentModifier: Modifier ->
+        if (isLyricsLoading) {
+            Box(
+                modifier = contentModifier,
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = primaryColor)
+            }
+        } else {
+            var isAutoScrolling by remember { mutableStateOf(false) }
+            var userHasScrolledAway by remember { mutableStateOf(false) }
+
+            val activeInSight by remember(activeLyricIndex) {
+                derivedStateOf {
+                    if (activeLyricIndex < 0 || lyricsLines.isEmpty()) {
+                        true
+                    } else {
+                        listState.layoutInfo.visibleItemsInfo.any { it.index == activeLyricIndex }
+                    }
+                }
+            }
+
+            LaunchedEffect(activeInSight, listState.isScrollInProgress) {
+                if (activeInSight) {
+                    userHasScrolledAway = false
+                } else if (listState.isScrollInProgress && !isAutoScrolling) {
+                    userHasScrolledAway = true
+                }
+            }
+
+            val isPlaybackDone = remember(exoPlayer.playbackState, isPlaying, currentPosition, duration) {
+                exoPlayer.playbackState == Player.STATE_ENDED || (!isPlaying && currentPosition >= duration - 1000 && duration > 0)
+            }
+
+            LaunchedEffect(isPlaybackDone) {
+                if (isPlaybackDone) {
+                    listState.animateScrollToItem(0)
+                }
+            }
+
+            LaunchedEffect(activeLyricIndex) {
+                if (!userHasScrolledAway && activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
+                    val targetOffset = -10
+                    val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                    if (initialVisibleItem == null) {
+                        listState.scrollToItem(activeLyricIndex, targetOffset)
+                    } else {
+                        isAutoScrolling = true
+                        try {
+                            listState.scroll {
+                                var lastValue = 0f
+                                animate(
+                                    initialValue = 0f,
+                                    targetValue = 1f,
+                                    animationSpec = tween(
+                                        durationMillis = 600,
+                                        easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                    )
+                                ) { currentValue, _ ->
+                                    val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                                    if (visibleItem != null) {
+                                        val currentOffset = visibleItem.offset
+                                        val remainingDelta = currentOffset - targetOffset
+
+                                        val denominator = 1f - lastValue
+                                        val stepFraction = if (denominator > 0.001f) {
+                                            (currentValue - lastValue) / denominator
+                                        } else {
+                                            1f
+                                        }
+                                        val scrollAmount = remainingDelta * stepFraction
+
+                                        scrollBy(scrollAmount)
+                                        lastValue = currentValue
+                                    }
+                                }
+                            }
+                        } finally {
+                            isAutoScrolling = false
+                        }
+                    }
+                }
+            }
+
+            Box(
+                modifier = contentModifier
+            ) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 24.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    itemsIndexed(lyricsLines) { index, line ->
+                        val isPlaceholder = lyricsLines.size == 1 &&
+                                (line.text.startsWith("No lyrics") ||
+                                        line.text.startsWith("Could not") ||
+                                        line.text.startsWith("No track"))
+
+                        val isActive = index == activeLyricIndex
+
+                        val targetAlpha = when {
+                            isPlaceholder -> 0.5f
+                            isActive -> 1f
+                            activeLyricIndex == -1 -> {
+                                when {
+                                    index < 2 -> 1f
+                                    index in 2..4 -> 0.9f
+                                    index in 5..7 -> 0.75f
+                                    index in 8..10 -> 0.6f
+                                    else -> 0.45f
+                                }
+                            }
+                            else -> {
+                                val distance = kotlin.math.abs(index - activeLyricIndex)
+                                when {
+                                    distance == 1 -> 0.85f
+                                    distance == 2 -> 0.7f
+                                    distance == 3 -> 0.55f
+                                    else -> 0.4f
+                                }
+                            }
+                        }
+
+                        val animatedAlpha by animateFloatAsState(
+                            targetValue = targetAlpha,
+                            animationSpec = tween(
+                                durationMillis = 350,
+                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                            ),
+                            label = "LyricAlpha"
+                        )
+
+                        val activeFraction by animateFloatAsState(
+                            targetValue = if (isActive || (activeLyricIndex == -1 && index < 2 && !isPlaceholder)) 1f else 0f,
+                            animationSpec = tween(
+                                durationMillis = 350,
+                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                            ),
+                            label = "LyricScale"
+                        )
+
+                        val fontSize = (21f + 5f * activeFraction).sp
+                        val lineHeight = (30f + 6f * activeFraction).sp
+                        val fontWeight = FontWeight.Bold
+
+                        val widthFraction by animateFloatAsState(
+                            targetValue = when {
+                                isPlaceholder -> 1f
+                                isActive -> 1f
+                                activeLyricIndex == -1 && index < 2 -> 1f
+                                else -> 0.78f
+                            },
+                            animationSpec = tween(
+                                durationMillis = 350,
+                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                            ),
+                            label = "LyricWidth"
+                        )
+
+                        val verticalPadding by animateDpAsState(
+                            targetValue = when {
+                                isPlaceholder -> 0.dp
+                                isActive -> 10.dp
+                                activeLyricIndex == -1 && index < 2 -> 10.dp
+                                else -> 0.dp
+                            },
+                            animationSpec = tween(
+                                durationMillis = 350,
+                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                            ),
+                            label = "LyricPadding"
+                        )
+
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(
+                                text = line.text,
+                                color = textColor.copy(alpha = animatedAlpha),
+                                fontSize = fontSize,
+                                fontWeight = fontWeight,
+                                lineHeight = lineHeight,
+                                style = LocalTextStyle.current.copy(
+                                    lineHeightStyle = LineHeightStyle(
+                                        alignment = LineHeightStyle.Alignment.Center,
+                                        trim = LineHeightStyle.Trim.None
+                                    )
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth(widthFraction)
+                                    .padding(vertical = verticalPadding)
+                                    .then(
+                                        if (!isPlaceholder && line.timestampMs >= 0) {
+                                            Modifier.clickable {
+                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                exoPlayer.seekTo(line.timestampMs)
+                                                currentPosition = line.timestampMs
+                                            }
+                                        } else {
+                                            Modifier
+                                        }
+                                    ),
+                                textAlign = if (isPlaceholder) TextAlign.Center else TextAlign.Start
+                            )
+                        }
+                    }
+
+                    if (lyricsLines.size > 1) {
+                        item {
+                            Spacer(modifier = Modifier.fillParentMaxHeight(0.85f))
+                        }
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = userHasScrolledAway && activeLyricIndex >= 0,
+                    enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 24.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            userHasScrolledAway = false
+                            scope.launch {
+                                if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
+                                    val targetOffset = -10
+                                    isAutoScrolling = true
+                                    try {
+                                        val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                                        if (initialVisibleItem == null) {
+                                            listState.scrollToItem(activeLyricIndex, targetOffset)
+                                        } else {
+                                            listState.animateScrollToItem(activeLyricIndex, targetOffset)
+                                        }
+                                    } finally {
+                                        isAutoScrolling = false
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = primaryColor,
+                            contentColor = onPrimaryColor
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+                    ) {
+                        Text(
+                            text = "Sync",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    val QueueView = @Composable { contentModifier: Modifier ->
+        LazyColumn(
+            state = queueListState,
+            userScrollEnabled = draggedId == null,
+            modifier = contentModifier
+                .pointerInput(localQueue) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { startOffset ->
+                            val layoutInfo = queueListState.layoutInfo
+                            val clickedItem = layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                                startOffset.y >= item.offset && startOffset.y <= (item.offset + item.size)
+                            }
+                            if (clickedItem != null) {
+                                draggedId = clickedItem.key as? String
+                                currentTouchY = startOffset.y
+                                dragOffset = 0f
+                                val originalIdx = localQueue.indexOfFirst { it.mediaId == draggedId }
+                                if (originalIdx != -1) {
+                                    hoverIndex = originalIdx
+                                    triggerVibration(120) // hardware-level long-press physical grab vibration
+                                }
+                            }
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            dragOffset += dragAmount.y
+                            currentTouchY = change.position.y
+                            updateHoverIndex()
+                        },
+                        onDragEnd = {
+                            val originalIdx = playQueue.indexOfFirst { it.mediaId == draggedId }
+                            if (originalIdx != -1 && hoverIndex != -1) {
+                                val targetIdx = if (hoverIndex < originalIdx) {
+                                    hoverIndex
+                                } else if (hoverIndex > originalIdx) {
+                                    hoverIndex - 1
+                                } else {
+                                    originalIdx
+                                }
+                                if (targetIdx != originalIdx) {
+                                    exoPlayer.moveMediaItem(originalIdx, targetIdx)
+                                }
+                            }
+                            draggedId = null
+                            hoverIndex = -1
+                            dragOffset = 0f
+                            currentTouchY = 0f
+                        },
+                        onDragCancel = {
+                            val originalIdx = playQueue.indexOfFirst { it.mediaId == draggedId }
+                            if (originalIdx != -1 && hoverIndex != -1) {
+                                val targetIdx = if (hoverIndex < originalIdx) {
+                                    hoverIndex
+                                } else if (hoverIndex > originalIdx) {
+                                    hoverIndex - 1
+                                } else {
+                                    originalIdx
+                                }
+                                if (targetIdx != originalIdx) {
+                                    exoPlayer.moveMediaItem(originalIdx, targetIdx)
+                                }
+                            }
+                            draggedId = null
+                            hoverIndex = -1
+                            dragOffset = 0f
+                            currentTouchY = 0f
+                        }
+                    )
+                },
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            itemsIndexed(localQueue, key = { index, item -> item.mediaId }) { index, item ->
+                val isCurrent = item.mediaId == (playQueue.getOrNull(currentTrackIndex)?.mediaId ?: "")
+                val isCommentary = item.mediaId.startsWith("commentary_")
+
+                val title = item.mediaMetadata.title?.toString() ?: "Unknown Song"
+                val artist = item.mediaMetadata.artist?.toString() ?: "Unknown Artist"
+                val artworkUri = item.mediaMetadata.artworkUri
+
+                val isDragged = item.mediaId == draggedId
+                val translationY = if (isDragged) dragOffset else 0f
+                val zIndexValue = if (isDragged) 10f else 1f
+
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Highlightable line before the item
+                    DropIndicatorLine(isHighlighted = draggedId != null && hoverIndex == index)
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .zIndex(zIndexValue)
+                            .graphicsLayer {
+                                this.translationY = translationY
+                                this.scaleX = if (isDragged) 1.05f else 1f
+                                this.scaleY = if (isDragged) 1.05f else 1f
+                                this.shadowElevation = if (isDragged) with(localDensity) { 8.dp.toPx() } else 0f
+                            }
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isCurrent) secondaryColor else if (isDragged) secondaryColor.copy(alpha = 0.15f) else Color.Transparent)
+                            .clickable(enabled = draggedId == null) {
+                                exoPlayer.seekToDefaultPosition(index)
+                            }
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(secondaryColor)
+                        ) {
+                            if (isCommentary) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("✨", fontSize = 20.sp)
+                                }
+                            } else if (artworkUri != null) {
+                                AsyncImage(
+                                    model = artworkUri.toString(),
+                                    contentDescription = "Queue Artwork",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("🎵", fontSize = 20.sp)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = title,
+                                fontSize = 15.sp,
+                                fontWeight = if (isCurrent) FontWeight.Medium else FontWeight.Normal,
+                                color = if (isCommentary) Color(0xFF5856D6) else textColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = artist,
+                                fontSize = 12.sp,
+                                color = textColor.copy(alpha = 0.6f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (index == localQueue.size - 1) {
+                        DropIndicatorLine(isHighlighted = draggedId != null && hoverIndex == localQueue.size)
+                    }
+                }
+            }
+        }
+    }
+
+    val TopBarView = @Composable {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp, bottom = 0.dp)
+        ) {
+            val parentWidth = maxWidth
+
+            // Back Button (Left Aligned)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(weatherBgColor)
+                    .border(1.dp, weatherBorderColor, CircleShape)
+                    .clickable {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        onNavigate(AppScreen.HOME) // Always takes user to HOME
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Back",
+                    tint = weatherTextColor,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Play/Pause & Skip buttons (Center Aligned, Hides when stop button expands)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !isStopExpanded,
+                enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .height(56.dp)
+                        .width(240.dp)
+                ) {
+                    // Left half (Play/Pause)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(119.dp)
+                            .align(Alignment.CenterStart)
+                    ) {
+                        val playPauseShape = RoundedCornerShape(
+                            topStart = 28.dp,
+                            bottomStart = 28.dp,
+                            topEnd = 8.dp,
+                            bottomEnd = 8.dp
+                        )
+                        Box(
+                            modifier = Modifier
+                                .height(56.dp)
+                                .width(80.dp + playPauseExtraWidth.value.coerceAtLeast(0f).dp)
+                                .align(Alignment.CenterEnd)
+                                .clip(playPauseShape)
+                                .background(weatherBgColor)
+                                .border(1.dp, weatherBorderColor, playPauseShape)
+                                .clickable {
+                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    scope.launch {
+                                        playPauseExtraWidth.snapTo(0f)
+                                        playPauseExtraWidth.animateTo(
+                                            targetValue = 10f, // Premium subtle peak elongation
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                        playPauseExtraWidth.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                    }
+                                    if (isPlaying) {
+                                        exoPlayer.pause()
+                                    } else {
+                                        exoPlayer.play()
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                tint = weatherTextColor,
+                                modifier = Modifier.size(26.dp) // Adjusted visual balance
+                            )
+                        }
+                    }
+
+                    // Right half (Skip)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(119.dp)
+                            .align(Alignment.CenterEnd)
+                    ) {
+                        val skipShape = RoundedCornerShape(
+                            topStart = 8.dp,
+                            bottomStart = 8.dp,
+                            topEnd = 28.dp,
+                            bottomEnd = 28.dp
+                        )
+                        Box(
+                            modifier = Modifier
+                                .height(56.dp)
+                                .width(80.dp + skipExtraWidth.value.coerceAtLeast(0f).dp)
+                                .align(Alignment.CenterStart)
+                                .clip(skipShape)
+                                .background(weatherBgColor)
+                                .border(1.dp, weatherBorderColor, skipShape)
+                                .clickable {
+                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    scope.launch {
+                                        skipExtraWidth.snapTo(0f)
+                                        skipExtraWidth.animateTo(
+                                            targetValue = 10f, // Premium subtle peak elongation
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                        skipExtraWidth.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                    }
+                                    if (exoPlayer.hasNextMediaItem()) {
+                                        exoPlayer.seekToNext()
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.SkipNext,
+                                contentDescription = "Skip Next",
+                                tint = weatherTextColor,
+                                modifier = Modifier.size(26.dp) // Matched size for perfect balance
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Stop Button (Right Aligned, Expands on first click)
+            val stopButtonWidth by animateDpAsState(
+                targetValue = if (isStopExpanded) parentWidth - 68.dp else 56.dp,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium
+                ),
+                label = "StopButtonWidth"
+            )
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .height(56.dp)
+                    .width(stopButtonWidth)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFFFF0000))
+                    .clickable {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        if (!isStopExpanded) {
+                            isStopExpanded = true
+                        } else {
+                            onStopRadio()
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Stop",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = isStopExpanded,
+                        enter = fadeIn() + expandHorizontally(),
+                        exit = fadeOut() + shrinkHorizontally()
+                    ) {
+                        Row {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Stop",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -554,226 +1211,826 @@ fun RadioScreen(
             verticalArrangement = Arrangement.Top
         ) {
             // 1. Top Bar
-            BoxWithConstraints(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 0.dp)
-            ) {
-                val parentWidth = maxWidth
-
-                // Back Button (Left Aligned)
-                Box(
+            if (!isLandscape) {
+                BoxWithConstraints(
                     modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .background(weatherBgColor)
-                        .border(1.dp, weatherBorderColor, CircleShape)
-                        .clickable {
-                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            onNavigate(AppScreen.HOME) // Always takes user to HOME
-                        },
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .padding(top = 12.dp, bottom = 0.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowBack,
-                        contentDescription = "Back",
-                        tint = weatherTextColor,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+                    val parentWidth = maxWidth
 
-                // Play/Pause & Skip buttons (Center Aligned, Hides when stop button expands)
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = !isStopExpanded,
-                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
-                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
-                    modifier = Modifier.align(Alignment.Center)
-                ) {
+                    // Back Button (Left Aligned)
                     Box(
                         modifier = Modifier
-                            .height(56.dp)
-                            .width(240.dp)
+                            .align(Alignment.CenterStart)
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(weatherBgColor)
+                            .border(1.dp, weatherBorderColor, CircleShape)
+                            .clickable {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                onNavigate(AppScreen.HOME) // Always takes user to HOME
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        // Left half (Play/Pause)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .width(119.dp)
-                                .align(Alignment.CenterStart)
-                        ) {
-                            val playPauseShape = RoundedCornerShape(
-                                topStart = 28.dp,
-                                bottomStart = 28.dp,
-                                topEnd = 8.dp,
-                                bottomEnd = 8.dp
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .height(56.dp)
-                                    .width(80.dp + playPauseExtraWidth.value.coerceAtLeast(0f).dp)
-                                    .align(Alignment.CenterEnd)
-                                    .clip(playPauseShape)
-                                    .background(weatherBgColor)
-                                    .border(1.dp, weatherBorderColor, playPauseShape)
-                                    .clickable {
-                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                        scope.launch {
-                                            playPauseExtraWidth.snapTo(0f)
-                                            playPauseExtraWidth.animateTo(
-                                                targetValue = 10f, // Premium subtle peak elongation
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioLowBouncy,
-                                                    stiffness = Spring.StiffnessMedium
-                                                )
-                                            )
-                                            playPauseExtraWidth.animateTo(
-                                                targetValue = 0f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                    stiffness = Spring.StiffnessMediumLow
-                                                )
-                                            )
-                                        }
-                                        if (isPlaying) {
-                                            exoPlayer.pause()
-                                        } else {
-                                            exoPlayer.play()
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
-                                    tint = weatherTextColor,
-                                    modifier = Modifier.size(26.dp) // Adjusted visual balance
-                                )
-                            }
-                        }
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = weatherTextColor,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
 
-                        // Right half (Skip)
+                    // Play/Pause & Skip buttons (Center Aligned, Hides when stop button expands)
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = !isStopExpanded,
+                        enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                        exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                        modifier = Modifier.align(Alignment.Center)
+                    ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxHeight()
-                                .width(119.dp)
-                                .align(Alignment.CenterEnd)
+                                .height(56.dp)
+                                .width(240.dp)
                         ) {
-                            val skipShape = RoundedCornerShape(
-                                topStart = 8.dp,
-                                bottomStart = 8.dp,
-                                topEnd = 28.dp,
-                                bottomEnd = 28.dp
-                            )
+                            // Left half (Play/Pause)
                             Box(
                                 modifier = Modifier
-                                    .height(56.dp)
-                                    .width(80.dp + skipExtraWidth.value.coerceAtLeast(0f).dp)
+                                    .fillMaxHeight()
+                                    .width(119.dp)
                                     .align(Alignment.CenterStart)
-                                    .clip(skipShape)
-                                    .background(weatherBgColor)
-                                    .border(1.dp, weatherBorderColor, skipShape)
-                                    .clickable {
-                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                        scope.launch {
-                                            skipExtraWidth.snapTo(0f)
-                                            skipExtraWidth.animateTo(
-                                                targetValue = 10f, // Premium subtle peak elongation
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioLowBouncy,
-                                                    stiffness = Spring.StiffnessMedium
-                                                )
-                                            )
-                                            skipExtraWidth.animateTo(
-                                                targetValue = 0f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                    stiffness = Spring.StiffnessMediumLow
-                                                )
-                                            )
-                                        }
-                                        if (exoPlayer.hasNextMediaItem()) {
-                                            exoPlayer.seekToNext()
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.SkipNext,
-                                    contentDescription = "Skip Next",
-                                    tint = weatherTextColor,
-                                    modifier = Modifier.size(26.dp) // Matched size for perfect balance
+                                val playPauseShape = RoundedCornerShape(
+                                    topStart = 28.dp,
+                                    bottomStart = 28.dp,
+                                    topEnd = 8.dp,
+                                    bottomEnd = 8.dp
                                 )
+                                Box(
+                                    modifier = Modifier
+                                        .height(56.dp)
+                                        .width(80.dp + playPauseExtraWidth.value.coerceAtLeast(0f).dp)
+                                        .align(Alignment.CenterEnd)
+                                        .clip(playPauseShape)
+                                        .background(weatherBgColor)
+                                        .border(1.dp, weatherBorderColor, playPauseShape)
+                                        .clickable {
+                                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                            scope.launch {
+                                                playPauseExtraWidth.snapTo(0f)
+                                                playPauseExtraWidth.animateTo(
+                                                    targetValue = 10f, // Premium subtle peak elongation
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                                        stiffness = Spring.StiffnessMedium
+                                                    )
+                                                )
+                                                playPauseExtraWidth.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                        stiffness = Spring.StiffnessMediumLow
+                                                    )
+                                                )
+                                            }
+                                            if (isPlaying) {
+                                                exoPlayer.pause()
+                                            } else {
+                                                exoPlayer.play()
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        contentDescription = if (isPlaying) "Pause" else "Play",
+                                        tint = weatherTextColor,
+                                        modifier = Modifier.size(26.dp) // Adjusted visual balance
+                                    )
+                                }
+                            }
+
+                            // Right half (Skip)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(119.dp)
+                                    .align(Alignment.CenterEnd)
+                            ) {
+                                val skipShape = RoundedCornerShape(
+                                    topStart = 8.dp,
+                                    bottomStart = 8.dp,
+                                    topEnd = 28.dp,
+                                    bottomEnd = 28.dp
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .height(56.dp)
+                                        .width(80.dp + skipExtraWidth.value.coerceAtLeast(0f).dp)
+                                        .align(Alignment.CenterStart)
+                                        .clip(skipShape)
+                                        .background(weatherBgColor)
+                                        .border(1.dp, weatherBorderColor, skipShape)
+                                        .clickable {
+                                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                            scope.launch {
+                                                skipExtraWidth.snapTo(0f)
+                                                skipExtraWidth.animateTo(
+                                                    targetValue = 10f, // Premium subtle peak elongation
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                                        stiffness = Spring.StiffnessMedium
+                                                    )
+                                                )
+                                                skipExtraWidth.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                        stiffness = Spring.StiffnessMediumLow
+                                                    )
+                                                )
+                                            }
+                                            if (exoPlayer.hasNextMediaItem()) {
+                                                exoPlayer.seekToNext()
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.SkipNext,
+                                        contentDescription = "Skip Next",
+                                        tint = weatherTextColor,
+                                        modifier = Modifier.size(26.dp) // Matched size for perfect balance
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                // Stop Button (Right Aligned, Expands on first click)
-                val stopButtonWidth by animateDpAsState(
-                    targetValue = if (isStopExpanded) parentWidth - 68.dp else 56.dp,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    ),
-                    label = "StopButtonWidth"
-                )
+                    // Stop Button (Right Aligned, Expands on first click)
+                    val stopButtonWidth by animateDpAsState(
+                        targetValue = if (isStopExpanded) parentWidth - 68.dp else 56.dp,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "StopButtonWidth"
+                    )
 
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .height(56.dp)
-                        .width(stopButtonWidth)
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(Color(0xFFFF0000))
-                        .clickable {
-                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            if (!isStopExpanded) {
-                                isStopExpanded = true
-                            } else {
-                                onStopRadio()
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .height(56.dp)
+                            .width(stopButtonWidth)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(Color(0xFFFF0000))
+                            .clickable {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                if (!isStopExpanded) {
+                                    isStopExpanded = true
+                                } else {
+                                    onStopRadio()
+                                }
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Stop",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        androidx.compose.animation.AnimatedVisibility(
-                            visible = isStopExpanded,
-                            enter = fadeIn() + expandHorizontally(),
-                            exit = fadeOut() + shrinkHorizontally()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
                         ) {
-                            Row {
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Stop",
-                                    color = Color.White,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Stop",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = isStopExpanded,
+                                enter = fadeIn() + expandHorizontally(),
+                                exit = fadeOut() + shrinkHorizontally()
+                            ) {
+                                Row {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Stop",
+                                        color = Color.White,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            if (activeTab == "none") {
+            if (isLandscape) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(top = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left half: Rotating vinyl disc and title/artist content under it
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            if (briefingArticle != null) {
+                                BriefingArticleCard(
+                                    article = briefingArticle,
+                                    textColor = textColor,
+                                    primaryColor = primaryColor,
+                                    onPrimaryColor = onPrimaryColor,
+                                    secondaryColor = secondaryColor,
+                                    onOpenArticle = {
+                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(briefingArticle.url))
+                                        context.startActivity(intent)
+                                    },
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+
+                            // Vinyl Disc
+                            Box(
+                                modifier = Modifier
+                                    .size(180.dp)
+                                    .pointerInput(hasNextTrack, hasPreviousTrack, swipeThresholdPx, swipeLimitPx) {
+                                        detectHorizontalDragGestures(
+                                            onDragStart = { isSwiping = true },
+                                            onDragEnd = {
+                                                scope.launch {
+                                                    if (swipeOffsetX.value < -swipeThresholdPx && hasNextTrack) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                        swipeOffsetX.animateTo(-swipeLimitPx, tween(200, easing = LinearOutSlowInEasing))
+                                                        exoPlayer.seekToNext()
+                                                        swipeOffsetX.snapTo(swipeLimitPx)
+                                                        swipeOffsetX.animateTo(0f, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow))
+                                                    } else if (swipeOffsetX.value > swipeThresholdPx && hasPreviousTrack) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                        swipeOffsetX.animateTo(swipeLimitPx, tween(200, easing = LinearOutSlowInEasing))
+                                                        exoPlayer.seekToPrevious()
+                                                        swipeOffsetX.snapTo(-swipeLimitPx)
+                                                        swipeOffsetX.animateTo(0f, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow))
+                                                    } else {
+                                                        swipeOffsetX.animateTo(0f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium))
+                                                    }
+                                                    isSwiping = false
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                scope.launch {
+                                                    swipeOffsetX.animateTo(0f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium))
+                                                    isSwiping = false
+                                                }
+                                            },
+                                            onHorizontalDrag = { change, dragAmount ->
+                                                change.consume()
+                                                scope.launch { swipeOffsetX.snapTo(swipeOffsetX.value + dragAmount) }
+                                            }
+                                        )
+                                    }
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        scope.launch {
+                                            artworkScale.animateTo(0.88f, tween(80, easing = LinearEasing))
+                                            artworkScale.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow))
+                                        }
+                                        if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            translationX = swipeOffsetX.value
+                                            rotationZ = rotation.value
+                                        }
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF181818)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(modifier = Modifier.size(155.dp).border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape))
+                                    Box(modifier = Modifier.size(125.dp).border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape))
+                                    val overlayAlpha by animateFloatAsState(
+                                        targetValue = if (artworkScale.value < 0.95f) 0.3f else 0f,
+                                        label = "ArtworkTapOverlay"
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(80.dp)
+                                            .graphicsLayer {
+                                                scaleX = artworkScale.value
+                                                scaleY = artworkScale.value
+                                            }
+                                            .clip(CircleShape)
+                                            .background(secondaryColor)
+                                    ) {
+                                        if (!currentSongArtwork.isNullOrEmpty()) {
+                                            AsyncImage(
+                                                model = currentSongArtwork,
+                                                contentDescription = "Vinyl Artwork",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                Text("🎵", fontSize = 24.sp)
+                                            }
+                                        }
+                                        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = overlayAlpha)))
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Song Title and Artist under it
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                            ) {
+                                Text(
+                                    text = currentSongTitle,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textColor,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (currentSongArtist.isNotEmpty()) currentSongArtist else "TuneSpark",
+                                    fontSize = 14.sp,
+                                    color = textColor.copy(alpha = 0.6f),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+
+                                if (isCommentaryEnabled && isMusicContextChecked) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(secondaryColor)
+                                            .clickable {
+                                                val viewLocal = view
+                                                val audioManagerLocal = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+                                                audioManagerLocal?.playSoundEffect(android.media.AudioManager.FX_KEY_CLICK, 1f)
+                                                viewLocal.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                                                val plainTextLyrics = lyricsLines.joinToString("\n") { it.text }
+                                                com.tunespark.music.PlaybackService.instance?.generateAndQueueMusicContextForCurrentSong(plainTextLyrics)
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.AutoAwesome,
+                                            contentDescription = "Generate Commentary",
+                                            tint = textColor,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Right half: Other content & buttons
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.TopStart
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.Start,
+                            verticalArrangement = Arrangement.Top
+                        ) {
+                            if (activeTab == "none") {
+                                // Top Buttons on the right half side of the screen
+                                BoxWithConstraints(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 12.dp, bottom = 16.dp)
+                                ) {
+                                    val parentWidth = maxWidth
+
+                                    // Back Button (Left Aligned)
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.CenterStart)
+                                            .size(56.dp)
+                                            .clip(CircleShape)
+                                            .background(weatherBgColor)
+                                            .border(1.dp, weatherBorderColor, CircleShape)
+                                            .clickable {
+                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                onNavigate(AppScreen.HOME) // Always takes user to HOME
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = weatherTextColor,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+
+                                    // Play/Pause & Skip buttons (Center Aligned, Hides when stop button expands)
+                                    androidx.compose.animation.AnimatedVisibility(
+                                        visible = !isStopExpanded,
+                                        enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                                        exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                                        modifier = Modifier.align(Alignment.Center)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .height(56.dp)
+                                                .width(240.dp)
+                                        ) {
+                                            // Left half (Play/Pause)
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxHeight()
+                                                    .width(119.dp)
+                                                    .align(Alignment.CenterStart)
+                                            ) {
+                                                val playPauseShape = RoundedCornerShape(
+                                                    topStart = 28.dp,
+                                                    bottomStart = 28.dp,
+                                                    topEnd = 8.dp,
+                                                    bottomEnd = 8.dp
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .height(56.dp)
+                                                        .width(80.dp + playPauseExtraWidth.value.coerceAtLeast(0f).dp)
+                                                        .align(Alignment.CenterEnd)
+                                                        .clip(playPauseShape)
+                                                        .background(weatherBgColor)
+                                                        .border(1.dp, weatherBorderColor, playPauseShape)
+                                                        .clickable {
+                                                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                            scope.launch {
+                                                                playPauseExtraWidth.snapTo(0f)
+                                                                playPauseExtraWidth.animateTo(
+                                                                    targetValue = 10f, // Premium subtle peak elongation
+                                                                    animationSpec = spring(
+                                                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                                                        stiffness = Spring.StiffnessMedium
+                                                                    )
+                                                                )
+                                                                playPauseExtraWidth.animateTo(
+                                                                    targetValue = 0f,
+                                                                    animationSpec = spring(
+                                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                                        stiffness = Spring.StiffnessMediumLow
+                                                                    )
+                                                                )
+                                                            }
+                                                            if (isPlaying) {
+                                                                exoPlayer.pause()
+                                                            } else {
+                                                                exoPlayer.play()
+                                                            }
+                                                        },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                                        contentDescription = if (isPlaying) "Pause" else "Play",
+                                                        tint = weatherTextColor,
+                                                        modifier = Modifier.size(26.dp) // Adjusted visual balance
+                                                    )
+                                                }
+                                            }
+
+                                            // Right half (Skip)
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxHeight()
+                                                    .width(119.dp)
+                                                    .align(Alignment.CenterEnd)
+                                            ) {
+                                                val skipShape = RoundedCornerShape(
+                                                    topStart = 8.dp,
+                                                    bottomStart = 8.dp,
+                                                    topEnd = 28.dp,
+                                                    bottomEnd = 28.dp
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .height(56.dp)
+                                                        .width(80.dp + skipExtraWidth.value.coerceAtLeast(0f).dp)
+                                                        .align(Alignment.CenterStart)
+                                                        .clip(skipShape)
+                                                        .background(weatherBgColor)
+                                                        .border(1.dp, weatherBorderColor, skipShape)
+                                                        .clickable {
+                                                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                            scope.launch {
+                                                                skipExtraWidth.snapTo(0f)
+                                                                skipExtraWidth.animateTo(
+                                                                    targetValue = 10f, // Premium subtle peak elongation
+                                                                    animationSpec = spring(
+                                                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                                                        stiffness = Spring.StiffnessMedium
+                                                                    )
+                                                                )
+                                                                skipExtraWidth.animateTo(
+                                                                    targetValue = 0f,
+                                                                    animationSpec = spring(
+                                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                                        stiffness = Spring.StiffnessMediumLow
+                                                                    )
+                                                                )
+                                                            }
+                                                            if (exoPlayer.hasNextMediaItem()) {
+                                                                exoPlayer.seekToNext()
+                                                            }
+                                                        },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.SkipNext,
+                                                        contentDescription = "Skip Next",
+                                                        tint = weatherTextColor,
+                                                        modifier = Modifier.size(26.dp) // Matched size for perfect balance
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Stop Button (Right Aligned, Expands on first click)
+                                    val stopButtonWidth by animateDpAsState(
+                                        targetValue = if (isStopExpanded) parentWidth - 68.dp else 56.dp,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        ),
+                                        label = "StopButtonWidth"
+                                    )
+
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.CenterEnd)
+                                            .height(56.dp)
+                                            .width(stopButtonWidth)
+                                            .clip(RoundedCornerShape(28.dp))
+                                            .background(Color(0xFFFF0000))
+                                            .clickable {
+                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                if (!isStopExpanded) {
+                                                    isStopExpanded = true
+                                                } else {
+                                                    onStopRadio()
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Stop",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                            androidx.compose.animation.AnimatedVisibility(
+                                                visible = isStopExpanded,
+                                                enter = fadeIn() + expandHorizontally(),
+                                                exit = fadeOut() + shrinkHorizontally()
+                                            ) {
+                                                Row {
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = "Stop",
+                                                        color = Color.White,
+                                                        fontSize = 18.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Music Progress Slider and Times
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Slider(
+                                        value = currentPosition.toFloat().coerceIn(0f, if (duration > 0) duration.toFloat() else 1f),
+                                        onValueChange = { newValue ->
+                                            currentPosition = newValue.toLong()
+                                            exoPlayer.seekTo(currentPosition)
+                                        },
+                                        valueRange = 0f..(if (duration > 0) duration.toFloat() else 1f),
+                                        colors = SliderDefaults.colors(
+                                            activeTrackColor = primaryColor,
+                                            inactiveTrackColor = secondaryColor,
+                                            thumbColor = primaryColor
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = formatDuration(currentPosition),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = textColor.copy(alpha = 0.6f)
+                                        )
+                                        Text(
+                                            text = formatDuration(duration),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = textColor.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
+                                // Tab Selector (Left Aligned on Right Half)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(40.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.Start),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .height(40.dp)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(secondaryColor)
+                                            .clickable {
+                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                activeTab = "lyrics"
+                                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, "lyrics")
+                                            }
+                                            .padding(horizontal = 20.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Lyrics",
+                                            color = onSecondaryColor,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .height(40.dp)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(secondaryColor)
+                                            .clickable {
+                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                activeTab = "queue"
+                                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, "queue")
+                                            }
+                                            .padding(horizontal = 20.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Up Next",
+                                            color = onSecondaryColor,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            } else {
+                                // lyrics or queue is expanded.
+                                Column(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalAlignment = Alignment.Start,
+                                    verticalArrangement = Arrangement.Top
+                                ) {
+                                    // Tab Selector visible at the top so user can switch or close (Left Aligned on Right Half)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .height(40.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.Start),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .height(40.dp)
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
+                                                .clickable {
+                                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                    val newTab = if (activeTab == "lyrics") "none" else "lyrics"
+                                                    activeTab = newTab
+                                                    com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                                                }
+                                                .padding(horizontal = 16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "Lyrics",
+                                                color = if (activeTab == "lyrics") onPrimaryColor else onSecondaryColor,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .height(40.dp)
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .background(if (activeTab == "queue") primaryColor else secondaryColor)
+                                                .clickable {
+                                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                    val newTab = if (activeTab == "queue") "none" else "queue"
+                                                    activeTab = newTab
+                                                    com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                                                }
+                                                .padding(horizontal = 16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "Up Next",
+                                                color = if (activeTab == "queue") onPrimaryColor else onSecondaryColor,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    if (activeTab == "lyrics") {
+                                        LyricsView(Modifier.fillMaxWidth().weight(1f))
+                                    } else {
+                                        QueueView(Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (activeTab == "none") {
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .then(if (isLandscape) Modifier.verticalScroll(nowPlayingScrollState) else Modifier),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -982,7 +2239,7 @@ fun RadioScreen(
                             color = textColor.copy(alpha = 0.6f),
                             textAlign = TextAlign.Center
                         )
-                        
+
                         if (isCommentaryEnabled && isMusicContextChecked) {
                             Spacer(modifier = Modifier.height(14.dp))
                             Box(
@@ -1318,448 +2575,448 @@ fun RadioScreen(
 
                 // 5. Content Area (Lyrics or Queue)
                 if (activeTab == "lyrics") {
-                if (isLyricsLoading) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = primaryColor)
-                    }
-                } else {
-                    var isAutoScrolling by remember { mutableStateOf(false) }
-                    var userHasScrolledAway by remember { mutableStateOf(false) }
+                    if (isLyricsLoading) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = primaryColor)
+                        }
+                    } else {
+                        var isAutoScrolling by remember { mutableStateOf(false) }
+                        var userHasScrolledAway by remember { mutableStateOf(false) }
 
-                    val activeInSight by remember(activeLyricIndex) {
-                        derivedStateOf {
-                            if (activeLyricIndex < 0 || lyricsLines.isEmpty()) {
-                                true
-                            } else {
-                                listState.layoutInfo.visibleItemsInfo.any { it.index == activeLyricIndex }
+                        val activeInSight by remember(activeLyricIndex) {
+                            derivedStateOf {
+                                if (activeLyricIndex < 0 || lyricsLines.isEmpty()) {
+                                    true
+                                } else {
+                                    listState.layoutInfo.visibleItemsInfo.any { it.index == activeLyricIndex }
+                                }
                             }
                         }
-                    }
 
-                    LaunchedEffect(activeInSight, listState.isScrollInProgress) {
-                        if (activeInSight) {
-                            userHasScrolledAway = false
-                        } else if (listState.isScrollInProgress && !isAutoScrolling) {
-                            userHasScrolledAway = true
+                        LaunchedEffect(activeInSight, listState.isScrollInProgress) {
+                            if (activeInSight) {
+                                userHasScrolledAway = false
+                            } else if (listState.isScrollInProgress && !isAutoScrolling) {
+                                userHasScrolledAway = true
+                            }
                         }
-                    }
 
-                    val isPlaybackDone = remember(exoPlayer.playbackState, isPlaying, currentPosition, duration) {
-                        exoPlayer.playbackState == Player.STATE_ENDED || (!isPlaying && currentPosition >= duration - 1000 && duration > 0)
-                    }
-
-                    LaunchedEffect(isPlaybackDone) {
-                        if (isPlaybackDone) {
-                            listState.animateScrollToItem(0)
+                        val isPlaybackDone = remember(exoPlayer.playbackState, isPlaying, currentPosition, duration) {
+                            exoPlayer.playbackState == Player.STATE_ENDED || (!isPlaying && currentPosition >= duration - 1000 && duration > 0)
                         }
-                    }
 
-                    LaunchedEffect(activeLyricIndex) {
-                        if (!userHasScrolledAway && activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
-                            val targetOffset = -10
-                            val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                            if (initialVisibleItem == null) {
-                                // If the item is not visible at all (e.g. initial load or far seek click),
-                                // snap to it instantly so there's no jarring jump, then it's in view for tracking
-                                listState.scrollToItem(activeLyricIndex, targetOffset)
-                            } else {
-                                // If the item is already visible, perform a buttery-smooth chase scroll.
-                                // It runs inside a scroll session and continuously calculates the item's live offset
-                                // during expansion/shrinks, guaranteeing 0% overshoot or bounciness glitches.
-                                isAutoScrolling = true
-                                try {
-                                    listState.scroll {
-                                        var lastValue = 0f
-                                        animate(
-                                            initialValue = 0f,
-                                            targetValue = 1f,
-                                            animationSpec = tween(
-                                                durationMillis = 600,
-                                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                            )
-                                        ) { currentValue, _ ->
-                                            val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                                            if (visibleItem != null) {
-                                                val currentOffset = visibleItem.offset
-                                                val remainingDelta = currentOffset - targetOffset
+                        LaunchedEffect(isPlaybackDone) {
+                            if (isPlaybackDone) {
+                                listState.animateScrollToItem(0)
+                            }
+                        }
 
-                                                val denominator = 1f - lastValue
-                                                val stepFraction = if (denominator > 0.001f) {
-                                                    (currentValue - lastValue) / denominator
-                                                } else {
-                                                    1f
+                        LaunchedEffect(activeLyricIndex) {
+                            if (!userHasScrolledAway && activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
+                                val targetOffset = -10
+                                val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                                if (initialVisibleItem == null) {
+                                    // If the item is not visible at all (e.g. initial load or far seek click),
+                                    // snap to it instantly so there's no jarring jump, then it's in view for tracking
+                                    listState.scrollToItem(activeLyricIndex, targetOffset)
+                                } else {
+                                    // If the item is already visible, perform a buttery-smooth chase scroll.
+                                    // It runs inside a scroll session and continuously calculates the item's live offset
+                                    // during expansion/shrinks, guaranteeing 0% overshoot or bounciness glitches.
+                                    isAutoScrolling = true
+                                    try {
+                                        listState.scroll {
+                                            var lastValue = 0f
+                                            animate(
+                                                initialValue = 0f,
+                                                targetValue = 1f,
+                                                animationSpec = tween(
+                                                    durationMillis = 600,
+                                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                                )
+                                            ) { currentValue, _ ->
+                                                val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                                                if (visibleItem != null) {
+                                                    val currentOffset = visibleItem.offset
+                                                    val remainingDelta = currentOffset - targetOffset
+
+                                                    val denominator = 1f - lastValue
+                                                    val stepFraction = if (denominator > 0.001f) {
+                                                        (currentValue - lastValue) / denominator
+                                                    } else {
+                                                        1f
+                                                    }
+                                                    val scrollAmount = remainingDelta * stepFraction
+
+                                                    scrollBy(scrollAmount)
+                                                    lastValue = currentValue
                                                 }
-                                                val scrollAmount = remainingDelta * stepFraction
+                                            }
+                                        }
+                                    } finally {
+                                        isAutoScrolling = false
+                                    }
+                                }
+                            }
+                        }
 
-                                                scrollBy(scrollAmount)
-                                                lastValue = currentValue
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        ) {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(top = 24.dp, bottom = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                itemsIndexed(lyricsLines) { index, line ->
+                                    val isPlaceholder = lyricsLines.size == 1 &&
+                                            (line.text.startsWith("No lyrics") ||
+                                                    line.text.startsWith("Could not") ||
+                                                    line.text.startsWith("No track"))
+
+                                    val isActive = index == activeLyricIndex
+
+                                    val targetAlpha = when {
+                                        isPlaceholder -> 0.5f
+                                        isActive -> 1f
+                                        activeLyricIndex == -1 -> {
+                                            when {
+                                                index < 2 -> 1f
+                                                index in 2..4 -> 0.9f
+                                                index in 5..7 -> 0.75f
+                                                index in 8..10 -> 0.6f
+                                                else -> 0.45f
+                                            }
+                                        }
+                                        else -> {
+                                            val distance = kotlin.math.abs(index - activeLyricIndex)
+                                            when {
+                                                distance == 1 -> 0.85f
+                                                distance == 2 -> 0.7f
+                                                distance == 3 -> 0.55f
+                                                else -> 0.4f
                                             }
                                         }
                                     }
-                                } finally {
-                                    isAutoScrolling = false
+
+                                    val animatedAlpha by animateFloatAsState(
+                                        targetValue = targetAlpha,
+                                        animationSpec = tween(
+                                            durationMillis = 350,
+                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                        ),
+                                        label = "LyricAlpha"
+                                    )
+
+                                    val activeFraction by animateFloatAsState(
+                                        targetValue = if (isActive || (activeLyricIndex == -1 && index < 2 && !isPlaceholder)) 1f else 0f,
+                                        animationSpec = tween(
+                                            durationMillis = 350,
+                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                        ),
+                                        label = "LyricScale"
+                                    )
+
+                                    val fontSize = (21f + 5f * activeFraction).sp
+                                    val lineHeight = (30f + 6f * activeFraction).sp
+                                    val fontWeight = FontWeight.Bold
+
+                                    val widthFraction by animateFloatAsState(
+                                        targetValue = when {
+                                            isPlaceholder -> 1f
+                                            isActive -> 1f
+                                            activeLyricIndex == -1 && index < 2 -> 1f
+                                            else -> 0.78f
+                                        },
+                                        animationSpec = tween(
+                                            durationMillis = 350,
+                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                        ),
+                                        label = "LyricWidth"
+                                    )
+
+                                    val verticalPadding by animateDpAsState(
+                                        targetValue = when {
+                                            isPlaceholder -> 0.dp
+                                            isActive -> 10.dp
+                                            activeLyricIndex == -1 && index < 2 -> 10.dp
+                                            else -> 0.dp
+                                        },
+                                        animationSpec = tween(
+                                            durationMillis = 350,
+                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
+                                        ),
+                                        label = "LyricPadding"
+                                    )
+
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        Text(
+                                            text = line.text,
+                                            color = textColor.copy(alpha = animatedAlpha),
+                                            fontSize = fontSize,
+                                            fontWeight = fontWeight,
+                                            lineHeight = lineHeight,
+                                            style = LocalTextStyle.current.copy(
+                                                lineHeightStyle = LineHeightStyle(
+                                                    alignment = LineHeightStyle.Alignment.Center,
+                                                    trim = LineHeightStyle.Trim.None
+                                                )
+                                            ),
+                                            modifier = Modifier
+                                                .fillMaxWidth(widthFraction)
+                                                .padding(vertical = verticalPadding)
+                                                .then(
+                                                    if (!isPlaceholder && line.timestampMs >= 0) {
+                                                        Modifier.clickable {
+                                                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                            exoPlayer.seekTo(line.timestampMs)
+                                                            currentPosition = line.timestampMs
+                                                        }
+                                                    } else {
+                                                        Modifier
+                                                    }
+                                                ),
+                                            textAlign = if (isPlaceholder) TextAlign.Center else TextAlign.Start
+                                        )
+                                    }
+                                }
+
+                                if (lyricsLines.size > 1) {
+                                    item {
+                                        Spacer(modifier = Modifier.fillParentMaxHeight(0.85f))
+                                    }
+                                }
+                            }
+
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = userHasScrolledAway && activeLyricIndex >= 0,
+                                enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
+                                exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 24.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        userHasScrolledAway = false
+                                        scope.launch {
+                                            if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
+                                                val targetOffset = -10
+                                                isAutoScrolling = true
+                                                try {
+                                                    val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
+                                                    if (initialVisibleItem == null) {
+                                                        listState.scrollToItem(activeLyricIndex, targetOffset)
+                                                    } else {
+                                                        listState.animateScrollToItem(activeLyricIndex, targetOffset)
+                                                    }
+                                                } finally {
+                                                    isAutoScrolling = false
+                                                }
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = primaryColor,
+                                        contentColor = onPrimaryColor
+                                    ),
+                                    shape = RoundedCornerShape(20.dp),
+                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "Sync",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
                     }
-
-                    Box(
+                } else {
+                    LazyColumn(
+                        state = queueListState,
+                        userScrollEnabled = draggedId == null,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                    ) {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 24.dp, bottom = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                        itemsIndexed(lyricsLines) { index, line ->
-                            val isPlaceholder = lyricsLines.size == 1 &&
-                                    (line.text.startsWith("No lyrics") ||
-                                            line.text.startsWith("Could not") ||
-                                            line.text.startsWith("No track"))
-
-                            val isActive = index == activeLyricIndex
-
-                            val targetAlpha = when {
-                                isPlaceholder -> 0.5f
-                                isActive -> 1f
-                                activeLyricIndex == -1 -> {
-                                    when {
-                                        index < 2 -> 1f
-                                        index in 2..4 -> 0.9f
-                                        index in 5..7 -> 0.75f
-                                        index in 8..10 -> 0.6f
-                                        else -> 0.45f
-                                    }
-                                }
-                                else -> {
-                                    val distance = kotlin.math.abs(index - activeLyricIndex)
-                                    when {
-                                        distance == 1 -> 0.85f
-                                        distance == 2 -> 0.7f
-                                        distance == 3 -> 0.55f
-                                        else -> 0.4f
-                                    }
-                                }
-                            }
-
-                            val animatedAlpha by animateFloatAsState(
-                                targetValue = targetAlpha,
-                                animationSpec = tween(
-                                    durationMillis = 350,
-                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                ),
-                                label = "LyricAlpha"
-                            )
-
-                            val activeFraction by animateFloatAsState(
-                                targetValue = if (isActive || (activeLyricIndex == -1 && index < 2 && !isPlaceholder)) 1f else 0f,
-                                animationSpec = tween(
-                                    durationMillis = 350,
-                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                ),
-                                label = "LyricScale"
-                            )
-
-                            val fontSize = (21f + 5f * activeFraction).sp
-                            val lineHeight = (30f + 6f * activeFraction).sp
-                            val fontWeight = FontWeight.Bold
-
-                            val widthFraction by animateFloatAsState(
-                                targetValue = when {
-                                    isPlaceholder -> 1f
-                                    isActive -> 1f
-                                    activeLyricIndex == -1 && index < 2 -> 1f
-                                    else -> 0.78f
-                                },
-                                animationSpec = tween(
-                                    durationMillis = 350,
-                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                ),
-                                label = "LyricWidth"
-                            )
-
-                            val verticalPadding by animateDpAsState(
-                                targetValue = when {
-                                    isPlaceholder -> 0.dp
-                                    isActive -> 10.dp
-                                    activeLyricIndex == -1 && index < 2 -> 10.dp
-                                    else -> 0.dp
-                                },
-                                animationSpec = tween(
-                                    durationMillis = 350,
-                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                ),
-                                label = "LyricPadding"
-                            )
-
-                            Box(
-                                modifier = Modifier.fillMaxWidth(),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    text = line.text,
-                                    color = textColor.copy(alpha = animatedAlpha),
-                                    fontSize = fontSize,
-                                    fontWeight = fontWeight,
-                                    lineHeight = lineHeight,
-                                    style = LocalTextStyle.current.copy(
-                                        lineHeightStyle = LineHeightStyle(
-                                            alignment = LineHeightStyle.Alignment.Center,
-                                            trim = LineHeightStyle.Trim.None
-                                        )
-                                    ),
-                                    modifier = Modifier
-                                        .fillMaxWidth(widthFraction)
-                                        .padding(vertical = verticalPadding)
-                                        .then(
-                                            if (!isPlaceholder && line.timestampMs >= 0) {
-                                                Modifier.clickable {
-                                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                    exoPlayer.seekTo(line.timestampMs)
-                                                    currentPosition = line.timestampMs
-                                                }
-                                            } else {
-                                                Modifier
-                                            }
-                                        ),
-                                    textAlign = if (isPlaceholder) TextAlign.Center else TextAlign.Start
-                                )
-                            }
-                        }
-
-                        if (lyricsLines.size > 1) {
-                            item {
-                                Spacer(modifier = Modifier.fillParentMaxHeight(0.85f))
-                            }
-                        }
-                    }
-
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = userHasScrolledAway && activeLyricIndex >= 0,
-                        enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
-                        exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 24.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                userHasScrolledAway = false
-                                scope.launch {
-                                    if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
-                                        val targetOffset = -10
-                                        isAutoScrolling = true
-                                        try {
-                                            val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                                            if (initialVisibleItem == null) {
-                                                listState.scrollToItem(activeLyricIndex, targetOffset)
-                                            } else {
-                                                listState.animateScrollToItem(activeLyricIndex, targetOffset)
-                                            }
-                                        } finally {
-                                            isAutoScrolling = false
+                            .padding(vertical = 8.dp)
+                            .pointerInput(localQueue) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { startOffset ->
+                                        val layoutInfo = queueListState.layoutInfo
+                                        val clickedItem = layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                                            startOffset.y >= item.offset && startOffset.y <= (item.offset + item.size)
                                         }
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = primaryColor,
-                                contentColor = onPrimaryColor
-                            ),
-                            shape = RoundedCornerShape(20.dp),
-                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
-                        ) {
-                            Text(
-                                text = "Sync",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-                LazyColumn(
-                    state = queueListState,
-                    userScrollEnabled = draggedId == null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(vertical = 8.dp)
-                        .pointerInput(localQueue) {
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = { startOffset ->
-                                    val layoutInfo = queueListState.layoutInfo
-                                    val clickedItem = layoutInfo.visibleItemsInfo.firstOrNull { item ->
-                                        startOffset.y >= item.offset && startOffset.y <= (item.offset + item.size)
-                                    }
-                                    if (clickedItem != null) {
-                                        draggedId = clickedItem.key as? String
-                                        currentTouchY = startOffset.y
+                                        if (clickedItem != null) {
+                                            draggedId = clickedItem.key as? String
+                                            currentTouchY = startOffset.y
+                                            dragOffset = 0f
+                                            val originalIdx = localQueue.indexOfFirst { it.mediaId == draggedId }
+                                            if (originalIdx != -1) {
+                                                hoverIndex = originalIdx
+                                                triggerVibration(120) // hardware-level long-press physical grab vibration
+                                            }
+                                        }
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        dragOffset += dragAmount.y
+                                        currentTouchY = change.position.y
+                                        updateHoverIndex()
+                                    },
+                                    onDragEnd = {
+                                        val originalIdx = playQueue.indexOfFirst { it.mediaId == draggedId }
+                                        if (originalIdx != -1 && hoverIndex != -1) {
+                                            val targetIdx = if (hoverIndex < originalIdx) {
+                                                hoverIndex
+                                            } else if (hoverIndex > originalIdx) {
+                                                hoverIndex - 1
+                                            } else {
+                                                originalIdx
+                                            }
+                                            if (targetIdx != originalIdx) {
+                                                exoPlayer.moveMediaItem(originalIdx, targetIdx)
+                                            }
+                                        }
+                                        draggedId = null
+                                        hoverIndex = -1
                                         dragOffset = 0f
-                                        val originalIdx = localQueue.indexOfFirst { it.mediaId == draggedId }
-                                        if (originalIdx != -1) {
-                                            hoverIndex = originalIdx
-                                            triggerVibration(120) // hardware-level long-press physical grab vibration
+                                        currentTouchY = 0f
+                                    },
+                                    onDragCancel = {
+                                        val originalIdx = playQueue.indexOfFirst { it.mediaId == draggedId }
+                                        if (originalIdx != -1 && hoverIndex != -1) {
+                                            val targetIdx = if (hoverIndex < originalIdx) {
+                                                hoverIndex
+                                            } else if (hoverIndex > originalIdx) {
+                                                hoverIndex - 1
+                                            } else {
+                                                originalIdx
+                                            }
+                                            if (targetIdx != originalIdx) {
+                                                exoPlayer.moveMediaItem(originalIdx, targetIdx)
+                                            }
                                         }
+                                        draggedId = null
+                                        hoverIndex = -1
+                                        dragOffset = 0f
+                                        currentTouchY = 0f
                                     }
-                                },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    dragOffset += dragAmount.y
-                                    currentTouchY = change.position.y
-                                    updateHoverIndex()
-                                },
-                                onDragEnd = {
-                                    val originalIdx = playQueue.indexOfFirst { it.mediaId == draggedId }
-                                    if (originalIdx != -1 && hoverIndex != -1) {
-                                        val targetIdx = if (hoverIndex < originalIdx) {
-                                            hoverIndex
-                                        } else if (hoverIndex > originalIdx) {
-                                            hoverIndex - 1
-                                        } else {
-                                            originalIdx
-                                        }
-                                        if (targetIdx != originalIdx) {
-                                            exoPlayer.moveMediaItem(originalIdx, targetIdx)
-                                        }
-                                    }
-                                    draggedId = null
-                                    hoverIndex = -1
-                                    dragOffset = 0f
-                                    currentTouchY = 0f
-                                },
-                                onDragCancel = {
-                                    val originalIdx = playQueue.indexOfFirst { it.mediaId == draggedId }
-                                    if (originalIdx != -1 && hoverIndex != -1) {
-                                        val targetIdx = if (hoverIndex < originalIdx) {
-                                            hoverIndex
-                                        } else if (hoverIndex > originalIdx) {
-                                            hoverIndex - 1
-                                        } else {
-                                            originalIdx
-                                        }
-                                        if (targetIdx != originalIdx) {
-                                            exoPlayer.moveMediaItem(originalIdx, targetIdx)
-                                        }
-                                    }
-                                    draggedId = null
-                                    hoverIndex = -1
-                                    dragOffset = 0f
-                                    currentTouchY = 0f
-                                }
-                            )
-                        },
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    itemsIndexed(localQueue, key = { index, item -> item.mediaId }) { index, item ->
-                        val isCurrent = item.mediaId == (playQueue.getOrNull(currentTrackIndex)?.mediaId ?: "")
-                        val isCommentary = item.mediaId.startsWith("commentary_")
+                                )
+                            },
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        itemsIndexed(localQueue, key = { index, item -> item.mediaId }) { index, item ->
+                            val isCurrent = item.mediaId == (playQueue.getOrNull(currentTrackIndex)?.mediaId ?: "")
+                            val isCommentary = item.mediaId.startsWith("commentary_")
 
-                        val title = item.mediaMetadata.title?.toString() ?: "Unknown Song"
-                        val artist = item.mediaMetadata.artist?.toString() ?: "Unknown Artist"
-                        val artworkUri = item.mediaMetadata.artworkUri
+                            val title = item.mediaMetadata.title?.toString() ?: "Unknown Song"
+                            val artist = item.mediaMetadata.artist?.toString() ?: "Unknown Artist"
+                            val artworkUri = item.mediaMetadata.artworkUri
 
-                        val isDragged = item.mediaId == draggedId
-                        val translationY = if (isDragged) dragOffset else 0f
-                        val zIndexValue = if (isDragged) 10f else 1f
+                            val isDragged = item.mediaId == draggedId
+                            val translationY = if (isDragged) dragOffset else 0f
+                            val zIndexValue = if (isDragged) 10f else 1f
 
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            // Highlightable line before the item
-                            DropIndicatorLine(isHighlighted = draggedId != null && hoverIndex == index)
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                // Highlightable line before the item
+                                DropIndicatorLine(isHighlighted = draggedId != null && hoverIndex == index)
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .zIndex(zIndexValue)
-                                    .graphicsLayer {
-                                        this.translationY = translationY
-                                        this.scaleX = if (isDragged) 1.05f else 1f
-                                        this.scaleY = if (isDragged) 1.05f else 1f
-                                        this.shadowElevation = if (isDragged) with(localDensity) { 8.dp.toPx() } else 0f
-                                    }
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isCurrent) secondaryColor else if (isDragged) secondaryColor.copy(alpha = 0.15f) else Color.Transparent)
-                                    .clickable(enabled = draggedId == null) {
-                                        exoPlayer.seekToDefaultPosition(index)
-                                    }
-                                    .padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-
-                                Box(
+                                Row(
                                     modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(secondaryColor)
+                                        .fillMaxWidth()
+                                        .zIndex(zIndexValue)
+                                        .graphicsLayer {
+                                            this.translationY = translationY
+                                            this.scaleX = if (isDragged) 1.05f else 1f
+                                            this.scaleY = if (isDragged) 1.05f else 1f
+                                            this.shadowElevation = if (isDragged) with(localDensity) { 8.dp.toPx() } else 0f
+                                        }
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isCurrent) secondaryColor else if (isDragged) secondaryColor.copy(alpha = 0.15f) else Color.Transparent)
+                                        .clickable(enabled = draggedId == null) {
+                                            exoPlayer.seekToDefaultPosition(index)
+                                        }
+                                        .padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (isCommentary) {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("✨", fontSize = 20.sp)
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(secondaryColor)
+                                    ) {
+                                        if (isCommentary) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("✨", fontSize = 20.sp)
+                                            }
+                                        } else if (artworkUri != null) {
+                                            AsyncImage(
+                                                model = artworkUri.toString(),
+                                                contentDescription = "Queue Artwork",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("🎵", fontSize = 20.sp)
+                                            }
                                         }
-                                    } else if (artworkUri != null) {
-                                        AsyncImage(
-                                            model = artworkUri.toString(),
-                                            contentDescription = "Queue Artwork",
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    Column(
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = title,
+                                            fontSize = 15.sp,
+                                            fontWeight = if (isCurrent) FontWeight.Medium else FontWeight.Normal,
+                                            color = if (isCommentary) Color(0xFF5856D6) else textColor,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("🎵", fontSize = 20.sp)
-                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = artist,
+                                            fontSize = 12.sp,
+                                            color = textColor.copy(alpha = 0.6f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                Column(
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = title,
-                                        fontSize = 15.sp,
-                                        fontWeight = if (isCurrent) FontWeight.Medium else FontWeight.Normal,
-                                        color = if (isCommentary) Color(0xFF5856D6) else textColor,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = artist,
-                                        fontSize = 12.sp,
-                                        color = textColor.copy(alpha = 0.6f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                if (index == localQueue.size - 1) {
+                                    DropIndicatorLine(isHighlighted = draggedId != null && hoverIndex == localQueue.size)
                                 }
-                            }
-
-                            if (index == localQueue.size - 1) {
-                                DropIndicatorLine(isHighlighted = draggedId != null && hoverIndex == localQueue.size)
                             }
                         }
                     }
                 }
-            }
             } // closes the else block of activeTab == "none"
         }
     }
@@ -1854,4 +3111,3 @@ private fun BriefingArticleCard(
         }
     }
 }
-
