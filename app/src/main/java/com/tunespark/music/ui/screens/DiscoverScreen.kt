@@ -417,7 +417,7 @@ private fun ArticleCardWithSummary(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                val isDarkTheme = isSystemInDarkTheme()
+                val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
                 val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
                 val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
                 val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)

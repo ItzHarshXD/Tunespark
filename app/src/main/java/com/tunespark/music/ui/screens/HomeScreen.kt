@@ -327,7 +327,7 @@ fun HomeScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                val isDarkTheme = isSystemInDarkTheme()
+                                val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
                                 val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
                                 val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
                                 val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
@@ -402,7 +402,7 @@ fun HomeScreen(
                                 if (locationEnabled) {
                                     Spacer(modifier = Modifier.width(16.dp))
 
-                                    val isDarkTheme = isSystemInDarkTheme()
+                                    val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
                                     val offWhiteColor = Color(0xFFF2F2F5)
                                     val offBlackColor = Color(0xFF16161A)
                                     val weatherBgColor = if (isDarkTheme) offBlackColor else offWhiteColor
@@ -958,7 +958,7 @@ fun BottomDock(
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
     }
 
-    val isDark = isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.background == Color.Black
     val dockBgColor = if (isDark) Color(0xFF141414) else Color(0xFFF2F2F5)
     val dockContentColor = if (isDark) Color.White else Color.Black
 
@@ -1584,7 +1584,7 @@ fun CommunityPlaylistCard(
     val playlist = data.playlist
     val songs = data.songs
 
-    val isDark = isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.background == Color.Black
     val cardBg = if (isDark) Color(0xFF141414) else Color(0xFFF7F7F7)
     val cardBorderColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.08f)
 
@@ -2230,7 +2230,7 @@ fun QuickPicksView(
             )
 
             if (songs.isNotEmpty() && !isLoading) {
-                val isDarkTheme = isSystemInDarkTheme()
+                val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
                 val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
                 val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
                 val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
@@ -2462,7 +2462,7 @@ fun DiscoverView(
                 fontWeight = FontWeight.Bold
             )
 
-            val isDarkTheme = isSystemInDarkTheme()
+            val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
             val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
             val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
             val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
@@ -2601,7 +2601,7 @@ fun DiscoverCard(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            val isDarkTheme = isSystemInDarkTheme()
+            val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
             val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
             val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
             val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
@@ -2667,7 +2667,7 @@ fun RecentsView(
                 fontWeight = FontWeight.Bold
             )
 
-            val isDarkTheme = isSystemInDarkTheme()
+            val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
             val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
             val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
             val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
