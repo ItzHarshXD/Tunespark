@@ -92,8 +92,16 @@ class PlaybackService : MediaSessionService() {
 
             override fun onPlayerError(error: PlaybackException) {
                 val currentItem = exoPlayer.currentMediaItem
-                if (currentItem != null && isUnresolvedMediaItem(currentItem)) {
-                    resolveCurrentMediaItem(exoPlayer, currentItem.mediaId)
+                if (currentItem != null) {
+                    if (isUnresolvedMediaItem(currentItem)) {
+                        resolveCurrentMediaItem(exoPlayer, currentItem.mediaId)
+                    } else {
+                        android.util.Log.e(PLAYBACK_SERVICE_TAG, "Playback error on resolved item: ${currentItem.mediaId}, error: ${error.message}", error)
+                        serviceScope.launch(Dispatchers.Main) {
+                            Toast.makeText(this@PlaybackService, "Playback error, skipping song...", Toast.LENGTH_SHORT).show()
+                            skipCurrentMediaItem(exoPlayer)
+                        }
+                    }
                 }
             }
         })
@@ -376,7 +384,30 @@ class PlaybackService : MediaSessionService() {
                 }
             } else {
                 android.util.Log.e(PLAYBACK_SERVICE_TAG, "resolveCurrentMediaItem failed to resolve URL for videoId: $videoId")
+                withContext(Dispatchers.Main) {
+                    val currentIndex = exoPlayer.currentMediaItemIndex
+                    if (currentIndex < exoPlayer.mediaItemCount && exoPlayer.getMediaItemAt(currentIndex).mediaId == videoId) {
+                        Toast.makeText(this@PlaybackService, "Failed to resolve stream for this song. Skipping...", Toast.LENGTH_SHORT).show()
+                        skipCurrentMediaItem(exoPlayer)
+                    }
+                }
             }
+        }
+    }
+
+    private fun skipCurrentMediaItem(exoPlayer: ExoPlayer) {
+        val currentIndex = exoPlayer.currentMediaItemIndex
+        if (currentIndex < 0 || currentIndex >= exoPlayer.mediaItemCount) return
+        
+        if (exoPlayer.hasNextMediaItem()) {
+            exoPlayer.seekToNextMediaItem()
+            exoPlayer.removeMediaItem(currentIndex)
+            exoPlayer.prepare()
+            exoPlayer.play()
+        } else {
+            exoPlayer.stop()
+            exoPlayer.removeMediaItem(currentIndex)
+            Toast.makeText(this, "No more playable songs in queue", Toast.LENGTH_SHORT).show()
         }
     }
 

@@ -659,7 +659,7 @@ fun MainPlayerScreen(
     }
 
     // Play list of songs in playlist mode starting from a specific index
-    val playPlaylist = { playlistName: String, songs: List<SongItem>, startIndex: Int ->
+    fun playPlaylist(playlistName: String, songs: List<SongItem>, startIndex: Int) {
         isLoading = true
         errorMessage = null
         statusMessage = "Loading playlist '$playlistName'..."
@@ -775,8 +775,15 @@ fun MainPlayerScreen(
                     errorMessage = "Playlist playback failed: ${e.message}"
                 }
             } else {
-                isLoading = false
-                errorMessage = "Failed to fetch stream URL for song"
+                if (startIndex + 1 < songs.size) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Song '${targetSong.title}' unplayable, trying next...", Toast.LENGTH_SHORT).show()
+                        playPlaylist(playlistName, songs, startIndex + 1)
+                    }
+                } else {
+                    isLoading = false
+                    errorMessage = "Failed to fetch stream URL for playlist songs"
+                }
             }
         }
     }
