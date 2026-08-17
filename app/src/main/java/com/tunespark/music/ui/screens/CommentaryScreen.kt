@@ -289,8 +289,14 @@ fun CommentaryScreen(
                 modifier = Modifier.padding(bottom = 4.dp)
             )
             Text(
-                text = "Customize your AI Radio's personality, tone, humor, style, or specific guidelines (things you want/don't want). These preferences apply globally across all commentary elements.",
+                text = "Customize your AI Radio's personality, tone, humor, style, or specific guidelines.",
                 color = Color.Gray,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+            Text(
+                text = "Get better results with instructions like:\n“Speak in Hinglish”\n“Use Gen Z slang occasionally”\n“Use a warm, friendly personality”",
+                color = textColor,
                 fontSize = 14.sp,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
@@ -305,7 +311,7 @@ fun CommentaryScreen(
                 },
                 placeholder = {
                     Text(
-                        text = "e.g., 'Speak in hinglish language.'",
+                        text = "Type your instructions...",
                         color = Color.Gray,
                         fontSize = 14.sp
                     )
