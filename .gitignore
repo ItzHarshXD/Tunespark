@@ -1,15 +1,59 @@
+# ================================
+# Android / Gradle
+# ================================
+.gradle/
+build/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ================================
+# Android Studio / IntelliJ
+# ================================
+.idea/
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+*.iws
+*.ipr
+
+# Local Android SDK configuration
 local.properties
+
+# ================================
+# Signing / Keystores
+# ================================
+*.jks
+*.keystore
+*.p12
+*.key
+*.pem
+signing.properties
+
+# ================================
+# Secrets / Environment
+# ================================
+.env
+.env.*
+*.env
+secrets.properties
+
+# Google/Firebase configuration
+google-services.json
+
+# ================================
+# OS files
+# ================================
+.DS_Store
+Thumbs.db
+
+# ================================
+# Generated / Temporary files
+# ================================
+*.log
+*.tmp
+*.bak
+
+# ================================
+# Tracking
+# ================================
+progress.md
