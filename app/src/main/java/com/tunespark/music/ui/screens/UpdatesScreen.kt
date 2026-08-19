@@ -39,7 +39,7 @@ fun UpdatesScreen(
         )
 
         Text(
-            text = "v1.24.2",
+            text = "v1.0.0",
             color = textColor,
             fontSize = 36.sp,
             fontWeight = FontWeight.Bold,
