@@ -91,6 +91,10 @@ class MainActivity : ComponentActivity() {
         // Initialize saved YouTube session cookie
         SessionManager.initialize(applicationContext)
 
+        // Initialize update notification channel and trigger background update check (respects 24h cooldown)
+        com.tunespark.music.update.UpdateNotificationHelper.createNotificationChannel(applicationContext)
+        com.tunespark.music.update.UpdateManager.checkOnStartup(applicationContext)
+
         // The UI talks to PlaybackService through MediaController; the service owns
         // ExoPlayer so playback survives activity recreation and backgrounding.
         val sessionToken = SessionToken(this, ComponentName(this, PlaybackService::class.java))
@@ -356,12 +360,18 @@ fun MainPlayerScreen(
         if (initialIntent?.action == "com.tunespark.music.action.SHOW_PLAYER") {
             currentScreen = AppScreen.RADIO
             initialIntent.action = null // Clear/consume action
+        } else if (initialIntent?.action == "com.tunespark.music.action.SHOW_UPDATES" || initialIntent?.getStringExtra("open_screen") == "UPDATES") {
+            currentScreen = AppScreen.UPDATES
+            initialIntent.action = null // Clear/consume action
         }
         
         // 2. Set listener for new intents (warm starts)
         activity?.onNewIntentListener = { intent ->
             if (intent.action == "com.tunespark.music.action.SHOW_PLAYER") {
                 currentScreen = AppScreen.RADIO
+                intent.action = null // Clear/consume action
+            } else if (intent.action == "com.tunespark.music.action.SHOW_UPDATES" || intent.getStringExtra("open_screen") == "UPDATES") {
+                currentScreen = AppScreen.UPDATES
                 intent.action = null // Clear/consume action
             }
         }
