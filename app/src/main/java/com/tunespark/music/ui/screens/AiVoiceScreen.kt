@@ -19,8 +19,12 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,6 +59,8 @@ fun AiVoiceScreen(
     var geminiApiKey by remember { mutableStateOf(SessionManager.getGeminiApiKey(context)) }
     var elevenLabsApiKey by remember { mutableStateOf(SessionManager.getElevenLabsApiKey(context)) }
     var elevenLabsVoiceId by remember { mutableStateOf(SessionManager.getElevenLabsVoiceId(context)) }
+    var isGeminiApiKeyVisible by remember { mutableStateOf(false) }
+    var isElevenLabsApiKeyVisible by remember { mutableStateOf(false) }
     var isGenerating by remember { mutableStateOf(false) }
     var activePlayer by remember { mutableStateOf<MediaPlayer?>(null) }
 
@@ -173,7 +179,7 @@ fun AiVoiceScreen(
             )
 
             Text(
-                text = "2. Tap “Get API key”",
+                text = "2. Sign in with Google account",
                 color = textColor,
                 fontSize = 16.sp,
                 modifier = Modifier.padding(bottom = 8.dp)
@@ -206,9 +212,9 @@ fun AiVoiceScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp),
+                    .height(70.dp),
                 singleLine = true,
-                shape = RoundedCornerShape(30.dp),
+                shape = RoundedCornerShape(50.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
@@ -220,24 +226,43 @@ fun AiVoiceScreen(
                 label = {
                     Text("Gemini API Key", color = textColor)
                 },
+                visualTransformation = if (isGeminiApiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            clipboardManager.getText()?.text?.let { text ->
-                                val trimmed = text.trim()
-                                geminiApiKey = trimmed
-                                SessionManager.saveGeminiApiKey(context, trimmed)
-                                Toast.makeText(context, "API Key pasted", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                    Row(
+                        modifier = Modifier.padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentPaste,
-                            contentDescription = "Paste Gemini API key",
-                            tint = textColor
-                        )
+                        IconButton(
+                            onClick = {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                isGeminiApiKeyVisible = !isGeminiApiKeyVisible
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (isGeminiApiKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = if (isGeminiApiKeyVisible) "Hide Gemini API Key" else "Show Gemini API Key",
+                                tint = textColor
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                clipboardManager.getText()?.text?.let { text ->
+                                    val trimmed = text.trim()
+                                    geminiApiKey = trimmed
+                                    SessionManager.saveGeminiApiKey(context, trimmed)
+                                    Toast.makeText(context, "API Key pasted", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentPaste,
+                                contentDescription = "Paste Gemini API key",
+                                tint = textColor
+                            )
+                        }
                     }
                 }
             )
@@ -565,9 +590,9 @@ fun AiVoiceScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp),
+                    .height(70.dp),
                 singleLine = true,
-                shape = RoundedCornerShape(30.dp),
+                shape = RoundedCornerShape(50.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
@@ -579,24 +604,43 @@ fun AiVoiceScreen(
                 label = {
                     Text("ElevenLabs API Key", color = textColor)
                 },
+                visualTransformation = if (isElevenLabsApiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            clipboardManager.getText()?.text?.let { text ->
-                                val trimmed = text.trim()
-                                elevenLabsApiKey = trimmed
-                                SessionManager.saveElevenLabsApiKey(context, trimmed)
-                                Toast.makeText(context, "API Key pasted", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                    Row(
+                        modifier = Modifier.padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentPaste,
-                            contentDescription = "Paste ElevenLabs API key",
-                            tint = textColor
-                        )
+                        IconButton(
+                            onClick = {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                isElevenLabsApiKeyVisible = !isElevenLabsApiKeyVisible
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (isElevenLabsApiKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = if (isElevenLabsApiKeyVisible) "Hide ElevenLabs API Key" else "Show ElevenLabs API Key",
+                                tint = textColor
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                clipboardManager.getText()?.text?.let { text ->
+                                    val trimmed = text.trim()
+                                    elevenLabsApiKey = trimmed
+                                    SessionManager.saveElevenLabsApiKey(context, trimmed)
+                                    Toast.makeText(context, "API Key pasted", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentPaste,
+                                contentDescription = "Paste ElevenLabs API key",
+                                tint = textColor
+                            )
+                        }
                     }
                 }
             )
@@ -704,9 +748,9 @@ fun AiVoiceScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp),
+                    .height(70.dp),
                 singleLine = true,
-                shape = RoundedCornerShape(30.dp),
+                shape = RoundedCornerShape(50.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent,
