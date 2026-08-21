@@ -23,11 +23,13 @@ object UpdateNotificationHelper {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "App Updates",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notifications about new Tunespark releases and updates"
                 enableLights(true)
+                enableVibration(true)
                 setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             manager?.createNotificationChannel(channel)
@@ -47,7 +49,7 @@ object UpdateNotificationHelper {
         val intent = Intent(context, MainActivity::class.java).apply {
             action = "com.tunespark.music.action.SHOW_UPDATES"
             putExtra("open_screen", "UPDATES")
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
 
         val pendingIntent = PendingIntent.getActivity(
@@ -60,12 +62,15 @@ object UpdateNotificationHelper {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Update Available: Tunespark ${releaseInfo.tagName}")
-            .setContentText("Version ${releaseInfo.versionName} is ready to download. Tap to view release notes.")
+            .setContentText("Version ${releaseInfo.versionName} is available. Tap to view and install.")
             .setStyle(
                 NotificationCompat.BigTextStyle()
-                    .bigText("A new version of Tunespark (${releaseInfo.tagName}) is available. Tap here to view release notes and download the update.")
+                    .bigText("A new version of Tunespark (${releaseInfo.tagName}) is available. Tap here to view details and download the update.")
             )
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()
@@ -73,7 +78,7 @@ object UpdateNotificationHelper {
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
         } catch (e: SecurityException) {
-            // Handled safely if permission is denied
+            e.printStackTrace()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -83,7 +88,7 @@ object UpdateNotificationHelper {
         try {
             NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
         } catch (e: Exception) {
-            // Ignore
+            e.printStackTrace()
         }
     }
 }

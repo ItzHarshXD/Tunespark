@@ -84,6 +84,13 @@ class MainActivity : ComponentActivity() {
         onNewIntentListener?.invoke(intent)
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1002 && grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            com.tunespark.music.update.UpdateManager.checkOnStartup(applicationContext)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -91,8 +98,16 @@ class MainActivity : ComponentActivity() {
         // Initialize saved YouTube session cookie
         SessionManager.initialize(applicationContext)
 
-        // Initialize update notification channel and trigger background update check (respects 24h cooldown)
+        // Initialize update notification channel and check for updates on app launch
         com.tunespark.music.update.UpdateNotificationHelper.createNotificationChannel(applicationContext)
+        
+        // Request POST_NOTIFICATIONS runtime permission on Android 13+ (API 33+) if not already granted
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1002)
+            }
+        }
+        
         com.tunespark.music.update.UpdateManager.checkOnStartup(applicationContext)
 
         // The UI talks to PlaybackService through MediaController; the service owns
@@ -358,20 +373,20 @@ fun MainPlayerScreen(
         // 1. Check for cold start action if present
         val initialIntent = activity?.intent
         if (initialIntent?.action == "com.tunespark.music.action.SHOW_PLAYER") {
-            currentScreen = AppScreen.RADIO
+            navigateHandler(AppScreen.RADIO)
             initialIntent.action = null // Clear/consume action
         } else if (initialIntent?.action == "com.tunespark.music.action.SHOW_UPDATES" || initialIntent?.getStringExtra("open_screen") == "UPDATES") {
-            currentScreen = AppScreen.UPDATES
+            navigateHandler(AppScreen.UPDATES)
             initialIntent.action = null // Clear/consume action
         }
         
         // 2. Set listener for new intents (warm starts)
         activity?.onNewIntentListener = { intent ->
             if (intent.action == "com.tunespark.music.action.SHOW_PLAYER") {
-                currentScreen = AppScreen.RADIO
+                navigateHandler(AppScreen.RADIO)
                 intent.action = null // Clear/consume action
             } else if (intent.action == "com.tunespark.music.action.SHOW_UPDATES" || intent.getStringExtra("open_screen") == "UPDATES") {
-                currentScreen = AppScreen.UPDATES
+                navigateHandler(AppScreen.UPDATES)
                 intent.action = null // Clear/consume action
             }
         }

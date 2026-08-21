@@ -16,8 +16,6 @@ import java.util.Locale
 object UpdateManager {
     private const val PREFS_NAME = "tunespark_update_prefs"
     private const val KEY_LAST_CHECK_TIME = "last_update_check_time"
-    private const val KEY_LAST_KNOWN_VERSION = "last_known_latest_version"
-    private const val COOLDOWN_MILLIS = 24 * 60 * 60 * 1000L // 24 hours
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var downloadJob: Job? = null
@@ -38,17 +36,11 @@ object UpdateManager {
     }
 
     /**
-     * Checks for updates on app startup if the 24-hour cooldown has elapsed.
-     * If an update is available, posts an Android notification to open the Updates screen.
+     * Checks for updates on app startup.
+     * If an update is available, posts an Android system notification to open the Updates screen.
      * Does NOT display any popups inside the app.
      */
     fun checkOnStartup(context: Context) {
-        val lastCheck = getLastCheckTime(context)
-        val now = System.currentTimeMillis()
-        if (now - lastCheck < COOLDOWN_MILLIS) {
-            return
-        }
-
         scope.launch(Dispatchers.IO) {
             val result = UpdateChecker.checkLatestRelease(context)
             saveLastCheckTime(context, System.currentTimeMillis())
@@ -79,7 +71,7 @@ object UpdateManager {
     }
 
     /**
-     * Explicitly checks for updates, bypassing the 24-hour cooldown.
+     * Explicitly checks for updates from the UI.
      */
     fun checkForUpdates(context: Context) {
         _state.value = UpdateState.Checking

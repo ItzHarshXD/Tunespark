@@ -717,9 +717,12 @@ fun UpdatesScreen(
         ) {
             Text(
                 text = "Made with ❤️ by Harsh",
-                color = textColor.copy(alpha = 0.8f),
+                color = primaryColor,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
+                style = androidx.compose.ui.text.TextStyle(
+                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                ),
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable {
@@ -734,7 +737,7 @@ fun UpdatesScreen(
             Text(
                 text = "Star this project on GitHub",
                 color = primaryColor,
-                fontSize = 14.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 style = androidx.compose.ui.text.TextStyle(
                     textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
