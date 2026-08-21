@@ -2,7 +2,7 @@
 
 # 🎵 Tunespark
 
-<img width="860" height="860" alt="Group 39" src="https://github.com/user-attachments/assets/c127255e-89fc-4221-9c74-cd703f141b93" />
+<img width="250" alt="Group 39" src="https://github.com/user-attachments/assets/c127255e-89fc-4221-9c74-cd703f141b93" />
 
 **A modern, open-source Android music streaming player with an AI-powered radio experience.**
 
