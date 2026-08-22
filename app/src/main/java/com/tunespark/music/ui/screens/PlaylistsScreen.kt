@@ -15,7 +15,9 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -37,6 +39,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.stylusHoverIcon
 import androidx.compose.ui.layout.ContentScale
@@ -155,70 +158,12 @@ fun PlaylistsScreen(
     var gridItems by remember { mutableStateOf<List<LibraryGridItem>>(emptyList()) }
     var isLoadingGrid by remember { mutableStateOf(false) }
 
-    val fallbackPlaylists = remember {
-        listOf(
-            LibraryGridItem(id = "LM", title = "Liked", subtitle = "Your favorites", isLiked = true),
-            LibraryGridItem(id = "PL4fGSI1pDJn5kI81J1fYxT5m68Sg_w60R", title = "Today's Hits", subtitle = "Global Hits", thumbnailUrl = "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?q=80&w=300&auto=format&fit=crop"),
-            LibraryGridItem(id = "PL4fGSI1pDJn6aHyS3qHcQz3nldSok0aH4", title = "Chill Hits", subtitle = "Relaxing Pop", thumbnailUrl = "https://images.unsplash.com/photo-1494232410401-ad00d5433cfa?q=80&w=300&auto=format&fit=crop"),
-            LibraryGridItem(id = "PL4fGSI1pDJn5kS967H6_988L07-7TfF0n", title = "Lo-Fi Beats", subtitle = "Study & Focus", thumbnailUrl = "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?q=80&w=300&auto=format&fit=crop"),
-            LibraryGridItem(id = "PL4fGSI1pDJn7_07H6yv7zZ-H_W-tZfE0P", title = "Workout Energy", subtitle = "Upbeat Tracks", thumbnailUrl = "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?q=80&w=300&auto=format&fit=crop"),
-            LibraryGridItem(id = "PL4fGSI1pDJn6V7_S9X_t1Fm_WzP_YkYfD", title = "Party Starter", subtitle = "Dance Beats", thumbnailUrl = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=300&auto=format&fit=crop")
-        )
-    }
+    val isUserSignedIn = SessionManager.isUserSignedIn(context)
 
-    val fallbackAlbums = remember {
-        listOf(
-            LibraryGridItem(id = "album_1", title = "Trending Mix", subtitle = "10 songs"),
-            LibraryGridItem(id = "album_2", title = "Popular Hits", subtitle = "10 songs"),
-            LibraryGridItem(id = "album_3", title = "Chill Vibes", subtitle = "10 songs")
-        )
-    }
-
-    val fallbackArtists = remember {
-        listOf(
-            LibraryGridItem(id = "artist_1", title = "The Weeknd", subtitle = "Artist"),
-            LibraryGridItem(id = "artist_2", title = "Ed Sheeran", subtitle = "Artist"),
-            LibraryGridItem(id = "artist_3", title = "Dua Lipa", subtitle = "Artist")
-        )
-    }
-
-    val realPlayableSongs = remember {
-        listOf(
-            SongItem("4NRXx6U8ABQ", "Blinding Lights", listOf(Artist("The Weeknd", null)), thumbnail = "https://img.youtube.com/vi/4NRXx6U8ABQ/0.jpg"),
-            SongItem("JGwWNGJdvx8", "Shape of You", listOf(Artist("Ed Sheeran", null)), thumbnail = "https://img.youtube.com/vi/JGwWNGJdvx8/0.jpg"),
-            SongItem("kTJczUoc5G4", "Stay", listOf(Artist("The Kid LAROI", null)), thumbnail = "https://img.youtube.com/vi/kTJczUoc5G4/0.jpg"),
-            SongItem("H5v3kku4y6Q", "As It Was", listOf(Artist("Harry Styles", null)), thumbnail = "https://img.youtube.com/vi/H5v3kku4y6Q/0.jpg"),
-            SongItem("34Na4j8AVgA", "Starboy", listOf(Artist("The Weeknd", null)), thumbnail = "https://img.youtube.com/vi/34Na4j8AVgA/0.jpg"),
-            SongItem("G7KNmW9a75Y", "Flowers", listOf(Artist("Miley Cyrus", null)), thumbnail = "https://img.youtube.com/vi/G7KNmW9a75Y/0.jpg"),
-            SongItem("TUVcZfQe-Kw", "Levitating", listOf(Artist("Dua Lipa", null)), thumbnail = "https://img.youtube.com/vi/TUVcZfQe-Kw/0.jpg"),
-            SongItem("7wtfhZwyrcc", "Believer", listOf(Artist("Imagine Dragons", null)), thumbnail = "https://img.youtube.com/vi/7wtfhZwyrcc/0.jpg"),
-            SongItem("2Vv-BfVoq4g", "Perfect", listOf(Artist("Ed Sheeran", null)), thumbnail = "https://img.youtube.com/vi/2Vv-BfVoq4g/0.jpg"),
-            SongItem("zABLecsR5UE", "Someone You Loved", listOf(Artist("Lewis Capaldi", null)), thumbnail = "https://img.youtube.com/vi/zABLecsR5UE/0.jpg")
-        )
-    }
-
-    val generatePlaylistSongs = { count: Int ->
-        if (count <= 0) {
-            emptyList<SongItem>()
-        } else {
-            val songs = mutableListOf<SongItem>()
-            for (i in 0 until count) {
-                val baseSong = realPlayableSongs[i % realPlayableSongs.size]
-                val uniqueId = if (i >= realPlayableSongs.size) "${baseSong.id}_$i" else baseSong.id
-                songs.add(SongItem(id = uniqueId, title = baseSong.title, artists = baseSong.artists, thumbnail = baseSong.thumbnail))
-            }
-            songs
-        }
-    }
-
-    LaunchedEffect(selectedTab, playlistsRefreshTrigger) {
-        val userSignedIn = SessionManager.isUserSignedIn(context)
-        if (!userSignedIn) {
-            gridItems = when (selectedTab) {
-                "Playlists" -> fallbackPlaylists
-                "Albums" -> fallbackAlbums
-                else -> fallbackArtists
-            }
+    LaunchedEffect(selectedTab, playlistsRefreshTrigger, isUserSignedIn) {
+        if (!isUserSignedIn) {
+            gridItems = emptyList()
+            isLoadingGrid = false
             return@LaunchedEffect
         }
 
@@ -385,25 +330,13 @@ fun PlaylistsScreen(
 
                 withContext(Dispatchers.Main) {
                     isLoadingGrid = false
-                    if (fetchedItems.isEmpty() || (selectedTab == "Playlists" && fetchedItems.size <= 1)) {
-                        gridItems = when (selectedTab) {
-                            "Playlists" -> fallbackPlaylists
-                            "Albums" -> fallbackAlbums
-                            else -> fallbackArtists
-                        }
-                    } else {
-                        gridItems = fetchedItems
-                    }
+                    gridItems = fetchedItems
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     isLoadingGrid = false
-                    gridItems = when (selectedTab) {
-                        "Playlists" -> fallbackPlaylists
-                        "Albums" -> fallbackAlbums
-                        else -> fallbackArtists
-                    }
+                    gridItems = emptyList()
                 }
             }
         }
@@ -435,11 +368,8 @@ fun PlaylistsScreen(
                         tracks = playlistPage?.songs.orEmpty()
                         playlistPage?.playlist?.let { playlistMeta ->
                             withContext(Dispatchers.Main) {
-                                if (activePlaylistName == "Today's Hits" || activePlaylistName == "Chill Hits" || activePlaylistName == "Lo-Fi Beats" || activePlaylistName == "Workout Energy" || activePlaylistName == "Party Starter") {
-                                    activePlaylistName = playlistMeta.title
-                                    if (playlistMeta.thumbnail != null) activePlaylistThumbnail = playlistMeta.thumbnail
-                                    activePlaylistSongCountText = playlistMeta.songCountText ?: "${tracks.size} songs"
-                                }
+                                if (playlistMeta.thumbnail != null) activePlaylistThumbnail = playlistMeta.thumbnail
+                                activePlaylistSongCountText = playlistMeta.songCountText ?: "${tracks.size} songs"
                             }
                         }
                     }
@@ -451,11 +381,6 @@ fun PlaylistsScreen(
                     if (searchResult.isSuccess) tracks = searchResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
                 }
 
-                if (tracks.isEmpty()) {
-                    val countStr = activePlaylistSongCountText.filter { it.isDigit() }
-                    tracks = generatePlaylistSongs(countStr.toIntOrNull() ?: 15)
-                }
-
                 withContext(Dispatchers.Main) {
                     playlistSongs = tracks
                     isSongsLoading = false
@@ -463,8 +388,7 @@ fun PlaylistsScreen(
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    val countStr = activePlaylistSongCountText.filter { it.isDigit() }
-                    playlistSongs = generatePlaylistSongs(countStr.toIntOrNull() ?: 15)
+                    playlistSongs = emptyList()
                     isSongsLoading = false
                 }
             }
@@ -948,6 +872,114 @@ fun PlaylistsScreen(
                 }
             }
         }
+    } else if (!isUserSignedIn) {
+        // ── SIGNED-OUT LIBRARY VIEW ──────────────────────────────────────
+        val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
+        val cardBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+        val cardBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
+
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(backgroundColor)
+                .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 0.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Library",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = textColor
+                )
+            }
+
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = { handleRefresh() },
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 96.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .shadow(elevation = 6.dp, shape = CircleShape)
+                            .clip(CircleShape)
+                            .background(cardBgColor)
+                            .border(1.dp, cardBorderColor, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = "Sign in",
+                            tint = textColor,
+                            modifier = Modifier.size(52.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = "Sign in to YouTube Music",
+                        color = textColor,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "Sign in to your YouTube Music account to view your playlists, liked tracks, and personalized music library.",
+                        color = Color.Gray,
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 22.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    Button(
+                        onClick = {
+                            playSoundAndHaptic()
+                            onNavigate(AppScreen.ACCOUNT)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000)),
+                        shape = RoundedCornerShape(30.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Sign In with YouTube",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+            }
+        }
     } else {
         // ── GRID VIEW ────────────────────────────────────────────────────
         Column(
@@ -1084,50 +1116,67 @@ fun PlaylistsScreen(
                     onRefresh = { handleRefresh() },
                     modifier = Modifier.weight(1f)
                 ) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        verticalArrangement = Arrangement.spacedBy(24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 96.dp)
-                    ) {
-                    items(sortedGridItems) { item ->
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                playSoundAndHaptic()
-                                activePlaylistId = item.id
-                                activePlaylistName = item.title
-                                activePlaylistThumbnail = item.thumbnailUrl
-                                activePlaylistSongCountText = item.subtitle
-                                activePlaylistIsLiked = item.isLiked
-                                activePlaylistRawItem = item.rawItem
-                                activePlaylistAuthorName = item.authorName
-                                activePlaylistAuthorAvatarUrl = item.authorAvatarUrl
-                            }
+                    if (sortedGridItems.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(bottom = 96.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(28.dp))
-                                    .background(color = if (item.isLiked) Color(0xFFFF0000) else textColor),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (item.isLiked) {
-                                    Icon(imageVector = Icons.Default.Favorite, contentDescription = "Heart", tint = Color.White, modifier = Modifier.size(44.dp))
-                                } else if (!item.thumbnailUrl.isNullOrEmpty()) {
-                                    AsyncImage(model = item.thumbnailUrl, contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            Text(
+                                text = "No playlists found in your library.",
+                                color = Color.Gray,
+                                fontSize = 15.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            verticalArrangement = Arrangement.spacedBy(24.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 96.dp)
+                        ) {
+                            items(sortedGridItems) { item ->
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        playSoundAndHaptic()
+                                        activePlaylistId = item.id
+                                        activePlaylistName = item.title
+                                        activePlaylistThumbnail = item.thumbnailUrl
+                                        activePlaylistSongCountText = item.subtitle
+                                        activePlaylistIsLiked = item.isLiked
+                                        activePlaylistRawItem = item.rawItem
+                                        activePlaylistAuthorName = item.authorName
+                                        activePlaylistAuthorAvatarUrl = item.authorAvatarUrl
+                                    }
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .aspectRatio(1f)
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(28.dp))
+                                            .background(color = if (item.isLiked) Color(0xFFFF0000) else textColor),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (item.isLiked) {
+                                            Icon(imageVector = Icons.Default.Favorite, contentDescription = "Heart", tint = Color.White, modifier = Modifier.size(44.dp))
+                                        } else if (!item.thumbnailUrl.isNullOrEmpty()) {
+                                            AsyncImage(model = item.thumbnailUrl, contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    Text(text = item.title, color = textColor, fontWeight = FontWeight.Medium, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                                    Text(text = item.subtitle, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                                 }
                             }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(text = item.title, color = textColor, fontWeight = FontWeight.Medium, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-                            Text(text = item.subtitle, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                         }
                     }
-                }
                 }
             }
         }
