@@ -360,7 +360,10 @@ fun PlaylistsScreen(
 
                 if (activePlaylistIsLiked || playlistId == "LM") {
                     val playlistResult = YouTube.playlist("LM")
-                    if (playlistResult.isSuccess) tracks = playlistResult.getOrNull()?.songs.orEmpty()
+                    if (playlistResult.isSuccess) {
+                        tracks = playlistResult.getOrNull()?.songs.orEmpty()
+                        com.tunespark.music.LikedSongManager.setLikedSongs(context, tracks.map { it.id })
+                    }
                 } else if (rawItem is PlaylistItem || playlistId.startsWith("PL") || playlistId.startsWith("RD")) {
                     val playlistResult = YouTube.playlist(playlistId)
                     if (playlistResult.isSuccess) {

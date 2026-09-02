@@ -56,6 +56,7 @@ object SessionManager {
     fun initialize(context: Context) {
         val cookie = getPrefs(context).getString(KEY_COOKIE, null)
         YouTube.cookie = cookie
+        LikedSongManager.init(context)
 
         // Migrate/override old default values for first-time or existing installations
         val prefs = getPrefs(context)
@@ -96,6 +97,7 @@ object SessionManager {
             .putString(KEY_COOKIE, cookie)
             .apply()
         YouTube.cookie = cookie
+        LikedSongManager.refreshLikedSongs(context)
     }
 
     /**
@@ -138,6 +140,7 @@ object SessionManager {
             .remove(KEY_USER_THUMBNAIL)
             .apply()
         YouTube.cookie = null
+        LikedSongManager.clear(context)
     }
 
     /**

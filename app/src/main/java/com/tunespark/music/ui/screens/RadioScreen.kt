@@ -58,6 +58,11 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Share
+import android.widget.Toast
+import com.tunespark.music.LikedSongManager
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -157,6 +162,154 @@ fun DropIndicatorLine(
                 shape = RoundedCornerShape(3.dp)
             )
     )
+}
+
+@Composable
+fun RadioTabBar(
+    activeTab: String,
+    onTabSelected: (String) -> Unit,
+    currentVideoId: String?,
+    currentSongTitle: String,
+    currentSongArtist: String,
+    isSignedIn: Boolean,
+    primaryColor: Color,
+    onPrimaryColor: Color,
+    secondaryColor: Color,
+    onSecondaryColor: Color,
+    textColor: Color,
+    view: android.view.View,
+    audioManager: AudioManager,
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(40.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Left: Tab Pills (Lyrics & Up Next)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Lyrics Pill
+            Box(
+                modifier = Modifier
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
+                    .clickable {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        val newTab = if (activeTab == "lyrics") "none" else "lyrics"
+                        onTabSelected(newTab)
+                    }
+                    .padding(horizontal = 16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Lyrics",
+                    color = if (activeTab == "lyrics") onPrimaryColor else onSecondaryColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            // Up Next Pill
+            Box(
+                modifier = Modifier
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (activeTab == "queue") primaryColor else secondaryColor)
+                    .clickable {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        val newTab = if (activeTab == "queue") "none" else "queue"
+                        onTabSelected(newTab)
+                    }
+                    .padding(horizontal = 16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Up Next",
+                    color = if (activeTab == "queue") onPrimaryColor else onSecondaryColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        // Right: Like & Share Icon Buttons
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val isLiked = currentVideoId != null && LikedSongManager.isLiked(currentVideoId)
+
+            // Like Button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(secondaryColor)
+                    .clickable {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        if (!isSignedIn) {
+                            Toast.makeText(context, "Sign in to like songs", Toast.LENGTH_SHORT).show()
+                        } else if (currentVideoId != null) {
+                            scope.launch {
+                                LikedSongManager.toggleLike(currentVideoId, context)
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = if (isLiked) "Unlike" else "Like",
+                    tint = if (isLiked) Color(0xFFFF0000) else if (!isSignedIn || currentVideoId == null) textColor.copy(alpha = 0.35f) else onSecondaryColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Share Button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(secondaryColor)
+                    .clickable(
+                        enabled = currentVideoId != null,
+                        onClick = {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            if (currentVideoId != null) {
+                                val shareUrl = "https://music.youtube.com/watch?v=$currentVideoId"
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "$currentSongTitle - $currentSongArtist")
+                                    putExtra(Intent.EXTRA_TEXT, shareUrl)
+                                }
+                                val chooser = Intent.createChooser(sendIntent, "Share song")
+                                context.startActivity(chooser)
+                            }
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Share,
+                    contentDescription = "Share",
+                    tint = if (currentVideoId == null) textColor.copy(alpha = 0.35f) else onSecondaryColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -421,6 +574,14 @@ fun RadioScreen(
             thumbnail = thumbnail
         )
     }
+
+    val currentSongItem = remember(currentTrackIndex, playQueue, exoPlayer.currentMediaItem) {
+        playQueue.getOrNull(currentTrackIndex) ?: exoPlayer.currentMediaItem
+    }
+    val currentVideoId = remember(currentSongItem) {
+        currentSongItem?.mediaId?.takeIf { !it.startsWith("commentary_") && it.isNotBlank() }
+    }
+    val isSignedIn = remember(context) { com.tunespark.music.SessionManager.isUserSignedIn(context) }
 
     val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
     val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
@@ -1898,58 +2059,27 @@ fun RadioScreen(
 
                                 Spacer(modifier = Modifier.height(24.dp))
 
-                                // Tab Selector (Left Aligned on Right Half)
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(40.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.Start),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .height(40.dp)
-                                            .clip(RoundedCornerShape(20.dp))
-                                            .background(secondaryColor)
-                                            .clickable {
-                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                activeTab = "lyrics"
-                                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, "lyrics")
-                                            }
-                                            .padding(horizontal = 20.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "Lyrics",
-                                            color = onSecondaryColor,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .height(40.dp)
-                                            .clip(RoundedCornerShape(20.dp))
-                                            .background(secondaryColor)
-                                            .clickable {
-                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                activeTab = "queue"
-                                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, "queue")
-                                            }
-                                            .padding(horizontal = 20.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "Up Next",
-                                            color = onSecondaryColor,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
+                                // Tab Selector with Like & Share
+                                RadioTabBar(
+                                    activeTab = activeTab,
+                                    onTabSelected = { newTab ->
+                                        activeTab = newTab
+                                        com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                                    },
+                                    currentVideoId = currentVideoId,
+                                    currentSongTitle = currentSongTitle,
+                                    currentSongArtist = currentSongArtist,
+                                    isSignedIn = isSignedIn,
+                                    primaryColor = primaryColor,
+                                    onPrimaryColor = onPrimaryColor,
+                                    secondaryColor = secondaryColor,
+                                    onSecondaryColor = onSecondaryColor,
+                                    textColor = textColor,
+                                    view = view,
+                                    audioManager = audioManager,
+                                    context = context,
+                                    scope = scope
+                                )
                             } else {
                                 // lyrics or queue is expanded.
                                 Column(
@@ -1957,61 +2087,28 @@ fun RadioScreen(
                                     horizontalAlignment = Alignment.Start,
                                     verticalArrangement = Arrangement.Top
                                 ) {
-                                    // Tab Selector visible at the top so user can switch or close (Left Aligned on Right Half)
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp)
-                                            .height(40.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.Start),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .height(40.dp)
-                                                .clip(RoundedCornerShape(20.dp))
-                                                .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
-                                                .clickable {
-                                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                    val newTab = if (activeTab == "lyrics") "none" else "lyrics"
-                                                    activeTab = newTab
-                                                    com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
-                                                }
-                                                .padding(horizontal = 16.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "Lyrics",
-                                                color = if (activeTab == "lyrics") onPrimaryColor else onSecondaryColor,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-
-                                        Box(
-                                            modifier = Modifier
-                                                .height(40.dp)
-                                                .clip(RoundedCornerShape(20.dp))
-                                                .background(if (activeTab == "queue") primaryColor else secondaryColor)
-                                                .clickable {
-                                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                    val newTab = if (activeTab == "queue") "none" else "queue"
-                                                    activeTab = newTab
-                                                    com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
-                                                }
-                                                .padding(horizontal = 16.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "Up Next",
-                                                color = if (activeTab == "queue") onPrimaryColor else onSecondaryColor,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
+                                    // Tab Selector visible at the top so user can switch or close with Like & Share
+                                    RadioTabBar(
+                                        activeTab = activeTab,
+                                        onTabSelected = { newTab ->
+                                            activeTab = newTab
+                                            com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                                        },
+                                        currentVideoId = currentVideoId,
+                                        currentSongTitle = currentSongTitle,
+                                        currentSongArtist = currentSongArtist,
+                                        isSignedIn = isSignedIn,
+                                        primaryColor = primaryColor,
+                                        onPrimaryColor = onPrimaryColor,
+                                        secondaryColor = secondaryColor,
+                                        onSecondaryColor = onSecondaryColor,
+                                        textColor = textColor,
+                                        view = view,
+                                        audioManager = audioManager,
+                                        context = context,
+                                        scope = scope,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
 
                                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -2314,61 +2411,28 @@ fun RadioScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Tab Selector
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp)
-                        .height(40.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .height(40.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
-                            .clickable {
-                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                val newTab = if (activeTab == "lyrics") "none" else "lyrics"
-                                activeTab = newTab
-                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
-                            }
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Lyrics",
-                            color = if (activeTab == "lyrics") onPrimaryColor else onSecondaryColor,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .height(40.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (activeTab == "queue") primaryColor else secondaryColor)
-                            .clickable {
-                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                val newTab = if (activeTab == "queue") "none" else "queue"
-                                activeTab = newTab
-                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
-                            }
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Up Next",
-                            color = if (activeTab == "queue") onPrimaryColor else onSecondaryColor,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                // Tab Selector with Like & Share
+                RadioTabBar(
+                    activeTab = activeTab,
+                    onTabSelected = { newTab ->
+                        activeTab = newTab
+                        com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                    },
+                    currentVideoId = currentVideoId,
+                    currentSongTitle = currentSongTitle,
+                    currentSongArtist = currentSongArtist,
+                    isSignedIn = isSignedIn,
+                    primaryColor = primaryColor,
+                    onPrimaryColor = onPrimaryColor,
+                    secondaryColor = secondaryColor,
+                    onSecondaryColor = onSecondaryColor,
+                    textColor = textColor,
+                    view = view,
+                    audioManager = audioManager,
+                    context = context,
+                    scope = scope,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
             } else {
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -2517,61 +2581,28 @@ fun RadioScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 4. Tab Selector
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp)
-                        .height(40.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .height(40.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
-                            .clickable {
-                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                val newTab = if (activeTab == "lyrics") "none" else "lyrics"
-                                activeTab = newTab
-                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
-                            }
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Lyrics",
-                            color = if (activeTab == "lyrics") onPrimaryColor else onSecondaryColor,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .height(40.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (activeTab == "queue") primaryColor else secondaryColor)
-                            .clickable {
-                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                val newTab = if (activeTab == "queue") "none" else "queue"
-                                activeTab = newTab
-                                com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
-                            }
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Up Next",
-                            color = if (activeTab == "queue") onPrimaryColor else onSecondaryColor,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                // 4. Tab Selector with Like & Share
+                RadioTabBar(
+                    activeTab = activeTab,
+                    onTabSelected = { newTab ->
+                        activeTab = newTab
+                        com.tunespark.music.SessionManager.saveRadioLayoutState(context, newTab)
+                    },
+                    currentVideoId = currentVideoId,
+                    currentSongTitle = currentSongTitle,
+                    currentSongArtist = currentSongArtist,
+                    isSignedIn = isSignedIn,
+                    primaryColor = primaryColor,
+                    onPrimaryColor = onPrimaryColor,
+                    secondaryColor = secondaryColor,
+                    onSecondaryColor = onSecondaryColor,
+                    textColor = textColor,
+                    view = view,
+                    audioManager = audioManager,
+                    context = context,
+                    scope = scope,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
                 // 5. Content Area (Lyrics or Queue)
                 if (activeTab == "lyrics") {
