@@ -434,13 +434,18 @@ fun PlaylistsScreen(
         }
     }
 
-    val sortedSongs = remember(filteredSongs, sortBy, sortAscending) {
+    val sortedSongs = remember(filteredSongs, sortBy, sortAscending, activePlaylistId, activePlaylistIsLiked) {
         val sorted = when (sortBy) {
             "Name" -> filteredSongs.sortedBy { it.title.lowercase() }
             "Date updated" -> filteredSongs.sortedBy { it.id }
             else -> filteredSongs // Date added (as fetched)
         }
-        if (sortAscending) sorted else sorted.reversed()
+        val isLikedPlaylist = activePlaylistId == "LM" || activePlaylistIsLiked
+        if (isLikedPlaylist && sortBy == "Date added") {
+            if (sortAscending) sorted.reversed() else sorted
+        } else {
+            if (sortAscending) sorted else sorted.reversed()
+        }
     }
 
 //    for individual playlist
