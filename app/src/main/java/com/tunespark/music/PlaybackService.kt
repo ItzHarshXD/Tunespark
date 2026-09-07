@@ -94,7 +94,7 @@ class PlaybackService : MediaSessionService() {
                 val currentItem = exoPlayer.currentMediaItem
                 if (currentItem != null) {
                     if (isUnresolvedMediaItem(currentItem)) {
-                        resolveCurrentMediaItem(exoPlayer, currentItem.mediaId)
+                        resolveCurrentMediaItem(exoPlayer, videoIdFromMediaId(currentItem.mediaId))
                     } else {
                         android.util.Log.e(PLAYBACK_SERVICE_TAG, "Playback error on resolved item: ${currentItem.mediaId}, error: ${error.message}", error)
                         serviceScope.launch(Dispatchers.Main) {
@@ -123,7 +123,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun handleCurrentMediaItem(exoPlayer: ExoPlayer, mediaItem: MediaItem) {
-        val videoId = mediaItem.mediaId
+        val videoId = videoIdFromMediaId(mediaItem.mediaId)
         if (videoId.isBlank()) return
 
         if (isCommentaryMediaItem(mediaItem)) {
@@ -181,7 +181,7 @@ class PlaybackService : MediaSessionService() {
                 if (!isCommentaryMediaItem(item)) {
                     val title = item.mediaMetadata.title?.toString() ?: ""
                     val artistName = item.mediaMetadata.artist?.toString() ?: ""
-                    val id = item.mediaId
+                    val id = videoIdFromMediaId(item.mediaId)
                     upcomingSongs.add(
                         SongItem(
                             id = id,
@@ -325,6 +325,14 @@ class PlaybackService : MediaSessionService() {
         return "$UNRESOLVED_MEDIA_SCHEME://$UNRESOLVED_MEDIA_HOST/$videoId"
     }
 
+    /**
+     * Extracts the real YouTube videoId from a mediaId. Queue items that were
+     * added multiple times carry a unique "#q<n>" qualifier suffix (Media3
+     * requires mediaIds to be unique across the timeline), which is stripped
+     * here so playback routing always works with the bare videoId.
+     */
+    private fun videoIdFromMediaId(mediaId: String): String = mediaId.substringBefore('#')
+
     private fun isUnresolvedMediaItem(mediaItem: MediaItem): Boolean {
         val uri = mediaItem.localConfiguration?.uri ?: return true
         return uri.scheme == UNRESOLVED_MEDIA_SCHEME && uri.host == UNRESOLVED_MEDIA_HOST
@@ -363,12 +371,15 @@ class PlaybackService : MediaSessionService() {
                 android.util.Log.d(PLAYBACK_SERVICE_TAG, "resolveCurrentMediaItem successfully resolved URL for videoId: $videoId")
                 withContext(Dispatchers.Main) {
                     val currentIndex = exoPlayer.currentMediaItemIndex
-                    if (currentIndex < exoPlayer.mediaItemCount && exoPlayer.getMediaItemAt(currentIndex).mediaId == videoId) {
+                    if (currentIndex < exoPlayer.mediaItemCount && videoIdFromMediaId(exoPlayer.getMediaItemAt(currentIndex).mediaId) == videoId) {
                         val originalItem = exoPlayer.getMediaItemAt(currentIndex)
                         val resolvedItem = buildPlayableMediaItem(
                             videoId = videoId,
                             streamUrl = resolvedUrl,
-                            metadata = originalItem.mediaMetadata
+                            metadata = originalItem.mediaMetadata,
+                            // Preserve the item's unique mediaId (repeats carry a
+                            // "#q<n>" qualifier that must survive the swap).
+                            mediaId = originalItem.mediaId
                         )
                         exoPlayer.replaceMediaItem(currentIndex, resolvedItem)
                         exoPlayer.prepare()
@@ -386,7 +397,7 @@ class PlaybackService : MediaSessionService() {
                 android.util.Log.e(PLAYBACK_SERVICE_TAG, "resolveCurrentMediaItem failed to resolve URL for videoId: $videoId")
                 withContext(Dispatchers.Main) {
                     val currentIndex = exoPlayer.currentMediaItemIndex
-                    if (currentIndex < exoPlayer.mediaItemCount && exoPlayer.getMediaItemAt(currentIndex).mediaId == videoId) {
+                    if (currentIndex < exoPlayer.mediaItemCount && videoIdFromMediaId(exoPlayer.getMediaItemAt(currentIndex).mediaId) == videoId) {
                         Toast.makeText(this@PlaybackService, "Failed to resolve stream for this song. Skipping...", Toast.LENGTH_SHORT).show()
                         skipCurrentMediaItem(exoPlayer)
                     }
@@ -416,19 +427,22 @@ class PlaybackService : MediaSessionService() {
         if (nextIndex < exoPlayer.mediaItemCount) {
             val nextItem = exoPlayer.getMediaItemAt(nextIndex)
             if (isUnresolvedMediaItem(nextItem)) {
-                val nextVideoId = nextItem.mediaId
+                val nextVideoId = videoIdFromMediaId(nextItem.mediaId)
                 serviceScope.launch(Dispatchers.IO) {
                     android.util.Log.d(PLAYBACK_SERVICE_TAG, "preFetchNextMediaItem started for videoId: $nextVideoId")
                     val resolvedUrl = StreamUrlResolver.resolveStreamUrl(nextVideoId)
                     if (resolvedUrl != null) {
                         android.util.Log.d(PLAYBACK_SERVICE_TAG, "preFetchNextMediaItem successfully pre-fetched URL for videoId: $nextVideoId")
                         withContext(Dispatchers.Main) {
-                            if (nextIndex < exoPlayer.mediaItemCount && exoPlayer.getMediaItemAt(nextIndex).mediaId == nextVideoId) {
+                            if (nextIndex < exoPlayer.mediaItemCount && videoIdFromMediaId(exoPlayer.getMediaItemAt(nextIndex).mediaId) == nextVideoId) {
                                 val originalItem = exoPlayer.getMediaItemAt(nextIndex)
                                 val resolvedItem = buildPlayableMediaItem(
                                     videoId = nextVideoId,
                                     streamUrl = resolvedUrl,
-                                    metadata = originalItem.mediaMetadata
+                                    metadata = originalItem.mediaMetadata,
+                                    // Preserve the item's unique mediaId (repeats
+                                    // carry a "#q<n>" qualifier that must survive).
+                                    mediaId = originalItem.mediaId
                                 )
                                 exoPlayer.replaceMediaItem(nextIndex, resolvedItem)
                             }
@@ -518,7 +532,7 @@ class PlaybackService : MediaSessionService() {
 
                 val existingVideoIds = withContext(Dispatchers.Main) {
                     (0 until exoPlayer.mediaItemCount)
-                        .map { index -> exoPlayer.getMediaItemAt(index).mediaId }
+                        .map { index -> videoIdFromMediaId(exoPlayer.getMediaItemAt(index).mediaId) }
                         .toSet()
                 }
 
@@ -595,11 +609,12 @@ class PlaybackService : MediaSessionService() {
     private fun buildPlayableMediaItem(
         videoId: String,
         streamUrl: String,
-        metadata: MediaMetadata
+        metadata: MediaMetadata,
+        mediaId: String = videoId
     ): MediaItem {
         return MediaItem.Builder()
             .setUri(streamUrl)
-            .setMediaId(videoId)
+            .setMediaId(mediaId)
             .setMediaMetadata(metadata)
             .build()
     }

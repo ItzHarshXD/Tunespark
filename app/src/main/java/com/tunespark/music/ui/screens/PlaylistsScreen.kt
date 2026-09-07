@@ -2,9 +2,11 @@ package com.tunespark.music.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.VectorConverter
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -73,6 +75,7 @@ data class LibraryGridItem(
     val authorAvatarUrl: String? = null
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistsScreen(
     initialPlaylistId: String? = null,
@@ -85,6 +88,7 @@ fun PlaylistsScreen(
     initialPlaylistAuthorAvatarUrl: String? = null,
     initialPlaylistSongs: List<SongItem> = emptyList(),
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -826,11 +830,18 @@ fun PlaylistsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        playSoundAndHaptic()
-                                        onPlayPlaylist(activePlaylistName, sortedSongs, index)
-                                        onNavigate(AppScreen.RADIO)
-                                    }
+                                    .combinedClickable(
+                                        onClick = {
+                                            playSoundAndHaptic()
+                                            onPlayPlaylist(activePlaylistName, sortedSongs, index)
+                                            onNavigate(AppScreen.RADIO)
+                                        },
+                                        onLongClick = {
+                                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            onSongLongPress(song)
+                                        }
+                                    )
                                     .padding(vertical = 10.dp, horizontal = 4.dp)
                             ) {
 
@@ -871,6 +882,29 @@ fun PlaylistsScreen(
                                         color = Color.Gray,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                // Minimal three-dot quick action button (opens the
+                                // same quick action view as a long press).
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .clickable {
+                                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                            onSongLongPress(song)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "More options",
+                                        tint = textColor.copy(alpha = 0.55f),
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }

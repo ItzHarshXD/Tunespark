@@ -4,8 +4,10 @@ import android.content.Context
 import android.media.AudioManager
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,10 +39,11 @@ import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun RecentsScreen(
     onPlaySong: (SongItem) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -198,10 +202,17 @@ fun RecentsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable {
-                                            playSoundAndHaptic()
-                                            onPlaySong(song)
-                                        }
+                                        .combinedClickable(
+                                            onClick = {
+                                                playSoundAndHaptic()
+                                                onPlaySong(song)
+                                            },
+                                            onLongClick = {
+                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+                                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                onSongLongPress(song)
+                                            }
+                                        )
                                         .padding(vertical = 8.dp)
                                 ) {
                                     Box(
@@ -241,6 +252,29 @@ fun RecentsScreen(
                                             color = textColor.copy(alpha = 0.55f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
+
+                                    // Minimal three-dot quick action button (opens the
+                                    // same quick action view as a long press).
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .clickable {
+                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                onSongLongPress(song)
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.MoreVert,
+                                            contentDescription = "More options",
+                                            tint = textColor.copy(alpha = 0.55f),
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                 }

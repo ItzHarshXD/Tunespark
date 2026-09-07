@@ -8,6 +8,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -182,6 +183,7 @@ fun HomeScreen(
     onNavigate: (AppScreen) -> Unit,
     onShufflePlay: () -> Unit,
     onPlaySong: (SongItem) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {},
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
     onPlaylistClick: (CommunityPlaylistData) -> Unit,
     onRefresh: () -> Unit,
@@ -484,6 +486,7 @@ fun HomeScreen(
                                 onPlaySong(song)
                                 onNavigate(AppScreen.RADIO)
                             },
+                            onSongLongPress = onSongLongPress,
                             onStartRadio = {
                                 playSoundAndHaptic()
                                 onNavigate(AppScreen.RADIO)
@@ -527,6 +530,7 @@ private fun IdleContent(
     onDiscoverShowAllClick: () -> Unit,
     onAiSummaryClick: (Article) -> Unit = {},
     onPlaySong: (SongItem) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {},
     onStartRadio: () -> Unit,
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
     onPlaylistClick: (CommunityPlaylistData) -> Unit
@@ -552,6 +556,7 @@ private fun IdleContent(
             textColor = textColor,
             primaryColor = primaryColor,
             onPlaySong = onPlaySong,
+            onSongLongPress = onSongLongPress,
             onShowAllClick = onShowAllClick
         )
 
@@ -562,7 +567,8 @@ private fun IdleContent(
             isLoading = isQuickPicksLoading,
             textColor = textColor,
             primaryColor = primaryColor,
-            onPlayPlaylist = onPlayPlaylist
+            onPlayPlaylist = onPlayPlaylist,
+            onSongLongPress = onSongLongPress
         )
 
         Spacer(modifier = Modifier.height(40.dp))
@@ -572,7 +578,8 @@ private fun IdleContent(
             isLoading = isSpeedDialLoading,
             textColor = textColor,
             primaryColor = primaryColor,
-            onPlaySong = onPlaySong
+            onPlaySong = onPlaySong,
+            onSongLongPress = onSongLongPress
         )
 
         Spacer(modifier = Modifier.height(40.dp))
@@ -584,6 +591,7 @@ private fun IdleContent(
             primaryColor = primaryColor,
             onPlayPlaylist = onPlayPlaylist,
             onPlaySong = onPlaySong,
+            onSongLongPress = onSongLongPress,
             onPlaylistClick = onPlaylistClick
         )
 
@@ -598,7 +606,8 @@ fun SpeedDialView(
     isLoading: Boolean,
     textColor: Color,
     primaryColor: Color,
-    onPlaySong: (SongItem) -> Unit
+    onPlaySong: (SongItem) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -606,6 +615,10 @@ fun SpeedDialView(
     val playSoundAndHaptic = {
         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+    val longPressAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
     }
 
     Column(
@@ -651,10 +664,16 @@ fun SpeedDialView(
                                             .weight(1f)
                                             .aspectRatio(1f)
                                             .clip(RoundedCornerShape(12.dp))
-                                            .clickable {
-                                                playSoundAndHaptic()
-                                                onPlaySong(song)
-                                            }
+                                            .combinedClickable(
+                                                onClick = {
+                                                    playSoundAndHaptic()
+                                                    onPlaySong(song)
+                                                },
+                                                onLongClick = {
+                                                    longPressAndHaptic()
+                                                    onSongLongPress(song)
+                                                }
+                                            )
                                     ) {
                                         AsyncImage(
                                             model = song.thumbnail,
@@ -1527,6 +1546,7 @@ fun CommunityPlaylistsView(
     primaryColor: Color,
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
     onPlaySong: (SongItem) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {},
     onPlaylistClick: (CommunityPlaylistData) -> Unit
 ) {
     Column(
@@ -1555,6 +1575,7 @@ fun CommunityPlaylistsView(
                         primaryColor = primaryColor,
                         onPlayPlaylist = onPlayPlaylist,
                         onPlaySong = onPlaySong,
+                        onSongLongPress = onSongLongPress,
                         onPlaylistClick = onPlaylistClick
                     )
                 }
@@ -1563,6 +1584,7 @@ fun CommunityPlaylistsView(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CommunityPlaylistCard(
     data: CommunityPlaylistData,
@@ -1570,6 +1592,7 @@ fun CommunityPlaylistCard(
     primaryColor: Color,
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
     onPlaySong: (SongItem) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {},
     onPlaylistClick: (CommunityPlaylistData) -> Unit
 ) {
     val context = LocalContext.current
@@ -1578,6 +1601,10 @@ fun CommunityPlaylistCard(
     val playSoundAndHaptic = {
         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+    val longPressAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
     }
 
     val coroutineScope = rememberCoroutineScope()
@@ -1694,10 +1721,16 @@ fun CommunityPlaylistCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                playSoundAndHaptic()
-                                onPlaySong(song)
-                            },
+                            .combinedClickable(
+                                onClick = {
+                                    playSoundAndHaptic()
+                                    onPlaySong(song)
+                                },
+                                onLongClick = {
+                                    longPressAndHaptic()
+                                    onSongLongPress(song)
+                                }
+                            ),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         AsyncImage(
@@ -1945,12 +1978,14 @@ fun CommunityPlaylistSkeleton() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CommunityPlaylistDetailView(
     data: CommunityPlaylistData,
     onBack: () -> Unit,
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
     onPlaySong: (SongItem) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
     textColor: Color,
     backgroundColor: Color,
@@ -1967,6 +2002,10 @@ fun CommunityPlaylistDetailView(
     val playSoundAndHaptic = {
         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+    val longPressAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
     }
 
     Box(
@@ -2152,11 +2191,17 @@ fun CommunityPlaylistDetailView(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                playSoundAndHaptic()
-                                onPlayPlaylist(playlist.title, songs, index)
-                                onNavigate(AppScreen.RADIO)
-                            }
+                            .combinedClickable(
+                                onClick = {
+                                    playSoundAndHaptic()
+                                    onPlayPlaylist(playlist.title, songs, index)
+                                    onNavigate(AppScreen.RADIO)
+                                },
+                                onLongClick = {
+                                    longPressAndHaptic()
+                                    onSongLongPress(song)
+                                }
+                            )
                             .padding(vertical = 10.dp, horizontal = 4.dp)
                     ) {
                         Box(
@@ -2210,7 +2255,8 @@ fun QuickPicksView(
     isLoading: Boolean,
     textColor: Color,
     primaryColor: Color,
-    onPlayPlaylist: (String, List<SongItem>, Int) -> Unit
+    onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {}
 ) {
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -2294,7 +2340,8 @@ fun QuickPicksView(
                     textColor = textColor,
                     primaryColor = primaryColor,
                     scale = zoomScale,
-                    onClick = { onPlayPlaylist("Quick Picks", songs, index) }
+                    onClick = { onPlayPlaylist("Quick Picks", songs, index) },
+                    onLongClick = { onSongLongPress(song) }
                 )
             }
         }
@@ -2327,13 +2374,15 @@ private fun String.toHighResThumbnail(): String {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickPicksCard(
     song: SongItem,
     textColor: Color,
     primaryColor: Color,
     scale: Float = 1.0f,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -2342,16 +2391,26 @@ fun QuickPicksCard(
         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
     }
+    val longPressAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    }
 
     Box(
         modifier = Modifier
             .width(260.dp)
             .aspectRatio(1f)
             .clip(RoundedCornerShape(24.dp))
-            .clickable {
-                playSoundAndHaptic()
-                onClick()
-            }
+            .combinedClickable(
+                onClick = {
+                    playSoundAndHaptic()
+                    onClick()
+                },
+                onLongClick = {
+                    longPressAndHaptic()
+                    onLongClick()
+                }
+            )
     ) {
         AsyncImage(
             model = song.thumbnail?.toHighResThumbnail(),
@@ -2648,6 +2707,7 @@ fun RecentsView(
     textColor: Color,
     primaryColor: Color,
     onPlaySong: (SongItem) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {},
     onShowAllClick: () -> Unit
 ) {
     Column(
@@ -2709,7 +2769,8 @@ fun RecentsView(
                     RecentsCard(
                         song = song,
                         textColor = textColor,
-                        onPlaySong = onPlaySong
+                        onPlaySong = onPlaySong,
+                        onSongLongPress = onSongLongPress
                     )
                 }
             }
@@ -2717,11 +2778,13 @@ fun RecentsView(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecentsCard(
     song: SongItem,
     textColor: Color,
-    onPlaySong: (SongItem) -> Unit
+    onPlaySong: (SongItem) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -2730,14 +2793,24 @@ fun RecentsCard(
         audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
     }
+    val longPressAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    }
 
     Column(
         modifier = Modifier
             .width(120.dp)
-            .clickable {
-                playSoundAndHaptic()
-                onPlaySong(song)
-            }
+            .combinedClickable(
+                onClick = {
+                    playSoundAndHaptic()
+                    onPlaySong(song)
+                },
+                onLongClick = {
+                    longPressAndHaptic()
+                    onSongLongPress(song)
+                }
+            )
     ) {
         AsyncImage(
             model = song.thumbnail,

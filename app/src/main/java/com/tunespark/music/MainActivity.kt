@@ -37,6 +37,7 @@ import com.tunespark.music.ui.screens.parseLyricsToLines
 import com.metrolist.lrclib.LrcLib
 import com.tunespark.music.rss.Article
 import com.tunespark.music.rss.RssRepository
+import com.tunespark.music.LikedSongManager
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -72,6 +73,30 @@ private fun getScreenDepth(screen: AppScreen): Int {
         AppScreen.DISCOVER_FEED -> 2
         else -> 1
     }
+}
+
+/**
+ * Builds a queue-ready MediaItem for a song using the app's standard
+ * "tunespark://unresolved/<videoId>" placeholder URI. The PlaybackService
+ * lazily resolves the real stream URL when the item becomes current (and
+ * proactively prefetches it), so adding to the queue is instant.
+ *
+ * [mediaId] must be unique across the whole timeline (a Media3 session
+ * requirement). Use [MainPlayerScreen]s uniqueQueueMediaId helper to derive
+ * it so the same song can be queued multiple times without crashing.
+ */
+private fun buildQueueMediaItem(song: SongItem, mediaId: String): MediaItem {
+    return MediaItem.Builder()
+        .setUri(android.net.Uri.parse("tunespark://unresolved/${song.id}"))
+        .setMediaId(mediaId)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(song.title)
+                .setArtist(song.artists.joinToString(", ") { it.name })
+                .setArtworkUri(android.net.Uri.parse(song.thumbnail))
+                .build()
+        )
+        .build()
 }
 
 class MainActivity : ComponentActivity() {
@@ -549,7 +574,7 @@ fun MainPlayerScreen(
             // Re-verify that it is still playing the same song and in READY state
             val currentMediaItem = exoPlayer.currentMediaItem
             if (currentMediaItem != null) {
-                val mediaId = currentMediaItem.mediaId
+                val mediaId = currentMediaItem.mediaId.substringBefore('#')
                 val title = currentMediaItem.mediaMetadata.title?.toString() ?: ""
                 val artist = currentMediaItem.mediaMetadata.artist?.toString() ?: ""
                 val artwork = currentMediaItem.mediaMetadata.artworkUri?.toString() ?: ""
@@ -756,6 +781,17 @@ fun MainPlayerScreen(
                     exoPlayer.stop()
                     exoPlayer.clearMediaItems()
 
+                    // Media3 requires unique mediaIds across the timeline, and a
+                    // playlist may legitimately contain the same song more than
+                    // once — repeats get a "#q<n>" qualifier (stripped by the
+                    // service's videoIdFromMediaId for all playback routing).
+                    val queuedIdCounts = HashMap<String, Int>()
+                    val uniquePlaylistMediaId = { videoId: String ->
+                        val n = queuedIdCounts.getOrDefault(videoId, 0)
+                        queuedIdCounts[videoId] = n + 1
+                        if (n == 0) videoId else "$videoId#q$n"
+                    }
+
                     // Add all songs and insert startCommentaryItem at startIndex
                     songs.forEachIndexed { index, song ->
                         if (index == startIndex && startCommentaryItem != null) {
@@ -765,7 +801,7 @@ fun MainPlayerScreen(
                         val item = if (index == startIndex) {
                             MediaItem.Builder()
                                 .setUri(fetchedUrl)
-                                .setMediaId(song.id)
+                                .setMediaId(uniquePlaylistMediaId(song.id))
                                 .setMediaMetadata(
                                     MediaMetadata.Builder()
                                         .setTitle(song.title)
@@ -777,7 +813,7 @@ fun MainPlayerScreen(
                         } else {
                             MediaItem.Builder()
                                 .setUri(android.net.Uri.parse("tunespark://unresolved/${song.id}"))
-                                .setMediaId(song.id)
+                                .setMediaId(uniquePlaylistMediaId(song.id))
                                 .setMediaMetadata(
                                     MediaMetadata.Builder()
                                         .setTitle(song.title)
@@ -1458,6 +1494,104 @@ fun MainPlayerScreen(
         }
     }
 
+    // ── Quick Action View (long-press song context sheet) state & handlers ──
+    var quickActionSong by remember { mutableStateOf<SongItem?>(null) }
+    val showQuickActions: (SongItem) -> Unit = { song ->
+        // Dismiss the keyboard if it is active so the sheet is fully visible.
+        focusManager.clearFocus(force = true)
+        quickActionSong = song
+    }
+
+    // Media3 requires unique mediaIds across the timeline. The same song can
+    // legitimately be queued multiple times, so repeats get a "#q<n>"
+    // qualifier appended to the videoId. Playback routing always strips the
+    // qualifier (see PlaybackService.videoIdFromMediaId) before use.
+    val uniqueQueueMediaId: (String) -> String = { videoId ->
+        val bareId = videoId.substringBefore('#')
+        var candidate = videoId
+        var counter = 0
+        while ((0 until exoPlayer.mediaItemCount).any { exoPlayer.getMediaItemAt(it).mediaId == candidate }) {
+            counter++
+            candidate = "$bareId#q$counter"
+        }
+        candidate
+    }
+
+    // Keep the liked-songs cache fresh so the heart state inside the quick
+    // action sheet is always accurate (idempotent initializer).
+    LaunchedEffect(Unit) {
+        LikedSongManager.init(context)
+    }
+
+    val onQuickActionLike: (SongItem) -> Unit = { song ->
+        if (!SessionManager.isUserSignedIn(context)) {
+            Toast.makeText(context, "Sign in to like songs", Toast.LENGTH_SHORT).show()
+        } else {
+            val wasLiked = LikedSongManager.isLiked(song.id)
+            coroutineScope.launch {
+                val success = LikedSongManager.toggleLike(song.id, context)
+                Toast.makeText(
+                    context,
+                    when {
+                        success && !wasLiked -> "Added to Liked songs"
+                        success -> "Removed from Liked songs"
+                        else -> "Couldn't update like. Please try again."
+                    },
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    // Start radio: plays the song immediately and lets the PlaybackService seed
+    // the continuous autoplay radio queue, then opens the Radio player screen.
+    val onQuickActionStartRadio: (SongItem) -> Unit = { song ->
+        quickActionSong = null
+        playSong(song)
+        openFullPlayer()
+    }
+
+    // Play next: inserts the song right after the currently playing track.
+    val onQuickActionPlayNext: (SongItem) -> Unit = { song ->
+        quickActionSong = null
+        if (exoPlayer.mediaItemCount == 0) {
+            PlaybackService.isPlaylistMode = false
+            exoPlayer.addMediaItem(buildQueueMediaItem(song, uniqueQueueMediaId(song.id)))
+            exoPlayer.prepare()
+            exoPlayer.play()
+            Toast.makeText(context, "Playing ${song.title}", Toast.LENGTH_SHORT).show()
+        } else {
+            exoPlayer.addMediaItem(exoPlayer.currentMediaItemIndex + 1, buildQueueMediaItem(song, uniqueQueueMediaId(song.id)))
+            Toast.makeText(context, "Playing next: ${song.title}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Add to queue: appends the song at the end of the queue.
+    val onQuickActionAddToQueue: (SongItem) -> Unit = { song ->
+        quickActionSong = null
+        if (exoPlayer.mediaItemCount == 0) {
+            PlaybackService.isPlaylistMode = false
+            exoPlayer.addMediaItem(buildQueueMediaItem(song, uniqueQueueMediaId(song.id)))
+            exoPlayer.prepare()
+            exoPlayer.play()
+            Toast.makeText(context, "Playing ${song.title}", Toast.LENGTH_SHORT).show()
+        } else {
+            exoPlayer.addMediaItem(buildQueueMediaItem(song, uniqueQueueMediaId(song.id)))
+            Toast.makeText(context, "Added to queue: ${song.title}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Share song: native Android share sheet with the YouTube Music track link.
+    val onQuickActionShare: (SongItem) -> Unit = { song ->
+        quickActionSong = null
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "${song.title} - ${song.artists.joinToString(", ") { it.name }}")
+            putExtra(Intent.EXTRA_TEXT, song.shareLink)
+        }
+        context.startActivity(Intent.createChooser(sendIntent, "Share song"))
+    }
+
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -1502,6 +1636,7 @@ fun MainPlayerScreen(
                                     playSong(song)
                                     openFullPlayer()
                                 },
+                                onSongLongPress = showQuickActions,
                                 onPlayPlaylist = { name, songs, startIndex ->
                                     playPlaylist(name, songs, startIndex)
                                     openFullPlayer()
@@ -1643,6 +1778,7 @@ fun MainPlayerScreen(
                                         playSong(song)
                                         openFullPlayer()
                                     },
+                                    onSongLongPress = showQuickActions,
                                     onNavigate = navigateHandler
                                 )
                             }
@@ -1696,6 +1832,7 @@ fun MainPlayerScreen(
                             playSong(song)
                             openFullPlayer()
                         },
+                        onSongLongPress = showQuickActions,
                         onNavigate = navigateHandler
                     )
                 }
@@ -1734,6 +1871,7 @@ fun MainPlayerScreen(
                             playPlaylist(name, songs, startIndex)
                             openFullPlayer()
                         },
+                        onSongLongPress = showQuickActions,
                         onNavigate = { screen ->
                             if (screen != AppScreen.PLAYLISTS) {
                                 initialPlaylistId = null
@@ -1876,6 +2014,18 @@ fun MainPlayerScreen(
                     }
                 }
             }
+
+            // Quick Action View — long-press song context sheet, drawn last so it
+            // floats on very top of every screen, overlay and the bottom dock.
+            QuickActionView(
+                song = quickActionSong,
+                onDismiss = { quickActionSong = null },
+                onLike = onQuickActionLike,
+                onStartRadio = onQuickActionStartRadio,
+                onPlayNext = onQuickActionPlayNext,
+                onAddToQueue = onQuickActionAddToQueue,
+                onShare = onQuickActionShare
+            )
         }
     }
 }

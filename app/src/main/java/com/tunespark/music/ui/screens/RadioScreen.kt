@@ -579,7 +579,9 @@ fun RadioScreen(
         playQueue.getOrNull(currentTrackIndex) ?: exoPlayer.currentMediaItem
     }
     val currentVideoId = remember(currentSongItem) {
-        currentSongItem?.mediaId?.takeIf { !it.startsWith("commentary_") && it.isNotBlank() }
+        currentSongItem?.mediaId
+            ?.substringBefore('#')
+            ?.takeIf { !it.startsWith("commentary_") && it.isNotBlank() }
     }
     val isSignedIn = remember(context) { com.tunespark.music.SessionManager.isUserSignedIn(context) }
 
