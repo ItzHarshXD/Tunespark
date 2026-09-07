@@ -309,6 +309,7 @@ class PlaybackService : MediaSessionService() {
             .setTitle("Music Context")
             .setArtist("Tunespark Radio")
             .setDescription(script)
+            .setArtworkUri(commentaryArtworkUri(this, "music_context"))
 
         return MediaItem.Builder()
             .setUri(android.net.Uri.fromFile(audioFile))
@@ -651,7 +652,7 @@ class PlaybackService : MediaSessionService() {
                 .setSubtitle(briefingArticle.url)
                 .setAlbumTitle(briefingArticle.title)
                 .setAlbumArtist(briefingArticle.source)
-                .setArtworkUri(android.net.Uri.parse(briefingArticle.thumbnail))
+                .setArtworkUri(commentaryArtworkUri(this, "briefing"))
         }
 
         return MediaItem.Builder()

@@ -1070,20 +1070,20 @@ fun RadioScreen(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(secondaryColor)
                         ) {
-                            if (isCommentary) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("✨", fontSize = 20.sp)
-                                }
-                            } else if (artworkUri != null) {
+                            if (artworkUri != null) {
                                 AsyncImage(
                                     model = artworkUri.toString(),
                                     contentDescription = "Queue Artwork",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
+                            } else if (isCommentary) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("✨", fontSize = 20.sp)
+                                }
                             } else {
                                 Box(
                                     modifier = Modifier.fillMaxSize(),
@@ -1103,7 +1103,7 @@ fun RadioScreen(
                                 text = title,
                                 fontSize = 15.sp,
                                 fontWeight = if (isCurrent) FontWeight.Medium else FontWeight.Normal,
-                                color = if (isCommentary) Color(0xFF5856D6) else textColor,
+                                color = textColor,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -2995,20 +2995,20 @@ fun RadioScreen(
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(secondaryColor)
                                     ) {
-                                        if (isCommentary) {
-                                            Box(
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text("✨", fontSize = 20.sp)
-                                            }
-                                        } else if (artworkUri != null) {
+                                        if (artworkUri != null) {
                                             AsyncImage(
                                                 model = artworkUri.toString(),
                                                 contentDescription = "Queue Artwork",
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Crop
                                             )
+                                        } else if (isCommentary) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("✨", fontSize = 20.sp)
+                                            }
                                         } else {
                                             Box(
                                                 modifier = Modifier.fillMaxSize(),
