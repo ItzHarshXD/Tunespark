@@ -1754,6 +1754,11 @@ fun MainPlayerScreen(
                                     playPlaylist(name, songs, startIndex)
                                     openFullPlayer()
                                 },
+                                onPlaySong = { song ->
+                                    playSong(song)
+                                    openFullPlayer()
+                                },
+                                onSongLongPress = showQuickActions,
                                 onNavigate = { screen ->
                                     if (screen != AppScreen.PLAYLISTS) {
                                         initialPlaylistId = null
@@ -1871,6 +1876,10 @@ fun MainPlayerScreen(
                         initialPlaylistSongs = initialPlaylistSongs,
                         onPlayPlaylist = { name, songs, startIndex ->
                             playPlaylist(name, songs, startIndex)
+                            openFullPlayer()
+                        },
+                        onPlaySong = { song ->
+                            playSong(song)
                             openFullPlayer()
                         },
                         onSongLongPress = showQuickActions,
