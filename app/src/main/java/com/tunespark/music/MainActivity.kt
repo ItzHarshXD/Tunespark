@@ -1711,6 +1711,8 @@ fun MainPlayerScreen(
                                     initialArtistThumbnail = artist.thumbnail
                                     navigateHandler(AppScreen.PLAYLISTS)
                                 },
+                                onPlayNextSong = onQuickActionPlayNext,
+                                onAddToQueueSong = onQuickActionAddToQueue,
                                 onNavigate = navigateHandler
                             )
                         }
@@ -1772,6 +1774,8 @@ fun MainPlayerScreen(
                                     openFullPlayer()
                                 },
                                 onSongLongPress = showQuickActions,
+                                onPlayNextSong = onQuickActionPlayNext,
+                                onAddToQueueSong = onQuickActionAddToQueue,
                                 onNavigate = { screen ->
                                     if (screen != AppScreen.PLAYLISTS) {
                                         initialPlaylistId = null
@@ -1802,6 +1806,8 @@ fun MainPlayerScreen(
                                         openFullPlayer()
                                     },
                                     onSongLongPress = showQuickActions,
+                                    onPlayNextSong = onQuickActionPlayNext,
+                                    onAddToQueueSong = onQuickActionAddToQueue,
                                     onNavigate = navigateHandler
                                 )
                             }
@@ -1856,6 +1862,8 @@ fun MainPlayerScreen(
                             openFullPlayer()
                         },
                         onSongLongPress = showQuickActions,
+                        onPlayNextSong = onQuickActionPlayNext,
+                        onAddToQueueSong = onQuickActionAddToQueue,
                         onArtistClick = { artist ->
                             initialArtistId = artist.id
                             initialArtistName = artist.title
@@ -1908,6 +1916,8 @@ fun MainPlayerScreen(
                             openFullPlayer()
                         },
                         onSongLongPress = showQuickActions,
+                        onPlayNextSong = onQuickActionPlayNext,
+                        onAddToQueueSong = onQuickActionAddToQueue,
                         onNavigate = { screen ->
                             if (screen != AppScreen.PLAYLISTS) {
                                 initialPlaylistId = null

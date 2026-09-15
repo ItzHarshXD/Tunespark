@@ -132,6 +132,8 @@ fun PlaylistsScreen(
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
     onPlaySong: ((SongItem) -> Unit)? = null,
     onSongLongPress: (SongItem) -> Unit = {},
+    onPlayNextSong: (SongItem) -> Unit = {},
+    onAddToQueueSong: (SongItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -699,7 +701,9 @@ fun PlaylistsScreen(
                         }
                         onNavigate(AppScreen.RADIO)
                     },
-                    onSongLongPress = onSongLongPress
+                    onSongLongPress = onSongLongPress,
+                    onPlayNextSong = onPlayNextSong,
+                    onAddToQueueSong = onAddToQueueSong
                 )
             }
 
@@ -932,6 +936,10 @@ fun PlaylistsScreen(
                                     }
                                 } else {
                                     itemsIndexed(artistTopSongs.take(10)) { index, song ->
+                                        SwipeQueueContainer(
+                                            onPlayNext = { onPlayNextSong(song) },
+                                            onAddToQueue = { onAddToQueueSong(song) }
+                                        ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier
@@ -1009,6 +1017,7 @@ fun PlaylistsScreen(
                                                     modifier = Modifier.size(20.dp)
                                                 )
                                             }
+                                        }
                                         }
                                     }
                                 }
@@ -1390,6 +1399,10 @@ fun PlaylistsScreen(
                                 }
                             } else {
                                 itemsIndexed(sortedSongs) { index, song ->
+                                    SwipeQueueContainer(
+                                        onPlayNext = { onPlayNextSong(song) },
+                                        onAddToQueue = { onAddToQueueSong(song) }
+                                    ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier
@@ -1468,6 +1481,7 @@ fun PlaylistsScreen(
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
+                                    }
                                     }
                                 }
                             }

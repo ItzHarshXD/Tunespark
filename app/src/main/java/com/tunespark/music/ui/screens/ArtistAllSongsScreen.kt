@@ -43,6 +43,8 @@ fun ArtistAllSongsScreen(
     onBack: () -> Unit,
     onPlaySong: (SongItem) -> Unit,
     onSongLongPress: (SongItem) -> Unit,
+    onPlayNextSong: (SongItem) -> Unit = {},
+    onAddToQueueSong: (SongItem) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -234,6 +236,10 @@ fun ArtistAllSongsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(sortedSongs) { song ->
+                        SwipeQueueContainer(
+                            onPlayNext = { onPlayNextSong(song) },
+                            onAddToQueue = { onAddToQueueSong(song) }
+                        ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -312,6 +318,7 @@ fun ArtistAllSongsScreen(
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
+                        }
                         }
                     }
                 }

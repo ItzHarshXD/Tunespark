@@ -60,6 +60,8 @@ fun SearchScreen(
     onTriggerSearch: () -> Unit,
     onPlaySong: (SongItem) -> Unit,
     onSongLongPress: (SongItem) -> Unit = {},
+    onPlayNextSong: (SongItem) -> Unit = {},
+    onAddToQueueSong: (SongItem) -> Unit = {},
     onArtistClick: (ArtistItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
@@ -377,6 +379,10 @@ fun SearchScreen(
                     )
                 }
                 items(localResults) { song ->
+                    SwipeQueueContainer(
+                        onPlayNext = { onPlayNextSong(song) },
+                        onAddToQueue = { onAddToQueueSong(song) }
+                    ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -446,6 +452,7 @@ fun SearchScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
+                    }
                     }
                 }
             } else if (!localIsSearching && searchQuery.isEmpty()) {

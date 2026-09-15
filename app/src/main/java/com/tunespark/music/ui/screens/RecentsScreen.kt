@@ -44,6 +44,8 @@ import kotlinx.coroutines.withContext
 fun RecentsScreen(
     onPlaySong: (SongItem) -> Unit,
     onSongLongPress: (SongItem) -> Unit = {},
+    onPlayNextSong: (SongItem) -> Unit = {},
+    onAddToQueueSong: (SongItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -198,6 +200,10 @@ fun RecentsScreen(
                             }
 
                             items(section.songs) { song ->
+                                SwipeQueueContainer(
+                                    onPlayNext = { onPlayNextSong(song) },
+                                    onAddToQueue = { onAddToQueueSong(song) }
+                                ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
@@ -277,6 +283,7 @@ fun RecentsScreen(
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
+                                }
                                 }
                             }
                         }
