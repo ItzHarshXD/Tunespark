@@ -563,7 +563,24 @@ fun PlaylistsScreen(
                     if (moreEndpoint != null) {
                         val itemsResult = YouTube.artistItems(moreEndpoint)
                         if (itemsResult.isSuccess) {
-                            allSongs = itemsResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                            val page = itemsResult.getOrNull()
+                            allSongs = page?.items?.filterIsInstance<SongItem>().orEmpty()
+
+                            // Page through every continuation so artists with more
+                            // than one shelf page (~100 songs) show their full catalog.
+                            var continuation = page?.continuation
+                            val seenContinuations = mutableSetOf<String>()
+                            var requestCount = 0
+                            while (continuation != null && requestCount < 50) {
+                                if (!seenContinuations.add(continuation)) break
+                                requestCount++
+                                val continuationPage =
+                                    YouTube.artistItemsContinuation(continuation).getOrNull() ?: break
+                                val songs = continuationPage.items.filterIsInstance<SongItem>()
+                                if (songs.isEmpty()) break
+                                allSongs = allSongs + songs
+                                continuation = continuationPage.continuation
+                            }
                         }
                     }
 
