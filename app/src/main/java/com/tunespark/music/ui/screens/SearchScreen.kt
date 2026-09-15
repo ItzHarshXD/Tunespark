@@ -34,7 +34,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -81,6 +83,10 @@ fun SearchScreen(
     var localResults by remember { mutableStateOf<List<SongItem>>(searchResults) }
     var artistResults by remember { mutableStateOf<List<ArtistItem>>(emptyList()) }
     var localIsSearching by remember { mutableStateOf(false) }
+    // True once the user commits a search (keyboard search button or tapping a
+    // suggestion row). While committed, the 3 live recommendations are hidden —
+    // only real results are shown. Typing again resets it.
+    var isSearchCommitted by remember { mutableStateOf(false) }
 
     LaunchedEffect(searchQuery) {
         if (searchQuery.isBlank()) {
@@ -134,6 +140,16 @@ fun SearchScreen(
     val backgroundColor = MaterialTheme.colorScheme.background
     val textColor = MaterialTheme.colorScheme.onBackground
 
+    // Backing TextFieldValue so the cursor can be placed at the end of the text
+    // whenever the query is filled programmatically (e.g. via the ↗ arrow).
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(searchQuery)) }
+    LaunchedEffect(searchQuery) {
+        if (searchQuery != textFieldValue.text) {
+            // External change (arrow fill, suggestion tap, clear): move cursor to end.
+            textFieldValue = TextFieldValue(searchQuery, TextRange(searchQuery.length))
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -142,8 +158,12 @@ fun SearchScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         OutlinedTextField(
-            value = searchQuery,
-            onValueChange = onSearchQueryChange,
+            value = textFieldValue,
+            onValueChange = {
+                textFieldValue = it
+                onSearchQueryChange(it.text)
+                isSearchCommitted = false
+            },
             placeholder = {
                 Text(
                     "Search songs, artists, albums...",
@@ -178,6 +198,7 @@ fun SearchScreen(
             keyboardActions = KeyboardActions(
                 onSearch = {
                     focusManager.clearFocus()
+                    isSearchCommitted = true
                 }
             ),
             colors = OutlinedTextFieldDefaults.colors(
@@ -219,20 +240,24 @@ fun SearchScreen(
             contentPadding = PaddingValues(bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (searchQuery.isNotEmpty() && suggestions.isNotEmpty()) {
+            if (searchQuery.isNotEmpty() && !isSearchCommitted && suggestions.isNotEmpty()) {
                 items(suggestions.take(3)) { suggestion ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
                                 focusManager.clearFocus()
+                                isSearchCommitted = true
                                 onSearchQueryChange(suggestion)
                             }
                             .padding(vertical = 6.dp, horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Search,
                                 contentDescription = "Suggestion",
@@ -244,14 +269,27 @@ fun SearchScreen(
                                 text = suggestion,
                                 color = textColor,
                                 fontSize = 16.sp,
-                                fontWeight = FontWeight.Normal
+                                fontWeight = FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
+                        // The ↗ arrow fills the suggestion into the search box (re-running
+                        // the search with suggestions still visible, cursor at end of the
+                        // filled text) — it never commits the search.
                         Text(
                             text = "↗",
                             color = textColor,
                             fontSize = 20.sp,
-                            fontWeight = FontWeight.Normal
+                            fontWeight = FontWeight.Normal,
+                            modifier = Modifier
+                                .clickable {
+                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    onSearchQueryChange(suggestion)
+                                    focusRequester.requestFocus()
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
                 }
@@ -329,6 +367,15 @@ fun SearchScreen(
             }
 
             if (localResults.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Songs",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor,
+                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 8.dp)
+                    )
+                }
                 items(localResults) { song ->
                     Row(
                         modifier = Modifier
