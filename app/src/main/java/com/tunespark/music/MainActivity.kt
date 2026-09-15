@@ -432,6 +432,10 @@ fun MainPlayerScreen(
     var initialPlaylistAuthorName by remember { mutableStateOf<String?>(null) }
     var initialPlaylistAuthorAvatarUrl by remember { mutableStateOf<String?>(null) }
     var initialPlaylistSongs by remember { mutableStateOf<List<com.metrolist.innertube.models.SongItem>>(emptyList()) }
+    // State variables for initial artist navigation to Playlists screen (opened from Search)
+    var initialArtistId by remember { mutableStateOf<String?>(null) }
+    var initialArtistName by remember { mutableStateOf<String?>(null) }
+    var initialArtistThumbnail by remember { mutableStateOf<String?>(null) }
     var isLoadingProfile by remember { mutableStateOf(false) }
     var profileError by remember { mutableStateOf<String?>(null) }
 
@@ -1701,6 +1705,12 @@ fun MainPlayerScreen(
                                     playSong(song)
                                     openFullPlayer()
                                 },
+                                onArtistClick = { artist ->
+                                    initialArtistId = artist.id
+                                    initialArtistName = artist.title
+                                    initialArtistThumbnail = artist.thumbnail
+                                    navigateHandler(AppScreen.PLAYLISTS)
+                                },
                                 onNavigate = navigateHandler
                             )
                         }
@@ -1750,6 +1760,9 @@ fun MainPlayerScreen(
                                 initialPlaylistAuthorName = initialPlaylistAuthorName,
                                 initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
                                 initialPlaylistSongs = initialPlaylistSongs,
+                                initialArtistId = initialArtistId,
+                                initialArtistName = initialArtistName,
+                                initialArtistThumbnail = initialArtistThumbnail,
                                 onPlayPlaylist = { name, songs, startIndex ->
                                     playPlaylist(name, songs, startIndex)
                                     openFullPlayer()
@@ -1770,6 +1783,9 @@ fun MainPlayerScreen(
                                         initialPlaylistAuthorName = null
                                         initialPlaylistAuthorAvatarUrl = null
                                         initialPlaylistSongs = emptyList()
+                                        initialArtistId = null
+                                        initialArtistName = null
+                                        initialArtistThumbnail = null
                                     }
                                     if (screen == AppScreen.RADIO) {
                                         openFullPlayer()
@@ -1840,6 +1856,12 @@ fun MainPlayerScreen(
                             openFullPlayer()
                         },
                         onSongLongPress = showQuickActions,
+                        onArtistClick = { artist ->
+                            initialArtistId = artist.id
+                            initialArtistName = artist.title
+                            initialArtistThumbnail = artist.thumbnail
+                            navigateHandler(AppScreen.PLAYLISTS)
+                        },
                         onNavigate = navigateHandler
                     )
                 }
@@ -1874,6 +1896,9 @@ fun MainPlayerScreen(
                         initialPlaylistAuthorName = initialPlaylistAuthorName,
                         initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
                         initialPlaylistSongs = initialPlaylistSongs,
+                        initialArtistId = initialArtistId,
+                        initialArtistName = initialArtistName,
+                        initialArtistThumbnail = initialArtistThumbnail,
                         onPlayPlaylist = { name, songs, startIndex ->
                             playPlaylist(name, songs, startIndex)
                             openFullPlayer()
@@ -1894,6 +1919,9 @@ fun MainPlayerScreen(
                                 initialPlaylistAuthorName = null
                                 initialPlaylistAuthorAvatarUrl = null
                                 initialPlaylistSongs = emptyList()
+                                initialArtistId = null
+                                initialArtistName = null
+                                initialArtistThumbnail = null
                             }
                             if (screen == AppScreen.RADIO) {
                                 openFullPlayer()

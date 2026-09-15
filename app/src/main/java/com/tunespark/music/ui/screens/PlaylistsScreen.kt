@@ -126,6 +126,9 @@ fun PlaylistsScreen(
     initialPlaylistAuthorName: String? = null,
     initialPlaylistAuthorAvatarUrl: String? = null,
     initialPlaylistSongs: List<SongItem> = emptyList(),
+    initialArtistId: String? = null,
+    initialArtistName: String? = null,
+    initialArtistThumbnail: String? = null,
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
     onPlaySong: ((SongItem) -> Unit)? = null,
     onSongLongPress: (SongItem) -> Unit = {},
@@ -187,9 +190,9 @@ fun PlaylistsScreen(
     var isSongsLoading by remember { mutableStateOf(false) }
 
     // Artist navigation state
-    var activeArtistId by remember { mutableStateOf<String?>(null) }
-    var activeArtistName by remember { mutableStateOf("") }
-    var activeArtistThumbnail by remember { mutableStateOf<String?>(null) }
+    var activeArtistId by remember { mutableStateOf(initialArtistId) }
+    var activeArtistName by remember { mutableStateOf(initialArtistName ?: "") }
+    var activeArtistThumbnail by remember { mutableStateOf(initialArtistThumbnail) }
     var activeArtistSubscribers by remember { mutableStateOf<String?>(null) }
     var activeArtistRawItem by remember { mutableStateOf<ArtistItem?>(null) }
     var activeArtistRadioEndpoint by remember { mutableStateOf<WatchEndpoint?>(null) }

@@ -10,12 +10,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -39,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.metrolist.innertube.YouTube
+import com.metrolist.innertube.models.ArtistItem
 import com.metrolist.innertube.models.SongItem
 import com.tunespark.music.AppScreen
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +58,7 @@ fun SearchScreen(
     onTriggerSearch: () -> Unit,
     onPlaySong: (SongItem) -> Unit,
     onSongLongPress: (SongItem) -> Unit = {},
+    onArtistClick: (ArtistItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -75,12 +79,14 @@ fun SearchScreen(
 
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
     var localResults by remember { mutableStateOf<List<SongItem>>(searchResults) }
+    var artistResults by remember { mutableStateOf<List<ArtistItem>>(emptyList()) }
     var localIsSearching by remember { mutableStateOf(false) }
 
     LaunchedEffect(searchQuery) {
         if (searchQuery.isBlank()) {
             suggestions = emptyList()
             localResults = emptyList()
+            artistResults = emptyList()
             onSearchQueryChange("")
             return@LaunchedEffect
         }
@@ -105,6 +111,18 @@ fun SearchScreen(
             if (resultsRes.isSuccess) {
                 val items = resultsRes.getOrNull()?.items.orEmpty()
                 localResults = items.filterIsInstance<SongItem>()
+            }
+
+            // Artist search: fetch matching artists alongside songs so users can
+            // navigate straight to an artist profile from the search screen.
+            val artistRes = withContext(Dispatchers.IO) {
+                YouTube.search(
+                    query = searchQuery,
+                    filter = YouTube.SearchFilter.FILTER_ARTIST
+                )
+            }
+            if (artistRes.isSuccess) {
+                artistResults = artistRes.getOrNull()?.items?.filterIsInstance<ArtistItem>().orEmpty()
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -238,6 +256,73 @@ fun SearchScreen(
                     }
                 }
 
+                item {
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+            }
+
+            if (artistResults.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Artists",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor,
+                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 8.dp)
+                    )
+                }
+                item {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        items(artistResults) { artist ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .width(96.dp)
+                                    .clickable {
+                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        onArtistClick(artist)
+                                    }
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(84.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.secondary),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (artist.thumbnail != null) {
+                                        AsyncImage(
+                                            model = artist.thumbnail,
+                                            contentDescription = artist.title,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.AccountCircle,
+                                            contentDescription = "Artist",
+                                            tint = textColor.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(40.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = artist.title,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = textColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
                 item {
                     Spacer(modifier = Modifier.height(6.dp))
                 }
