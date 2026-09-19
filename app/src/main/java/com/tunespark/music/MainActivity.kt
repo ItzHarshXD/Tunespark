@@ -50,6 +50,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
@@ -72,6 +73,36 @@ private fun getScreenDepth(screen: AppScreen): Int {
         AppScreen.ACCOUNT,
         AppScreen.DISCOVER_FEED -> 2
         else -> 1
+    }
+}
+
+/**
+ * Determines whether an accountInfo() failure genuinely means the saved
+ * YouTube session is dead (the sign-in should be cleared), as opposed to a
+ * transient network/server problem.
+ *
+ * IMPORTANT: plain network errors must NEVER be treated as sign-out — doing
+ * so logged users out permanently whenever a launch happened to coincide
+ * with a bad connection. The session is only cleared when YouTube itself
+ * rejects the credentials (HTTP 401/403) or returns a 200 body that contains
+ * no active account header (which is what a dead cookie looks like).
+ */
+private fun isGenuineAuthFailure(throwable: Throwable?): Boolean {
+    return when (throwable) {
+        null -> false
+        // Ktor wraps non-2xx responses in ResponseException (expectSuccess = true).
+        is io.ktor.client.plugins.ResponseException -> {
+            val code = throwable.response.status.value
+            code == 401 || code == 403
+        }
+        // Timeouts, DNS failures, connection resets, HTTP 5xx (ServerResponseException
+        // is handled above and only matches 401/403) — all transient, keep the session.
+        is java.io.IOException -> false
+        // A 200 response whose account menu has no active account header throws
+        // one of these while parsing — this is what an expired cookie looks like.
+        is IndexOutOfBoundsException, is NullPointerException -> true
+        // Malformed/unexpected body (serialization failures) — dead session.
+        else -> true
     }
 }
 
@@ -442,20 +473,49 @@ fun MainPlayerScreen(
     LaunchedEffect(Unit) {
         if (SessionManager.isUserSignedIn(context)) {
             isLoadingProfile = true
+            profileError = null
             coroutineScope.launch(Dispatchers.IO) {
-                val result = YouTube.accountInfo()
+                var fetched: com.metrolist.innertube.models.AccountInfo? = null
+                var authFailure = false
+
+                // Retry transient network failures with backoff; never treat
+                // them as sign-out. Only clear the session when YouTube itself
+                // rejects the saved credentials.
+                for (attempt in 1..3) {
+                    val result = YouTube.accountInfo()
+                    val info = result.getOrNull()
+                    if (info != null) {
+                        fetched = info
+                        break
+                    }
+                    if (isGenuineAuthFailure(result.exceptionOrNull())) {
+                        authFailure = true
+                        break
+                    }
+                    if (attempt < 3) delay(1500L * attempt)
+                }
+
                 withContext(Dispatchers.Main) {
                     isLoadingProfile = false
-                    if (result.isSuccess) {
-                        val info = result.getOrNull()
-                        if (info != null) {
-                            accountInfo = info
-                            SessionManager.saveAccountInfo(context, info)
+                    when {
+                        fetched != null -> {
+                            accountInfo = fetched
+                            SessionManager.saveAccountInfo(context, fetched)
+                            profileError = null
                         }
-                    } else {
-                        profileError = "Session expired. Please sign in again."
-                        SessionManager.clearSession(context)
-                        accountInfo = null
+                        authFailure -> {
+                            // Confirmed dead session: YouTube rejected the cookie
+                            // or returned a logged-out account menu. Safe to clear.
+                            profileError = "Session expired. Please sign in again."
+                            SessionManager.clearSession(context)
+                            accountInfo = null
+                        }
+                        else -> {
+                            // Network/server trouble after retries: the user is
+                            // still signed in — keep the session and stay quiet.
+                            // The cached profile remains visible in the UI.
+                            profileError = null
+                        }
                     }
                 }
             }
