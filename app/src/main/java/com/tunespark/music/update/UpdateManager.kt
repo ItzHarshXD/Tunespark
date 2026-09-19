@@ -42,6 +42,10 @@ object UpdateManager {
      */
     fun checkOnStartup(context: Context) {
         scope.launch(Dispatchers.IO) {
+            // Remove stale cached APKs (e.g. old-version files left behind by
+            // previous app versions) so they can never be installed by mistake.
+            UpdateDownloader.cleanupStaleApks(context)
+
             val result = UpdateChecker.checkLatestRelease(context)
             saveLastCheckTime(context, System.currentTimeMillis())
 
@@ -76,6 +80,7 @@ object UpdateManager {
     fun checkForUpdates(context: Context) {
         _state.value = UpdateState.Checking
         scope.launch(Dispatchers.IO) {
+            UpdateDownloader.cleanupStaleApks(context)
             val result = UpdateChecker.checkLatestRelease(context)
             saveLastCheckTime(context, System.currentTimeMillis())
 

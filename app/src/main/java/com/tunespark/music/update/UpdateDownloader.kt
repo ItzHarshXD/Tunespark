@@ -54,15 +54,62 @@ object UpdateDownloader {
     }
 
     /**
+     * Returns the local file where the APK for [releaseInfo] is stored.
+     * The filename is derived from the release tag (e.g. "Tunespark-1.5.0.apk")
+     * instead of the GitHub asset name, because release assets may reuse the
+     * same filename ("Tunespark.apk") across every release. Keying the cache
+     * by tag guarantees that a download of one version can never be mistaken
+     * for the download of another version.
+     */
+    fun getLocalApkFile(context: Context, releaseInfo: ReleaseInfo): File {
+        val dir = getUpdatesDir(context)
+        val version = VersionComparator.sanitizeVersion(releaseInfo.tagName)
+            .ifBlank { releaseInfo.tagName.filter { it.isLetterOrDigit() || it == '.' } }
+        return File(dir, "Tunespark-$version.apk")
+    }
+
+    /**
      * Checks if a valid APK for [releaseInfo] has already been downloaded.
+     * The cached file must pass two checks:
+     *  1. It is a valid APK archive for this app's package name.
+     *  2. Its versionCode is strictly NEWER than the installed app's versionCode.
+     * Check 2 rejects stale cached files from previous releases that reused the
+     * same filename — installing such a file would re-install the current
+     * version instead of updating ("app installs the same version" bug).
      */
     fun getDownloadedApk(context: Context, releaseInfo: ReleaseInfo): File? {
+        val file = getLocalApkFile(context, releaseInfo)
+        if (!file.exists()) return null
+        val isValid = UpdateInstaller.verifyApk(context, file) &&
+                UpdateInstaller.isApkNewerThanInstalled(context, file)
+        if (!isValid) {
+            file.delete()
+            return null
+        }
+        return file
+    }
+
+    /**
+     * Deletes stale APK files from the updates directory:
+     *  - any file whose versionCode is <= the installed versionCode (including
+     *    legacy files such as "Tunespark.apk" from previous app versions),
+     *  - any file that is not a valid APK archive for this app,
+     *  - leftover ".part" partial-download files.
+     * Called on every update check so devices that are already stuck with a
+     * stale cached APK self-heal on the next app launch.
+     */
+    fun cleanupStaleApks(context: Context) {
         val dir = getUpdatesDir(context)
-        val file = File(dir, releaseInfo.apkFileName)
-        return if (file.exists() && UpdateInstaller.verifyApk(context, file)) {
-            file
-        } else {
-            null
+        val files = dir.listFiles() ?: return
+        for (file in files) {
+            if (file.name.endsWith(".part")) {
+                file.delete()
+                continue
+            }
+            val newer = UpdateInstaller.isApkNewerThanInstalled(context, file)
+            if (!newer) {
+                file.delete()
+            }
         }
     }
 
@@ -76,8 +123,7 @@ object UpdateDownloader {
         activeCall = null
 
         if (releaseInfo != null) {
-            val dir = getUpdatesDir(context)
-            val partFile = File(dir, "${releaseInfo.apkFileName}.part")
+            val partFile = File(getLocalApkFile(context, releaseInfo).absolutePath + ".part")
             if (partFile.exists()) {
                 partFile.delete()
             }
@@ -92,12 +138,16 @@ object UpdateDownloader {
         releaseInfo: ReleaseInfo,
         onProgress: (bytesDownloaded: Long, totalBytes: Long, progress: Float) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
-        val updatesDir = getUpdatesDir(context)
-        val targetFile = File(updatesDir, releaseInfo.apkFileName)
-        val partFile = File(updatesDir, "${releaseInfo.apkFileName}.part")
+        val targetFile = getLocalApkFile(context, releaseInfo)
+        val partFile = File(targetFile.absolutePath + ".part")
 
-        // If target file already exists and is valid, return it immediately
-        if (targetFile.exists() && UpdateInstaller.verifyApk(context, targetFile)) {
+        // If target file already exists AND is genuinely a newer version than
+        // the installed app, reuse it. A stale cached file from an older
+        // release must never be reused (it would re-install the same version).
+        if (targetFile.exists() &&
+            UpdateInstaller.verifyApk(context, targetFile) &&
+            UpdateInstaller.isApkNewerThanInstalled(context, targetFile)
+        ) {
             return@withContext Result.success(targetFile)
         }
 
@@ -165,11 +215,19 @@ object UpdateDownloader {
                 partFile.delete()
             }
 
-            // Verify the integrity of the downloaded APK
+            // Verify the integrity of the downloaded APK, and that it is
+            // genuinely newer than the installed version (guards against a
+            // release asset accidentally containing an old build).
             if (!UpdateInstaller.verifyApk(context, targetFile)) {
                 targetFile.delete()
                 return@withContext Result.failure(
                     Exception("Downloaded APK verification failed: package archive is invalid or corrupted.")
+                )
+            }
+            if (!UpdateInstaller.isApkNewerThanInstalled(context, targetFile)) {
+                targetFile.delete()
+                return@withContext Result.failure(
+                    Exception("Downloaded APK is not newer than the installed version.")
                 )
             }
 

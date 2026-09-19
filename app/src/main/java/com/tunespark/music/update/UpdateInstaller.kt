@@ -2,6 +2,7 @@ package com.tunespark.music.update
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -57,6 +58,62 @@ object UpdateInstaller {
         } catch (e: Exception) {
             false
         }
+    }
+
+    /**
+     * Reads the versionCode of an APK archive without installing it.
+     * Returns null if the file is not a valid APK archive for this app.
+     */
+    fun getApkVersionCode(context: Context, apkFile: File): Long? {
+        if (!apkFile.exists() || apkFile.length() <= 0) return null
+        return try {
+            val pm = context.packageManager
+            val packageInfo = pm.getPackageArchiveInfo(apkFile.absolutePath, 0)
+            if (packageInfo != null && packageInfo.packageName == context.packageName) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    packageInfo.longVersionCode
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageInfo.versionCode.toLong()
+                }
+            } else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Returns the currently installed app's versionCode.
+     */
+    fun getInstalledVersionCode(context: Context): Long {
+        return try {
+            val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode.toLong()
+            }
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
+    /**
+     * Checks whether a cached APK is actually NEWER than the currently installed app.
+     * This is critical for update caching: release assets may reuse the same filename,
+     * so a stale (old-version) APK can sit in the updates folder and pass a basic
+     * validity check. Requiring versionCode > installed versionCode guarantees a cached
+     * file is a genuine pending update, never a re-install of the current version.
+     */
+    fun isApkNewerThanInstalled(context: Context, apkFile: File): Boolean {
+        val cachedVersionCode = getApkVersionCode(context, apkFile) ?: return false
+        return cachedVersionCode > getInstalledVersionCode(context)
     }
 
     /**
