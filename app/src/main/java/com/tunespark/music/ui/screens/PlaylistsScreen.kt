@@ -15,9 +15,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,6 +63,7 @@ import coil.compose.AsyncImage
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.*
 import com.metrolist.innertube.models.response.*
+import com.metrolist.innertube.pages.ArtistSection
 import com.tunespark.music.AppScreen
 import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
@@ -175,6 +178,9 @@ fun PlaylistsScreen(
     } // False -> descending (↓), True -> ascending (↑)
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
+    // Library filter tab (All / Playlists / Artists)
+    var libraryFilter by remember { mutableStateOf("All") }
+
     // Search parameters
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -203,6 +209,9 @@ fun PlaylistsScreen(
     var artistTopSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isArtistSongsLoading by remember { mutableStateOf(false) }
 
+    // Artist release shelves (Albums, Singles & EPs, etc.) from the artist page
+    var artistSections by remember { mutableStateOf<List<ArtistSection>>(emptyList()) }
+
     var isArtistAllSongsVisible by remember { mutableStateOf(false) }
     var artistAllSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isArtistAllSongsLoading by remember { mutableStateOf(false) }
@@ -214,13 +223,14 @@ fun PlaylistsScreen(
             searchQuery = ""
         } else if (isArtistAllSongsVisible) {
             isArtistAllSongsVisible = false
+        } else if (activePlaylistId != null) {
+            activePlaylistId = null
+            playlistSongs = emptyList()
         } else if (activeArtistId != null) {
             activeArtistId = null
             artistTopSongs = emptyList()
             artistAllSongs = emptyList()
-        } else if (activePlaylistId != null) {
-            activePlaylistId = null
-            playlistSongs = emptyList()
+            artistSections = emptyList()
         } else {
             onNavigate(AppScreen.HOME)
         }
@@ -488,6 +498,7 @@ fun PlaylistsScreen(
         isArtistSongsLoading = true
         artistTopSongs = emptyList()
         artistAllSongs = emptyList()
+        artistSections = emptyList()
         isArtistAllSongsVisible = false
 
         coroutineScope.launch(Dispatchers.IO) {
@@ -497,6 +508,7 @@ fun PlaylistsScreen(
                 var subText: String? = null
                 var radioEndpoint: WatchEndpoint? = null
                 var highResThumb: String? = null
+                var fetchedSections = emptyList<ArtistSection>()
 
                 val artistResult = YouTube.artist(artistId)
                 if (artistResult.isSuccess) {
@@ -514,6 +526,11 @@ fun PlaylistsScreen(
                             topSongs = songSection.items.filterIsInstance<SongItem>()
                             moreEndpoint = songSection.moreEndpoint
                         }
+                        // Capture release shelves (Albums, Singles & EPs, etc.)
+                        // shown below the top-songs list, just like YouTube Music.
+                        fetchedSections = page.sections.filter { section ->
+                            section.items.any { it is AlbumItem }
+                        }
                     }
                 }
 
@@ -526,6 +543,7 @@ fun PlaylistsScreen(
 
                 withContext(Dispatchers.Main) {
                     artistTopSongs = topSongs.take(10)
+                    artistSections = fetchedSections
                     activeArtistMoreEndpoint = moreEndpoint
                     if (!highResThumb.isNullOrEmpty()) activeArtistThumbnail = highResThumb
                     if (subText != null) activeArtistSubscribers = subText
@@ -638,6 +656,15 @@ fun PlaylistsScreen(
         fullySorted
     }
 
+    // Library tab filter (All / Playlists / Artists)
+    val tabFilteredGridItems = remember(sortedGridItems, libraryFilter) {
+        when (libraryFilter) {
+            "Playlists" -> sortedGridItems.filter { !it.isArtist }
+            "Artists" -> sortedGridItems.filter { it.isArtist }
+            else -> sortedGridItems
+        }
+    }
+
     val filteredSongs = remember(playlistSongs, searchQuery) {
         if (searchQuery.isBlank()) playlistSongs
         else playlistSongs.filter {
@@ -728,6 +755,7 @@ fun PlaylistsScreen(
                                     activeArtistId = null
                                     artistTopSongs = emptyList()
                                     artistAllSongs = emptyList()
+                                    artistSections = emptyList()
                                 },
                                 modifier = Modifier
                                     .size(44.dp)
@@ -1018,6 +1046,81 @@ fun PlaylistsScreen(
                                                 )
                                             }
                                         }
+                                        }
+                                    }
+                                }
+
+                                // Release shelves (Albums, Singles & EPs, etc.) below Top songs
+                                artistSections.forEach { section ->
+                                    val releaseItems = section.items.filterIsInstance<AlbumItem>()
+                                    if (releaseItems.isNotEmpty()) {
+                                        item(key = "artist_section_${section.title}") {
+                                            Text(
+                                                text = section.title,
+                                                fontSize = 20.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = textColor,
+                                                modifier = Modifier.padding(top = 24.dp, bottom = 12.dp)
+                                            )
+                                        }
+                                        item(key = "artist_section_row_${section.title}") {
+                                            LazyRow(
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                items(releaseItems, key = { it.browseId }) { release ->
+                                                    Column(
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        modifier = Modifier
+                                                            .width(124.dp)
+                                                            .clickable {
+                                                                playSoundAndHaptic()
+                                                                activePlaylistId = release.browseId
+                                                                activePlaylistName = release.title
+                                                                activePlaylistThumbnail = release.thumbnail
+                                                                activePlaylistSongCountText = release.year?.toString() ?: "Album"
+                                                                activePlaylistIsLiked = false
+                                                                activePlaylistRawItem = release
+                                                                activePlaylistAuthorName = activeArtistName
+                                                                activePlaylistAuthorAvatarUrl = null
+                                                            }
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(124.dp)
+                                                                .clip(RoundedCornerShape(16.dp))
+                                                                .background(Color.Gray.copy(alpha = 0.2f))
+                                                        ) {
+                                                            AsyncImage(
+                                                                model = release.thumbnail,
+                                                                contentDescription = release.title,
+                                                                contentScale = ContentScale.Crop,
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+                                                        }
+
+                                                        Spacer(modifier = Modifier.height(6.dp))
+
+                                                        Text(
+                                                            text = release.title,
+                                                            color = textColor,
+                                                            fontWeight = FontWeight.Medium,
+                                                            fontSize = 13.sp,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            textAlign = TextAlign.Center
+                                                        )
+                                                        Text(
+                                                            text = release.year?.toString() ?: "Album",
+                                                            color = Color.Gray,
+                                                            fontSize = 11.sp,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            textAlign = TextAlign.Center
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1726,7 +1829,42 @@ fun PlaylistsScreen(
                             }
                         }
 
-                        if (isLoadingGrid && sortedGridItems.isEmpty()) {
+                        // Library filter pills (All / Playlists / Artists)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            listOf("All", "Playlists", "Artists").forEach { tab ->
+                                val isSelected = libraryFilter == tab
+                                Box(
+                                    modifier = Modifier
+                                        .shadow(elevation = 4.dp, shape = CircleShape)
+                                        .clip(CircleShape)
+                                        .background(if (isSelected) Color(0xFFFF0000) else Color.Gray.copy(alpha = 0.15f))
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) Color(0xFFFF0000) else textColor.copy(alpha = 0.2f),
+                                            CircleShape
+                                        )
+                                        .clickable {
+                                            playSoundAndHaptic()
+                                            libraryFilter = tab
+                                        }
+                                        .padding(horizontal = 18.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = tab,
+                                        color = if (isSelected) Color.White else textColor,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+
+                        if (isLoadingGrid && tabFilteredGridItems.isEmpty()) {
                             Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(color = textColor)
                             }
@@ -1736,7 +1874,7 @@ fun PlaylistsScreen(
                                 onRefresh = { handleRefresh() },
                                 modifier = Modifier.weight(1f)
                             ) {
-                                if (sortedGridItems.isEmpty()) {
+                                if (tabFilteredGridItems.isEmpty()) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
@@ -1759,7 +1897,7 @@ fun PlaylistsScreen(
                                         modifier = Modifier.fillMaxSize(),
                                         contentPadding = PaddingValues(bottom = 96.dp)
                                     ) {
-                                        items(sortedGridItems) { item ->
+                                        items(tabFilteredGridItems) { item ->
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
                                                 modifier = Modifier
