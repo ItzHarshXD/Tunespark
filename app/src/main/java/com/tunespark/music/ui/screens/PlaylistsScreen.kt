@@ -194,6 +194,15 @@ fun PlaylistsScreen(
     var activePlaylistAuthorName by remember { mutableStateOf(initialPlaylistAuthorName) }
     var activePlaylistAuthorAvatarUrl by remember { mutableStateOf(initialPlaylistAuthorAvatarUrl) }
 
+    // True when the currently open playlist detail was opened from an artist page's
+    // release shelf (Albums / Singles & EPs). Used so the detail layer sits *above*
+    // the artist page instead of behind it, and so the slide animation goes forward.
+    var activePlaylistOpenedFromArtist by remember { mutableStateOf(false) }
+    // Screen header label for the open playlist/album detail.
+    var activePlaylistHeader by remember { mutableStateOf("Playlist View") }
+    // Release id currently being loaded + played straight from its shelf card.
+    var loadingReleaseId by remember { mutableStateOf<String?>(null) }
+
     var playlistSongs by remember { mutableStateOf(initialPlaylistSongs) }
     var isSongsLoading by remember { mutableStateOf(false) }
 
@@ -216,6 +225,43 @@ fun PlaylistsScreen(
     var artistAllSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isArtistAllSongsLoading by remember { mutableStateOf(false) }
 
+    // Opens a release (Album / Single / EP) card from an artist page's release shelf.
+    // Flagging `activePlaylistOpenedFromArtist` makes the detail layer count as *deeper*
+    // than the artist page, so it renders on top of it (and slides in from the right).
+    val openArtistRelease: (AlbumItem, String) -> Unit = { release, shelfTitle ->
+        playSoundAndHaptic()
+        activePlaylistHeader = shelfTitle
+        activePlaylistOpenedFromArtist = true
+        activePlaylistId = release.browseId
+        activePlaylistName = release.title
+        activePlaylistThumbnail = release.thumbnail
+        activePlaylistSongCountText = release.year?.toString() ?: "Album"
+        activePlaylistIsLiked = false
+        activePlaylistRawItem = release
+        activePlaylistAuthorName = activeArtistName
+        activePlaylistAuthorAvatarUrl = null
+    }
+
+    // Plays a release straight from its shelf card (album/single play badge) without
+    // opening the detail screen: fetches the tracklist, then starts playback + Radio.
+    val playArtistRelease: (AlbumItem) -> Unit = { release ->
+        if (loadingReleaseId == null) {
+            loadingReleaseId = release.id
+            coroutineScope.launch {
+                val tracks = withContext(Dispatchers.IO) {
+                    YouTube.albumSongs(release.playlistId, release).getOrNull().orEmpty()
+                }
+                loadingReleaseId = null
+                if (tracks.isNotEmpty()) {
+                    onPlayPlaylist(release.title, tracks, 0)
+                    onNavigate(AppScreen.RADIO)
+                } else {
+                    Toast.makeText(context, "Couldn't load '${release.title}'", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     BackHandler {
         playSoundAndHaptic()
         if (isSearchActive) {
@@ -226,6 +272,8 @@ fun PlaylistsScreen(
         } else if (activePlaylistId != null) {
             activePlaylistId = null
             playlistSongs = emptyList()
+            activePlaylistOpenedFromArtist = false
+            activePlaylistHeader = "Playlist View"
         } else if (activeArtistId != null) {
             activeArtistId = null
             artistTopSongs = emptyList()
@@ -673,31 +721,48 @@ fun PlaylistsScreen(
         }
     }
 
-    val sortedSongs = remember(filteredSongs, sortBy, sortAscending, activePlaylistId, activePlaylistIsLiked) {
+    val sortedSongs = remember(filteredSongs, sortBy, sortAscending, activePlaylistId, activePlaylistIsLiked, activePlaylistRawItem) {
         val sorted = when (sortBy) {
             "Name" -> filteredSongs.sortedBy { it.title.lowercase() }
             "Date updated" -> filteredSongs.sortedBy { it.id }
             else -> filteredSongs // Date added (as fetched)
         }
         val isLikedPlaylist = activePlaylistId == "LM" || activePlaylistIsLiked
-        if (isLikedPlaylist && sortBy == "Date added") {
-            if (sortAscending) sorted.reversed() else sorted
-        } else {
-            if (sortAscending) sorted else sorted.reversed()
+        val isAlbumRelease = activePlaylistRawItem is AlbumItem
+        when {
+            // Album / single / EP tracklists are positional — never reorder them, so the
+            // release plays back in its official track order when opened from a shelf.
+            isAlbumRelease && sortBy == "Date added" -> sorted
+            isLikedPlaylist && sortBy == "Date added" -> if (sortAscending) sorted.reversed() else sorted
+            else -> if (sortAscending) sorted else sorted.reversed()
+        }
+    }
+
+    // Navigation depth per view mode. A playlist/album detail opened from an artist
+    // page's release shelf is one level *deeper* than the artist page, which is what
+    // makes it render on top of the artist page instead of behind it.
+    val modeDepth: (PlaylistsViewMode) -> Int = { m ->
+        when (m) {
+            PlaylistsViewMode.LIBRARY_GRID -> 0
+            PlaylistsViewMode.PLAYLIST_DETAIL -> if (activePlaylistOpenedFromArtist) 2 else 1
+            PlaylistsViewMode.ARTIST_DETAIL -> 1
+            PlaylistsViewMode.ARTIST_ALL_SONGS -> 2
         }
     }
 
     val currentMode = when {
         isArtistAllSongsVisible && activeArtistId != null -> PlaylistsViewMode.ARTIST_ALL_SONGS
-        activeArtistId != null -> PlaylistsViewMode.ARTIST_DETAIL
+        // A release opened from an artist shelf must win over the artist page beneath it,
+        // otherwise the artist page keeps the foreground and the album opens "behind" it.
         activePlaylistId != null -> PlaylistsViewMode.PLAYLIST_DETAIL
+        activeArtistId != null -> PlaylistsViewMode.ARTIST_DETAIL
         else -> PlaylistsViewMode.LIBRARY_GRID
     }
 
     AnimatedContent(
         targetState = currentMode,
         transitionSpec = {
-            if (targetState.ordinal > initialState.ordinal) {
+            if (modeDepth(targetState) > modeDepth(initialState)) {
                 slideInHorizontally(animationSpec = tween(300)) { width -> width } togetherWith
                         slideOutHorizontally(animationSpec = tween(300)) { width -> -width }
             } else {
@@ -1069,21 +1134,12 @@ fun PlaylistsScreen(
                                                 modifier = Modifier.fillMaxWidth()
                                             ) {
                                                 items(releaseItems, key = { it.browseId }) { release ->
+                                                    val isReleaseLoading = loadingReleaseId == release.id
                                                     Column(
                                                         horizontalAlignment = Alignment.CenterHorizontally,
                                                         modifier = Modifier
                                                             .width(124.dp)
-                                                            .clickable {
-                                                                playSoundAndHaptic()
-                                                                activePlaylistId = release.browseId
-                                                                activePlaylistName = release.title
-                                                                activePlaylistThumbnail = release.thumbnail
-                                                                activePlaylistSongCountText = release.year?.toString() ?: "Album"
-                                                                activePlaylistIsLiked = false
-                                                                activePlaylistRawItem = release
-                                                                activePlaylistAuthorName = activeArtistName
-                                                                activePlaylistAuthorAvatarUrl = null
-                                                            }
+                                                            .clickable { openArtistRelease(release, section.title) }
                                                     ) {
                                                         Box(
                                                             modifier = Modifier
@@ -1097,6 +1153,38 @@ fun PlaylistsScreen(
                                                                 contentScale = ContentScale.Crop,
                                                                 modifier = Modifier.fillMaxSize()
                                                             )
+
+                                                            // Quick play badge — starts the release directly
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .align(Alignment.BottomEnd)
+                                                                    .padding(6.dp)
+                                                                    .size(34.dp)
+                                                                    .shadow(elevation = 6.dp, shape = CircleShape)
+                                                                    .clip(CircleShape)
+                                                                    .background(Color(0xFFFF0000))
+                                                                    .clickable(enabled = loadingReleaseId == null) {
+                                                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+                                                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                                        playArtistRelease(release)
+                                                                    },
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                if (isReleaseLoading) {
+                                                                    CircularProgressIndicator(
+                                                                        color = Color.White,
+                                                                        strokeWidth = 2.dp,
+                                                                        modifier = Modifier.size(18.dp)
+                                                                    )
+                                                                } else {
+                                                                    Icon(
+                                                                        imageVector = Icons.Default.PlayArrow,
+                                                                        contentDescription = "Play ${release.title}",
+                                                                        tint = Color.White,
+                                                                        modifier = Modifier.size(20.dp)
+                                                                    )
+                                                                }
+                                                            }
                                                         }
 
                                                         Spacer(modifier = Modifier.height(6.dp))
@@ -1211,6 +1299,8 @@ fun PlaylistsScreen(
                                         playSoundAndHaptic()
                                         activePlaylistId = null
                                         playlistSongs = emptyList()
+                                        activePlaylistOpenedFromArtist = false
+                                        activePlaylistHeader = "Playlist View"
                                     },
                                     modifier = Modifier
                                         .size(44.dp)
@@ -1227,7 +1317,7 @@ fun PlaylistsScreen(
                                 Spacer(modifier = Modifier.width(16.dp))
 
                                 Text(
-                                    text = "Playlist View",
+                                    text = activePlaylistHeader,
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = textColor
@@ -1447,15 +1537,18 @@ fun PlaylistsScreen(
                                                                 if (!SessionManager.isUserSignedIn(context)) {
                                                                     Toast.makeText(context, "Please sign in to your account first.", Toast.LENGTH_SHORT).show()
                                                                 } else {
+                                                                    // Albums / singles / EPs are saved through their release
+                                                                    // playlist id, plain playlists through their own id.
+                                                                    val targetId = (activePlaylistRawItem as? AlbumItem)?.playlistId ?: currentActiveId
                                                                     coroutineScope.launch {
                                                                         val result = withContext(Dispatchers.IO) {
-                                                                            YouTube.likePlaylist(currentActiveId, true)
+                                                                            YouTube.likePlaylist(targetId, true)
                                                                         }
                                                                         if (result.isSuccess) {
                                                                             isLocallySaved = true
                                                                             Toast.makeText(context, "Saved '$activePlaylistName' to library!", Toast.LENGTH_SHORT).show()
                                                                         } else {
-                                                                            Toast.makeText(context, "Failed to save playlist to library.", Toast.LENGTH_SHORT).show()
+                                                                            Toast.makeText(context, "Failed to save to library.", Toast.LENGTH_SHORT).show()
                                                                         }
                                                                     }
                                                                 }
@@ -1919,6 +2012,8 @@ fun PlaylistsScreen(
                                                             activePlaylistRawItem = item.rawItem
                                                             activePlaylistAuthorName = item.authorName
                                                             activePlaylistAuthorAvatarUrl = item.authorAvatarUrl
+                                                            activePlaylistOpenedFromArtist = false
+                                                            activePlaylistHeader = "Playlist View"
                                                         }
                                                     }
                                             ) {
