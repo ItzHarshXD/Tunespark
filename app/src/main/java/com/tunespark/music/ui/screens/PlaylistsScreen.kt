@@ -35,6 +35,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -132,9 +135,16 @@ fun PlaylistsScreen(
     initialArtistId: String? = null,
     initialArtistName: String? = null,
     initialArtistThumbnail: String? = null,
+    initialArtistNavRequest: Int = 0,
     onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
     onPlaySong: ((SongItem) -> Unit)? = null,
     onSongLongPress: (SongItem) -> Unit = {},
+    // Invoked instead of onSongLongPress for songs inside a playlist the user owns;
+    // carries (playlistId, playlistName, song) so the Quick Action sheet can offer
+    // "Remove song". Null → plain onSongLongPress everywhere else.
+    onPlaylistSongLongPress: ((String, String, SongItem) -> Unit)? = null,
+    // Bumped by MainActivity after a successful in-playlist song removal.
+    playlistContentVersion: Int = 0,
     onPlayNextSong: (SongItem) -> Unit = {},
     onAddToQueueSong: (SongItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
@@ -193,6 +203,9 @@ fun PlaylistsScreen(
     var activePlaylistRawItem by remember { mutableStateOf(initialPlaylistRawItem) }
     var activePlaylistAuthorName by remember { mutableStateOf(initialPlaylistAuthorName) }
     var activePlaylistAuthorAvatarUrl by remember { mutableStateOf(initialPlaylistAuthorAvatarUrl) }
+    // Whether the OPEN playlist's loaded page reported an editable (owned) header.
+    // Null until a playlist page loads; authoritative once set (liked/albums never set it).
+    var activePlaylistEditable by remember { mutableStateOf<Boolean?>(null) }
 
     // True when the currently open playlist detail was opened from an artist page's
     // release shelf (Albums / Singles & EPs). Used so the detail layer sits *above*
@@ -288,6 +301,62 @@ fun PlaylistsScreen(
     var isLoadingGrid by remember { mutableStateOf(false) }
 
     val isUserSignedIn = SessionManager.isUserSignedIn(context)
+
+    // ── Custom playlist creation + rename state ──────────────────────────────
+    // True while a brand-new playlist is being created on the user's real
+    // YouTube Music account (drives the grey "+" box in the library grid).
+    var isCreatingPlaylist by remember { mutableStateOf(false) }
+
+    // Rename dialog state for the currently open playlist detail.
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameDraft by remember { mutableStateOf("") }
+    var isRenamingPlaylist by remember { mutableStateOf(false) }
+
+    // Delete confirmation dialog state for the open playlist detail.
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var isDeletingPlaylist by remember { mutableStateOf(false) }
+
+    // Creates a new playlist on the signed-in YouTube Music account with a dummy
+    // default name, then opens its detail view (and refreshes the library grid so
+    // the playlist shows up in the grid too).
+    val createNewPlaylist: () -> Unit = {
+        playSoundAndHaptic()
+        if (!isCreatingPlaylist) {
+            isCreatingPlaylist = true
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    // Dummy default name (YouTube Music's own default naming).
+                    val dummyName = "New playlist"
+                    val newPlaylistId = YouTube.createPlaylist(dummyName).removePrefix("VL")
+                    if (newPlaylistId.isBlank()) throw IllegalStateException("Empty playlist id")
+                    val accountInfo = SessionManager.getCachedAccountInfo(context)
+                    withContext(Dispatchers.Main) {
+                        // Jump straight into the freshly created playlist's detail view.
+                        activePlaylistHeader = "Playlist View"
+                        activePlaylistOpenedFromArtist = false
+                        activePlaylistId = newPlaylistId
+                        activePlaylistName = dummyName
+                        activePlaylistThumbnail = null
+                        activePlaylistSongCountText = "0 songs"
+                        activePlaylistIsLiked = false
+                        activePlaylistRawItem = null
+                        activePlaylistAuthorName = accountInfo?.name
+                        activePlaylistAuthorAvatarUrl = accountInfo?.thumbnailUrl
+                        playlistSongs = emptyList()
+                        isCreatingPlaylist = false
+                        // Reload the library grid so the new playlist appears behind the detail view.
+                        playlistsRefreshTrigger++
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    withContext(Dispatchers.Main) {
+                        isCreatingPlaylist = false
+                        Toast.makeText(context, "Couldn't create playlist", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(selectedTab, playlistsRefreshTrigger, isUserSignedIn) {
         if (!isUserSignedIn) {
@@ -495,6 +564,7 @@ fun PlaylistsScreen(
         
         isSongsLoading = true
         playlistSongs = emptyList()
+        activePlaylistEditable = null
 
         coroutineScope.launch(Dispatchers.IO) {
             try {
@@ -516,6 +586,7 @@ fun PlaylistsScreen(
                             withContext(Dispatchers.Main) {
                                 if (playlistMeta.thumbnail != null) activePlaylistThumbnail = playlistMeta.thumbnail
                                 activePlaylistSongCountText = playlistMeta.songCountText ?: "${tracks.size} songs"
+                                activePlaylistEditable = playlistMeta.isEditable
                             }
                         }
                     }
@@ -525,6 +596,25 @@ fun PlaylistsScreen(
                 } else if (rawItem is ArtistItem) {
                     val searchResult = YouTube.search(activePlaylistName, YouTube.SearchFilter.FILTER_SONG)
                     if (searchResult.isSuccess) tracks = searchResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
+                } else {
+                    // Fallback for any other playlist id (e.g. a playlist just created from
+                    // the "+" box in the library grid): load it through the standard path.
+                    val playlistResult = YouTube.playlist(playlistId)
+                    if (playlistResult.isSuccess) {
+                        val playlistPage = playlistResult.getOrNull()
+                        tracks = playlistPage?.songs.orEmpty()
+                        playlistPage?.playlist?.let { playlistMeta ->
+                            withContext(Dispatchers.Main) {
+                                if (playlistMeta.thumbnail != null) activePlaylistThumbnail = playlistMeta.thumbnail
+                                activePlaylistSongCountText = playlistMeta.songCountText ?: "${tracks.size} songs"
+                                if (activePlaylistAuthorName == null) {
+                                    activePlaylistAuthorName = playlistMeta.author?.name
+                                    activePlaylistAuthorAvatarUrl = playlistMeta.authorAvatarUrl
+                                }
+                                activePlaylistEditable = playlistMeta.isEditable
+                            }
+                        }
+                    }
                 }
 
                 withContext(Dispatchers.Main) {
@@ -676,6 +766,39 @@ fun PlaylistsScreen(
         }
     }
 
+
+    // Applies artist navigation requests raised while this screen is already
+    // composed — e.g. the Quick Action sheet's "Go to artist" opened on top of
+    // the live library overlay (initialArtistId alone only applies on mount).
+    LaunchedEffect(initialArtistNavRequest) {
+        val targetId = initialArtistId ?: return@LaunchedEffect
+        if (initialArtistNavRequest == 0 || activeArtistId == targetId) return@LaunchedEffect
+
+        // Close whatever is currently open and show the requested artist.
+        activePlaylistId = null
+        playlistSongs = emptyList()
+        activePlaylistOpenedFromArtist = false
+        activePlaylistHeader = "Playlist View"
+        isSearchActive = false
+        searchQuery = ""
+        activeArtistId = null
+        artistTopSongs = emptyList()
+        artistAllSongs = emptyList()
+        artistSections = emptyList()
+        isArtistAllSongsVisible = false
+        activeArtistSubscribers = null
+        activeArtistRawItem = null
+        activeArtistRadioEndpoint = null
+        activeArtistMoreEndpoint = null
+        activeArtistName = initialArtistName ?: activeArtistName
+        activeArtistThumbnail = initialArtistThumbnail
+        activeArtistId = targetId
+    }
+
+    // Reload the open playlist after MainActivity reports a successful song removal.
+    LaunchedEffect(playlistContentVersion) {
+        if (playlistContentVersion > 0) playlistsRefreshTrigger++
+    }
 
     // Filter and sorting derived states
     val filteredGridItems = remember(gridItems, searchQuery) {
@@ -1219,6 +1342,22 @@ fun PlaylistsScreen(
             }
 
             PlaylistsViewMode.PLAYLIST_DETAIL -> {
+                // Ownership of the open playlist: drives the per-song "Remove song"
+                // quick action (owned playlists only — created in-app or the user's own).
+                // The loaded page's editable header is authoritative when present.
+                val cachedAccountName = remember(context) { SessionManager.getCachedAccountInfo(context)?.name }
+                val isUserOwnedPlaylist = activePlaylistId != null &&
+                    activePlaylistId != "LM" &&
+                    !activePlaylistIsLiked &&
+                    (when (val raw = activePlaylistRawItem) {
+                        is AlbumItem -> false
+                        is ArtistItem -> false
+                        else -> activePlaylistEditable == true ||
+                            (activePlaylistEditable == null &&
+                                (raw == null || (raw as? PlaylistItem)?.let { p ->
+                                    p.isEditable || p.author?.name == cachedAccountName
+                                } == true))
+                    })
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1386,14 +1525,48 @@ fun PlaylistsScreen(
 
                                     Spacer(modifier = Modifier.height(16.dp))
 
-                                    Text(
-                                        text = activePlaylistName,
-                                        fontSize = 24.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = textColor,
-                                        textAlign = TextAlign.Center,
+                                    // Whether the open detail is a real playlist the user may
+                                    // rename (not the auto "Liked" playlist, not albums).
+                                    val canRenamePlaylist = activePlaylistId != null &&
+                                        activePlaylistId != "LM" &&
+                                        !activePlaylistIsLiked &&
+                                        activePlaylistRawItem !is AlbumItem
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
                                         modifier = Modifier.padding(horizontal = 8.dp)
-                                    )
+                                    ) {
+                                        Text(
+                                            text = activePlaylistName,
+                                            fontSize = 24.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = textColor,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier
+                                                .clickable(enabled = canRenamePlaylist) {
+                                                    playSoundAndHaptic()
+                                                    renameDraft = activePlaylistName
+                                                    showRenameDialog = true
+                                                }
+                                        )
+
+                                        if (canRenamePlaylist) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = "Rename playlist",
+                                                tint = Color.Gray,
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .clickable {
+                                                        playSoundAndHaptic()
+                                                        renameDraft = activePlaylistName
+                                                        showRenameDialog = true
+                                                    }
+                                            )
+                                        }
+                                    }
 
                                     val accountInfo = remember(context) { SessionManager.getCachedAccountInfo(context) }
                                     val authorName = if (activePlaylistIsLiked || activePlaylistId == "LM") accountInfo?.name ?: "You" else activePlaylistAuthorName ?: "TuneSpark"
@@ -1562,6 +1735,26 @@ fun PlaylistsScreen(
                                                             onClick = {}
                                                         )
                                                     }
+
+                                                    // Delete playlist — only for real playlists (never the
+                                                    // auto "Liked" playlist, albums, or artist views).
+                                                    // The server rejects playlists the user doesn't own.
+                                                    val canDeletePlaylist = canRenamePlaylist &&
+                                                        activePlaylistRawItem !is ArtistItem
+
+                                                    if (canDeletePlaylist) {
+                                                        DropdownMenuItem(
+                                                            text = { Text("Delete playlist", color = Color(0xFFFF0000)) },
+                                                            leadingIcon = {
+                                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF0000))
+                                                            },
+                                                            onClick = {
+                                                                playSoundAndHaptic()
+                                                                menuExpanded = false
+                                                                showDeleteConfirmDialog = true
+                                                            }
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -1595,6 +1788,16 @@ fun PlaylistsScreen(
                                 }
                             } else {
                                 itemsIndexed(sortedSongs) { index, song ->
+                                    // Owned playlists get the playlist-aware variant so the
+                                    // Quick Action sheet can offer "Remove song" for this list.
+                                    val songQuickActions: (SongItem) -> Unit = { s ->
+                                        val ownedPlaylistId = activePlaylistId
+                                        if (isUserOwnedPlaylist && ownedPlaylistId != null && onPlaylistSongLongPress != null) {
+                                            onPlaylistSongLongPress(ownedPlaylistId, activePlaylistName, s)
+                                        } else {
+                                            onSongLongPress(s)
+                                        }
+                                    }
                                     SwipeQueueContainer(
                                         onPlayNext = { onPlayNextSong(song) },
                                         onAddToQueue = { onAddToQueueSong(song) }
@@ -1612,7 +1815,7 @@ fun PlaylistsScreen(
                                                 onLongClick = {
                                                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
                                                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                                    onSongLongPress(song)
+                                                    songQuickActions(song)
                                                 }
                                             )
                                             .padding(vertical = 10.dp, horizontal = 4.dp)
@@ -1666,7 +1869,7 @@ fun PlaylistsScreen(
                                                 .clickable {
                                                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
                                                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                    onSongLongPress(song)
+                                                    songQuickActions(song)
                                                 },
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -1929,13 +2132,20 @@ fun PlaylistsScreen(
                                 .padding(bottom = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            val isPillDarkTheme = backgroundColor == Color.Black
                             listOf("All", "Playlists", "Artists").forEach { tab ->
                                 val isSelected = libraryFilter == tab
                                 Box(
                                     modifier = Modifier
-                                        .shadow(elevation = 4.dp, shape = CircleShape)
+                                        // Shadow only when selected: unselected pills used to keep
+                                        // the shadow behind a translucent background, which made it
+                                        // look like it was "leaking" around the pill on the light theme.
+                                        .then(if (isSelected) Modifier.shadow(elevation = 4.dp, shape = CircleShape) else Modifier)
                                         .clip(CircleShape)
-                                        .background(if (isSelected) Color(0xFFFF0000) else Color.Gray.copy(alpha = 0.15f))
+                                        .background(
+                                            if (isSelected) Color(0xFFFF0000)
+                                            else if (isPillDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
+                                        )
                                         .border(
                                             1.dp,
                                             if (isSelected) Color(0xFFFF0000) else textColor.copy(alpha = 0.2f),
@@ -1990,6 +2200,48 @@ fun PlaylistsScreen(
                                         modifier = Modifier.fillMaxSize(),
                                         contentPadding = PaddingValues(bottom = 96.dp)
                                     ) {
+                                        // "New playlist" creation box — always the very first
+                                        // cell of the grid, even before the Liked songs box.
+                                        if (libraryFilter != "Artists" && searchQuery.isBlank()) {
+                                            item(key = "new_playlist_box") {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable { createNewPlaylist() }
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .aspectRatio(1f)
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(28.dp))
+                                                            .background(Color.Gray.copy(alpha = 0.3f)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        if (isCreatingPlaylist) {
+                                                            CircularProgressIndicator(
+                                                                color = textColor,
+                                                                strokeWidth = 3.dp,
+                                                                modifier = Modifier.size(36.dp)
+                                                            )
+                                                        } else {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Add,
+                                                                contentDescription = "New playlist",
+                                                                tint = textColor,
+                                                                modifier = Modifier.size(44.dp)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                                    Text(text = "New playlist", color = textColor, fontWeight = FontWeight.Medium, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                                                    Text(text = "Create playlist", color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                                                }
+                                            }
+                                        }
+
                                         items(tabFilteredGridItems) { item ->
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -2048,5 +2300,137 @@ fun PlaylistsScreen(
                 }
             }
         }
+    }
+
+    // ── Rename playlist dialog (tapping the playlist name in the detail view) ──
+    if (showRenameDialog) {
+        // Elevated surface (rounded + hairline border + distinct fill) so the popup
+        // contrasts against the app background in BOTH themes — in dark it used to
+        // be the exact same pure-black color as the background.
+        val isDialogDark = backgroundColor == Color.Black
+        AlertDialog(
+            onDismissRequest = { if (!isRenamingPlaylist) showRenameDialog = false },
+            modifier = Modifier.border(
+                1.dp,
+                if (isDialogDark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.10f),
+                RoundedCornerShape(28.dp)
+            ),
+            shape = RoundedCornerShape(28.dp),
+            containerColor = if (isDialogDark) Color(0xFF1E1E22) else Color(0xFFF2F2F5),
+            title = { Text(text = "Rename playlist", color = textColor, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = renameDraft,
+                    onValueChange = { renameDraft = it },
+                    singleLine = true,
+                    placeholder = { Text("Playlist name", color = Color.Gray) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFFFF0000),
+                        unfocusedBorderColor = textColor.copy(alpha = 0.4f),
+                        focusedTextColor = textColor,
+                        unfocusedTextColor = textColor,
+                        cursorColor = Color(0xFFFF0000)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isRenamingPlaylist,
+                    onClick = {
+                        playSoundAndHaptic()
+                        val pid = activePlaylistId
+                        val newName = renameDraft.trim()
+                        if (pid == null || pid == "LM" || newName.isEmpty()) return@TextButton
+                        isRenamingPlaylist = true
+                        coroutineScope.launch(Dispatchers.IO) {
+                            // Renames the playlist directly on the user's YouTube Music account.
+                            val result = YouTube.renamePlaylist(pid, newName)
+                            withContext(Dispatchers.Main) {
+                                isRenamingPlaylist = false
+                                if (result.isSuccess) {
+                                    showRenameDialog = false
+                                    activePlaylistName = newName
+                                    // Keep the library grid cell in sync without a refetch.
+                                    gridItems = gridItems.map { gridItem ->
+                                        if (gridItem.id == pid) gridItem.copy(title = newName) else gridItem
+                                    }
+                                    Toast.makeText(context, "Playlist renamed", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Couldn't rename playlist", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+                ) {
+                    Text(text = "Save", color = Color(0xFFFF0000), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!isRenamingPlaylist) showRenameDialog = false }) {
+                    Text(text = "Cancel", color = textColor)
+                }
+            }
+        )
+    }
+
+    // ── Delete playlist confirmation dialog (⋮ menu → "Delete playlist") ──
+    if (showDeleteConfirmDialog) {
+        val isDialogDark = backgroundColor == Color.Black
+        AlertDialog(
+            onDismissRequest = { if (!isDeletingPlaylist) showDeleteConfirmDialog = false },
+            modifier = Modifier.border(
+                1.dp,
+                if (isDialogDark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.10f),
+                RoundedCornerShape(28.dp)
+            ),
+            shape = RoundedCornerShape(28.dp),
+            containerColor = if (isDialogDark) Color(0xFF1E1E22) else Color(0xFFF2F2F5),
+            title = { Text(text = "Delete playlist?", color = textColor, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "\"${activePlaylistName}\" will be permanently deleted from your YouTube Music account. This can't be undone.",
+                    color = Color.Gray,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isDeletingPlaylist,
+                    onClick = {
+                        playSoundAndHaptic()
+                        val pid = activePlaylistId ?: return@TextButton
+                        isDeletingPlaylist = true
+                        coroutineScope.launch(Dispatchers.IO) {
+                            // Deletes the playlist on the user's real YouTube Music account.
+                            val result = YouTube.deletePlaylist(pid)
+                            withContext(Dispatchers.Main) {
+                                isDeletingPlaylist = false
+                                if (result.isSuccess) {
+                                    showDeleteConfirmDialog = false
+                                    activePlaylistId = null
+                                    playlistSongs = emptyList()
+                                    activePlaylistOpenedFromArtist = false
+                                    activePlaylistHeader = "Playlist View"
+                                    Toast.makeText(context, "Playlist deleted", Toast.LENGTH_SHORT).show()
+                                    // Refresh the library grid so the deleted playlist disappears.
+                                    playlistsRefreshTrigger++
+                                } else {
+                                    Toast.makeText(context, "Couldn't delete playlist", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+                ) {
+                    Text(text = "Delete", color = Color(0xFFFF0000), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!isDeletingPlaylist) showDeleteConfirmDialog = false }) {
+                    Text(text = "Cancel", color = textColor)
+                }
+            }
+        )
     }
 }

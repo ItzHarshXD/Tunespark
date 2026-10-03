@@ -27,6 +27,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.Artist
+import com.metrolist.innertube.models.ArtistItem
 import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.tunespark.music.ui.theme.TunesparkTheme
@@ -257,6 +258,16 @@ fun MainPlayerScreen(
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
     var isLibraryOpen by rememberSaveable { mutableStateOf(false) }
 
+    // Initial artist navigation state for the Playlists screen (Search artist taps
+    // and the Quick Action sheet's "Go to artist" / Info "View" action). Declared
+    // before the overlay controls so `closeLibrary()` can clear it on close.
+    var initialArtistId by remember { mutableStateOf<String?>(null) }
+    var initialArtistName by remember { mutableStateOf<String?>(null) }
+    var initialArtistThumbnail by remember { mutableStateOf<String?>(null) }
+    // Bumped on every artist navigation request so an already-composed
+    // PlaylistsScreen re-applies initialArtistId while the library stays open.
+    var initialArtistNavRequest by remember { mutableStateOf(0) }
+
     val fullPlayerProgress = remember { Animatable(if (isFullPlayerOpen) 1f else 0f) }
     val searchProgress = remember { Animatable(if (isSearchOpen) 1f else 0f) }
     val libraryProgress = remember { Animatable(if (isLibraryOpen) 1f else 0f) }
@@ -352,6 +363,11 @@ fun MainPlayerScreen(
 
     val closeLibrary: () -> Unit = {
         isLibraryOpen = false
+        // Drop stale artist deep-links so reopening the library starts at the grid
+        // instead of resurrecting the last artist that was opened.
+        initialArtistId = null
+        initialArtistName = null
+        initialArtistThumbnail = null
         coroutineScope.launch {
             libraryProgress.animateTo(
                 targetValue = 0f,
@@ -463,10 +479,6 @@ fun MainPlayerScreen(
     var initialPlaylistAuthorName by remember { mutableStateOf<String?>(null) }
     var initialPlaylistAuthorAvatarUrl by remember { mutableStateOf<String?>(null) }
     var initialPlaylistSongs by remember { mutableStateOf<List<com.metrolist.innertube.models.SongItem>>(emptyList()) }
-    // State variables for initial artist navigation to Playlists screen (opened from Search)
-    var initialArtistId by remember { mutableStateOf<String?>(null) }
-    var initialArtistName by remember { mutableStateOf<String?>(null) }
-    var initialArtistThumbnail by remember { mutableStateOf<String?>(null) }
     var isLoadingProfile by remember { mutableStateOf(false) }
     var profileError by remember { mutableStateOf<String?>(null) }
 
@@ -1562,10 +1574,27 @@ fun MainPlayerScreen(
 
     // ── Quick Action View (long-press song context sheet) state & handlers ──
     var quickActionSong by remember { mutableStateOf<SongItem?>(null) }
+    // Playlist context of the long-pressed song — non-null only when the song was
+    // opened from a playlist the user owns (enables the "Remove song" action).
+    var quickActionPlaylistId by remember { mutableStateOf<String?>(null) }
+    var quickActionPlaylistName by remember { mutableStateOf<String?>(null) }
+    // Bumped after a successful removal so PlaylistsScreen reloads its song list.
+    var playlistContentVersion by remember { mutableStateOf(0) }
+
     val showQuickActions: (SongItem) -> Unit = { song ->
         // Dismiss the keyboard if it is active so the sheet is fully visible.
         focusManager.clearFocus(force = true)
+        quickActionPlaylistId = null
+        quickActionPlaylistName = null
         quickActionSong = song
+    }
+
+    // PlaylistsScreen variant: records which owned playlist the song belongs to
+    // before opening the sheet (context is cleared again by every plain open).
+    val showQuickActionsInPlaylist: (String, String, SongItem) -> Unit = { playlistId, playlistName, song ->
+        showQuickActions(song)
+        quickActionPlaylistId = playlistId
+        quickActionPlaylistName = playlistName
     }
 
     // Media3 requires unique mediaIds across the timeline. The same song can
@@ -1656,6 +1685,68 @@ fun MainPlayerScreen(
             putExtra(Intent.EXTRA_TEXT, song.shareLink)
         }
         context.startActivity(Intent.createChooser(sendIntent, "Share song"))
+    }
+
+    // Go to artist: opens the artist's profile view inside the Library overlay.
+    // Some feeds (Home quick picks etc.) parse artists without a browse id — in
+    // that case the artist is resolved through a FILTER_ARTIST search first, with
+    // a sentinel-id fallback (the artist screen itself falls back to a song search).
+    val onQuickActionOpenArtist: (String, String) -> Unit = { artistId, artistName ->
+        quickActionSong = null
+        if (artistName.isBlank()) {
+            Toast.makeText(context, "Artist information unavailable", Toast.LENGTH_SHORT).show()
+        } else if (artistId.isNotBlank()) {
+            initialArtistId = artistId
+            initialArtistName = artistName
+            initialArtistThumbnail = null
+            initialArtistNavRequest++
+            navigateHandler(AppScreen.PLAYLISTS)
+        } else {
+            coroutineScope.launch {
+                val resolved = withContext(Dispatchers.IO) {
+                    YouTube.search(
+                        query = artistName,
+                        filter = YouTube.SearchFilter.FILTER_ARTIST
+                    ).getOrNull()?.items?.filterIsInstance<ArtistItem>()?.firstOrNull()
+                }
+                if (resolved != null) {
+                    initialArtistId = resolved.id
+                    initialArtistName = resolved.title
+                    initialArtistThumbnail = resolved.thumbnail
+                } else {
+                    initialArtistId = "search:$artistName"
+                    initialArtistName = artistName
+                    initialArtistThumbnail = null
+                }
+                initialArtistNavRequest++
+                navigateHandler(AppScreen.PLAYLISTS)
+            }
+        }
+    }
+
+    // Remove from playlist: drops the song from the owned playlist it was opened
+    // from (the sheet only offers this action in that context).
+    val onQuickActionRemoveFromPlaylist: (SongItem) -> Unit = { song ->
+        quickActionSong = null
+        val playlistId = quickActionPlaylistId
+        val playlistName = quickActionPlaylistName
+        val setVideoId = song.setVideoId
+        if (playlistId == null || setVideoId == null) {
+            Toast.makeText(context, "Couldn't remove the song from this playlist.", Toast.LENGTH_SHORT).show()
+        } else {
+            coroutineScope.launch(Dispatchers.IO) {
+                val result = YouTube.removeFromPlaylist(playlistId, song.id, setVideoId)
+                withContext(Dispatchers.Main) {
+                    if (result.isSuccess) {
+                        Toast.makeText(context, "Removed '${song.title}' from '${playlistName ?: "playlist"}'", Toast.LENGTH_SHORT).show()
+                        // Tell PlaylistsScreen to reload the playlist (and grid counts).
+                        playlistContentVersion++
+                    } else {
+                        Toast.makeText(context, "Couldn't remove the song from this playlist.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
     }
 
     Surface(
@@ -1825,6 +1916,7 @@ fun MainPlayerScreen(
                                 initialArtistId = initialArtistId,
                                 initialArtistName = initialArtistName,
                                 initialArtistThumbnail = initialArtistThumbnail,
+                                initialArtistNavRequest = initialArtistNavRequest,
                                 onPlayPlaylist = { name, songs, startIndex ->
                                     playPlaylist(name, songs, startIndex)
                                     openFullPlayer()
@@ -1834,6 +1926,8 @@ fun MainPlayerScreen(
                                     openFullPlayer()
                                 },
                                 onSongLongPress = showQuickActions,
+                                onPlaylistSongLongPress = showQuickActionsInPlaylist,
+                                playlistContentVersion = playlistContentVersion,
                                 onPlayNextSong = onQuickActionPlayNext,
                                 onAddToQueueSong = onQuickActionAddToQueue,
                                 onNavigate = { screen ->
@@ -1967,6 +2061,7 @@ fun MainPlayerScreen(
                         initialArtistId = initialArtistId,
                         initialArtistName = initialArtistName,
                         initialArtistThumbnail = initialArtistThumbnail,
+                        initialArtistNavRequest = initialArtistNavRequest,
                         onPlayPlaylist = { name, songs, startIndex ->
                             playPlaylist(name, songs, startIndex)
                             openFullPlayer()
@@ -1976,6 +2071,8 @@ fun MainPlayerScreen(
                             openFullPlayer()
                         },
                         onSongLongPress = showQuickActions,
+                        onPlaylistSongLongPress = showQuickActionsInPlaylist,
+                        playlistContentVersion = playlistContentVersion,
                         onPlayNextSong = onQuickActionPlayNext,
                         onAddToQueueSong = onQuickActionAddToQueue,
                         onNavigate = { screen ->
@@ -2133,7 +2230,9 @@ fun MainPlayerScreen(
                 onStartRadio = onQuickActionStartRadio,
                 onPlayNext = onQuickActionPlayNext,
                 onAddToQueue = onQuickActionAddToQueue,
-                onShare = onQuickActionShare
+                onShare = onQuickActionShare,
+                onOpenArtist = onQuickActionOpenArtist,
+                onRemoveFromPlaylist = if (quickActionPlaylistId != null) onQuickActionRemoveFromPlaylist else null
             )
         }
     }
