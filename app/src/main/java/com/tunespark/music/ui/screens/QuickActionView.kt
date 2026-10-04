@@ -85,6 +85,7 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.innertube.models.YouTubeClient
 import com.tunespark.music.LikedSongManager
+import com.tunespark.music.LocalPlaylistManager
 import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -141,7 +142,13 @@ fun QuickActionView(
     var addingToPlaylistId by remember { mutableStateOf<String?>(null) }
     var showPlaylistPicker by remember { mutableStateOf(false) }
     var showInfoDialog by remember { mutableStateOf(false) }
+    // "Create playlist" popup opened from the picker's "New playlist" row — the
+    // same shared popup as the Library's "+" box (name + local/synced choice).
+    var showCreateFromPicker by remember { mutableStateOf(false) }
+    var isCreatingFromPicker by remember { mutableStateOf(false) }
     var pickerPlaylists by remember { mutableStateOf<List<PlaylistItem>>(emptyList()) }
+    // On-device playlists (also shown signed out — they need no account).
+    var pickerLocalPlaylists by remember { mutableStateOf<List<LocalPlaylistManager.LocalPlaylist>>(emptyList()) }
     var isPickerLoading by remember { mutableStateOf(false) }
     // Row key used by the picker's inline "New playlist" creation entry.
     val newPlaylistPickerKey = "__new_playlist__"
@@ -209,24 +216,30 @@ fun QuickActionView(
     }
 
     // Loads the user's library playlists the first time the picker opens.
+// Loads the library playlists the first time the picker opens.
+// Local playlists are always listed (they live on this device, hence need no
+// sign-in); YouTube playlists are only listed when signed in.
     LaunchedEffect(showPlaylistPicker) {
         if (!showPlaylistPicker) return@LaunchedEffect
         isPickerLoading = true
         pickerPlaylists = emptyList()
+        pickerLocalPlaylists = LocalPlaylistManager.getPlaylists(context)
         try {
-            val result = withContext(Dispatchers.IO) { YouTube.library("FEmusic_liked_playlists") }
-            // Only the user's OWN playlists: songs can't be added to someone else's
-            // playlist. The EDIT menu flag marks owned playlists; the author-name
-            // match covers parses where that flag is missing.
-            val accountName = SessionManager.getCachedAccountInfo(context)?.name
-            pickerPlaylists = result.getOrNull()?.items.orEmpty()
-                .filterIsInstance<PlaylistItem>()
-                .filter {
-                    val titleLower = it.title.lowercase()
-                    val isAutoList = titleLower == "liked music" || titleLower == "episodes for later"
-                    val isOwn = it.isEditable || (accountName != null && it.author?.name == accountName)
-                    !isAutoList && isOwn
-                }
+            if (SessionManager.isUserSignedIn(context)) {
+                val result = withContext(Dispatchers.IO) { YouTube.library("FEmusic_liked_playlists") }
+                // Only the user's OWN playlists: songs can't be added to someone else's
+                // playlist. The EDIT menu flag marks owned playlists; the author-name
+                // match covers parses where that flag is missing.
+                val accountName = SessionManager.getCachedAccountInfo(context)?.name
+                pickerPlaylists = result.getOrNull()?.items.orEmpty()
+                    .filterIsInstance<PlaylistItem>()
+                    .filter {
+                        val titleLower = it.title.lowercase()
+                        val isAutoList = titleLower == "liked music" || titleLower == "episodes for later"
+                        val isOwn = it.isEditable || (accountName != null && it.author?.name == accountName)
+                        !isAutoList && isOwn
+                    }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             pickerPlaylists = emptyList()
@@ -249,6 +262,7 @@ fun QuickActionView(
         // A different song (or a closed sheet) always starts with fresh dialogs.
         showPlaylistPicker = false
         showInfoDialog = false
+        showCreateFromPicker = false
         if (song != null) {
             displayedSong = song
             dragOffsetPx.floatValue = 0f
@@ -463,11 +477,7 @@ fun QuickActionView(
                         buttonBorderColor = buttonBorderColor,
                         labelColor = textColor
                     ) {
-                        if (!SessionManager.isUserSignedIn(context)) {
-                            Toast.makeText(context, "Sign in to add songs to playlists", Toast.LENGTH_SHORT).show()
-                        } else {
-                            showPlaylistPicker = true
-                        }
+                        showPlaylistPicker = true
                     }
                 }
 
@@ -569,6 +579,7 @@ fun QuickActionView(
 
         if (showPlaylistPicker) {
             val songToAdd = currentSong
+            // YouTube Music playlist add — syncs to the real account.
             val startAddToPlaylist: (PlaylistItem) -> Unit = { playlist ->
                 if (addingToPlaylistId == null) {
                     addingToPlaylistId = playlist.id
@@ -583,6 +594,25 @@ fun QuickActionView(
                         } else {
                             Toast.makeText(context, "Couldn't add to '${playlist.title}'", Toast.LENGTH_SHORT).show()
                         }
+                    }
+                }
+            }
+            // On-device playlist add — writes to local storage only (works signed out).
+            val startAddToLocalPlaylist: (LocalPlaylistManager.LocalPlaylist) -> Unit = { local ->
+                if (addingToPlaylistId == null) {
+                    addingToPlaylistId = local.id
+                    scope.launch {
+                        val added = withContext(Dispatchers.IO) {
+                            LocalPlaylistManager.addSong(context, local.id, songToAdd)
+                        }
+                        if (added) {
+                            pickerLocalPlaylists = LocalPlaylistManager.getPlaylists(context)
+                            showPlaylistPicker = false
+                            Toast.makeText(context, "Added to '${local.name}'", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Couldn't add to '${local.name}'", Toast.LENGTH_SHORT).show()
+                        }
+                        addingToPlaylistId = null
                     }
                 }
             }
@@ -624,6 +654,8 @@ fun QuickActionView(
                             .verticalScroll(rememberScrollState())
                     ) {
                         // Create a brand-new playlist and drop the song straight into it.
+// Create a brand-new playlist and drop the song straight into it.
+// Signed out → on-device playlist; signed in → YouTube-synced playlist.
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -631,29 +663,9 @@ fun QuickActionView(
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(buttonBgColor)
                                 .clickable(enabled = addingToPlaylistId == null) {
-                                    if (addingToPlaylistId == null) {
-                                        addingToPlaylistId = newPlaylistPickerKey
-                                        scope.launch {
-                                            val createdId = withContext(Dispatchers.IO) {
-                                                runCatching { YouTube.createPlaylist("New playlist").removePrefix("VL") }.getOrNull()
-                                            }
-                                            if (createdId.isNullOrBlank()) {
-                                                addingToPlaylistId = null
-                                                Toast.makeText(context, "Couldn't create playlist", Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                val added = withContext(Dispatchers.IO) {
-                                                    YouTube.addToPlaylist(createdId, songToAdd.id)
-                                                }
-                                                addingToPlaylistId = null
-                                                if (added.isSuccess) {
-                                                    showPlaylistPicker = false
-                                                    Toast.makeText(context, "Added to 'New playlist'", Toast.LENGTH_SHORT).show()
-                                                } else {
-                                                    Toast.makeText(context, "Couldn't add to the new playlist", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        }
-                                    }
+                                    // Opens the shared create-playlist popup (name +
+                                    // local/synced choice) instead of auto-creating.
+                                    showCreateFromPicker = true
                                 }
                                 .padding(10.dp)
                         ) {
@@ -664,7 +676,7 @@ fun QuickActionView(
                                     .background(Color.Gray.copy(alpha = 0.25f)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (addingToPlaylistId == newPlaylistPickerKey) {
+                                if (addingToPlaylistId == newPlaylistPickerKey || isCreatingFromPicker) {
                                     CircularProgressIndicator(color = textColor, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                                 } else {
                                     Icon(Icons.Filled.Add, contentDescription = "New playlist", tint = textColor, modifier = Modifier.size(22.dp))
@@ -691,9 +703,9 @@ fun QuickActionView(
                                     CircularProgressIndicator(color = textColor, modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
                                 }
                             }
-                            pickerPlaylists.isEmpty() -> {
+                            pickerLocalPlaylists.isEmpty() && pickerPlaylists.isEmpty() -> {
                                 Text(
-                                    text = "No playlists found in your library yet.",
+                                    text = "No playlists found yet.",
                                     color = Color.Gray,
                                     fontSize = 13.sp,
                                     textAlign = TextAlign.Center,
@@ -701,6 +713,61 @@ fun QuickActionView(
                                 )
                             }
                             else -> {
+                                // On-device lists first (with an "On this device" tag), then
+                                // the synced YouTube Music lists.
+                                pickerLocalPlaylists.forEach { local ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(buttonBgColor)
+                                            .clickable(enabled = addingToPlaylistId == null) { startAddToLocalPlaylist(local) }
+                                            .padding(10.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color.Gray.copy(alpha = 0.25f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            val firstThumb = local.songs.firstOrNull { it.thumbnail.isNotBlank() }?.thumbnail
+                                            if (!firstThumb.isNullOrEmpty()) {
+                                                AsyncImage(
+                                                    model = firstThumb,
+                                                    contentDescription = local.name,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else {
+                                                Icon(Icons.Filled.PlaylistAdd, contentDescription = null, tint = textColor, modifier = Modifier.size(20.dp))
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = local.name,
+                                                color = textColor,
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = local.songCountText + " • Local playlist",
+                                                color = Color.Gray,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        if (addingToPlaylistId == local.id) {
+                                            CircularProgressIndicator(color = textColor, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
                                 pickerPlaylists.forEach { playlist ->
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -760,6 +827,65 @@ fun QuickActionView(
                 confirmButton = {}
             )
         }
+
+        // Create-playlist popup opened from the picker's "New playlist" row — the
+        // same shared popup as the Library's "+" box. On Create the fresh playlist
+        // is made (local or synced per the choice) and the song drops straight in.
+        CreatePlaylistDialog(
+            show = showCreateFromPicker,
+            isSignedIn = SessionManager.isUserSignedIn(context),
+            isCreating = isCreatingFromPicker,
+            onDismiss = { showCreateFromPicker = false },
+            onCreate = { name, asLocal ->
+                val songToCreateFor = currentSong
+                if (songToCreateFor != null && !isCreatingFromPicker) {
+                    isCreatingFromPicker = true
+                    scope.launch {
+                        try {
+                            if (asLocal) {
+                                // Local playlist + add the song, all on-device.
+                                val created = withContext(Dispatchers.IO) {
+                                    LocalPlaylistManager.createPlaylist(context, name)
+                                }
+                                LocalPlaylistManager.addSong(context, created.id, songToCreateFor)
+                                withContext(Dispatchers.Main) {
+                                    isCreatingFromPicker = false
+                                    showCreateFromPicker = false
+                                    showPlaylistPicker = false
+                                    pickerLocalPlaylists = LocalPlaylistManager.getPlaylists(context)
+                                    Toast.makeText(context, "Added to '${created.name}'", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                // YouTube Music playlist + add the song to the real account.
+                                val createdId = withContext(Dispatchers.IO) {
+                                    YouTube.createPlaylist(name).removePrefix("VL")
+                                }
+                                if (createdId.isBlank()) throw IllegalStateException("Empty playlist id")
+                                val added = withContext(Dispatchers.IO) {
+                                    YouTube.addToPlaylist(createdId, songToCreateFor.id)
+                                }
+                                withContext(Dispatchers.Main) {
+                                    isCreatingFromPicker = false
+                                    showCreateFromPicker = false
+                                    showPlaylistPicker = false
+                                    if (added.isSuccess) {
+                                        Toast.makeText(context, "Added to '$name'", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Couldn't add to '$name'", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            withContext(Dispatchers.Main) {
+                                isCreatingFromPicker = false
+                                Toast.makeText(context, "Couldn't create playlist", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+            }
+        )
 
         if (showInfoDialog) {
             val infoSong = currentSong

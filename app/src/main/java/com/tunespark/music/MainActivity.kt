@@ -25,6 +25,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.metrolist.innertube.YouTube
+import com.tunespark.music.LocalPlaylistManager
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.Artist
 import com.metrolist.innertube.models.ArtistItem
@@ -1730,19 +1731,37 @@ fun MainPlayerScreen(
         quickActionSong = null
         val playlistId = quickActionPlaylistId
         val playlistName = quickActionPlaylistName
-        val setVideoId = song.setVideoId
-        if (playlistId == null || setVideoId == null) {
+        if (playlistId == null) {
             Toast.makeText(context, "Couldn't remove the song from this playlist.", Toast.LENGTH_SHORT).show()
+        } else if (LocalPlaylistManager.isLocalPlaylistId(playlistId)) {
+            // On-device playlist — no setVideoId needed, just drop the id locally.
+            coroutineScope.launch {
+                val removed = withContext(Dispatchers.IO) {
+                    LocalPlaylistManager.removeSong(context, playlistId, song.id)
+                }
+                if (removed) {
+                    Toast.makeText(context, "Removed '${song.title}' from '${playlistName ?: "playlist"}'", Toast.LENGTH_SHORT).show()
+                    // Tell PlaylistsScreen to reload the playlist (and grid counts).
+                    playlistContentVersion++
+                } else {
+                    Toast.makeText(context, "Couldn't remove the song from this playlist.", Toast.LENGTH_SHORT).show()
+                }
+            }
         } else {
-            coroutineScope.launch(Dispatchers.IO) {
-                val result = YouTube.removeFromPlaylist(playlistId, song.id, setVideoId)
-                withContext(Dispatchers.Main) {
-                    if (result.isSuccess) {
-                        Toast.makeText(context, "Removed '${song.title}' from '${playlistName ?: "playlist"}'", Toast.LENGTH_SHORT).show()
-                        // Tell PlaylistsScreen to reload the playlist (and grid counts).
-                        playlistContentVersion++
-                    } else {
-                        Toast.makeText(context, "Couldn't remove the song from this playlist.", Toast.LENGTH_SHORT).show()
+            val setVideoId = song.setVideoId
+            if (setVideoId == null) {
+                Toast.makeText(context, "Couldn't remove the song from this playlist.", Toast.LENGTH_SHORT).show()
+            } else {
+                coroutineScope.launch(Dispatchers.IO) {
+                    val result = YouTube.removeFromPlaylist(playlistId, song.id, setVideoId)
+                    withContext(Dispatchers.Main) {
+                        if (result.isSuccess) {
+                            Toast.makeText(context, "Removed '${song.title}' from '${playlistName ?: "playlist"}'", Toast.LENGTH_SHORT).show()
+                            // Tell PlaylistsScreen to reload the playlist (and grid counts).
+                            playlistContentVersion++
+                        } else {
+                            Toast.makeText(context, "Couldn't remove the song from this playlist.", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }

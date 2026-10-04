@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -68,6 +70,7 @@ import com.metrolist.innertube.models.*
 import com.metrolist.innertube.models.response.*
 import com.metrolist.innertube.pages.ArtistSection
 import com.tunespark.music.AppScreen
+import com.tunespark.music.LocalPlaylistManager
 import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -86,7 +89,9 @@ data class LibraryGridItem(
     val rawItem: YTItem? = null,
     val authorName: String? = null,
     val authorAvatarUrl: String? = null,
-    val isArtist: Boolean = false
+    val isArtist: Boolean = false,
+    // True for on-device playlists created in the app (never synced to YouTube Music).
+    val isLocal: Boolean = false
 )
 
 enum class PlaylistsViewMode {
@@ -206,6 +211,8 @@ fun PlaylistsScreen(
     // Whether the OPEN playlist's loaded page reported an editable (owned) header.
     // Null until a playlist page loads; authoritative once set (liked/albums never set it).
     var activePlaylistEditable by remember { mutableStateOf<Boolean?>(null) }
+    // True when the open playlist is an on-device (local) playlist created in the app.
+    var activePlaylistIsLocal by remember { mutableStateOf(false) }
 
     // True when the currently open playlist detail was opened from an artist page's
     // release shelf (Albums / Singles & EPs). Used so the detail layer sits *above*
@@ -250,6 +257,7 @@ fun PlaylistsScreen(
         activePlaylistThumbnail = release.thumbnail
         activePlaylistSongCountText = release.year?.toString() ?: "Album"
         activePlaylistIsLiked = false
+        activePlaylistIsLocal = false
         activePlaylistRawItem = release
         activePlaylistAuthorName = activeArtistName
         activePlaylistAuthorAvatarUrl = null
@@ -285,6 +293,7 @@ fun PlaylistsScreen(
         } else if (activePlaylistId != null) {
             activePlaylistId = null
             playlistSongs = emptyList()
+            activePlaylistIsLocal = false
             activePlaylistOpenedFromArtist = false
             activePlaylistHeader = "Playlist View"
         } else if (activeArtistId != null) {
@@ -303,9 +312,14 @@ fun PlaylistsScreen(
     val isUserSignedIn = SessionManager.isUserSignedIn(context)
 
     // ── Custom playlist creation + rename state ──────────────────────────────
-    // True while a brand-new playlist is being created on the user's real
-    // YouTube Music account (drives the grey "+" box in the library grid).
+    // True while a brand-new playlist is being created (drives the grey "+" box
+    // spinner and disables the create dialog's confirm button).
     var isCreatingPlaylist by remember { mutableStateOf(false) }
+
+    // "Create playlist" popup — shared composable (also used by the Quick Action
+    // sheet's picker). Lets the user pick a name AND choose whether the playlist is
+    // a local playlist (on-device, never synced) or a YouTube Music playlist.
+    var showCreateDialog by remember { mutableStateOf(false) }
 
     // Rename dialog state for the currently open playlist detail.
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -316,36 +330,68 @@ fun PlaylistsScreen(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isDeletingPlaylist by remember { mutableStateOf(false) }
 
-    // Creates a new playlist on the signed-in YouTube Music account with a dummy
-    // default name, then opens its detail view (and refreshes the library grid so
-    // the playlist shows up in the grid too).
-    val createNewPlaylist: () -> Unit = {
+    val openCreateDialog: () -> Unit = {
+        playSoundAndHaptic()
+        showCreateDialog = true
+    }
+
+    // Creates the playlist (local or YouTube-synced, per the popup) and opens its
+    // detail view, then refreshes the library grid so it shows up there too.
+    val createPlaylist: (String, Boolean) -> Unit = { rawName, asLocal ->
         playSoundAndHaptic()
         if (!isCreatingPlaylist) {
+            val name = rawName.trim().ifBlank { "New playlist" }
             isCreatingPlaylist = true
-            coroutineScope.launch(Dispatchers.IO) {
+            coroutineScope.launch {
                 try {
-                    // Dummy default name (YouTube Music's own default naming).
-                    val dummyName = "New playlist"
-                    val newPlaylistId = YouTube.createPlaylist(dummyName).removePrefix("VL")
-                    if (newPlaylistId.isBlank()) throw IllegalStateException("Empty playlist id")
-                    val accountInfo = SessionManager.getCachedAccountInfo(context)
-                    withContext(Dispatchers.Main) {
-                        // Jump straight into the freshly created playlist's detail view.
-                        activePlaylistHeader = "Playlist View"
-                        activePlaylistOpenedFromArtist = false
-                        activePlaylistId = newPlaylistId
-                        activePlaylistName = dummyName
-                        activePlaylistThumbnail = null
-                        activePlaylistSongCountText = "0 songs"
-                        activePlaylistIsLiked = false
-                        activePlaylistRawItem = null
-                        activePlaylistAuthorName = accountInfo?.name
-                        activePlaylistAuthorAvatarUrl = accountInfo?.thumbnailUrl
-                        playlistSongs = emptyList()
-                        isCreatingPlaylist = false
-                        // Reload the library grid so the new playlist appears behind the detail view.
-                        playlistsRefreshTrigger++
+                    if (asLocal) {
+                        // On-device playlist — works signed in or out, never synced.
+                        val created = withContext(Dispatchers.IO) {
+                            LocalPlaylistManager.createPlaylist(context, name)
+                        }
+                        withContext(Dispatchers.Main) {
+                            activePlaylistHeader = "Playlist View"
+                            activePlaylistOpenedFromArtist = false
+                            activePlaylistId = created.id
+                            activePlaylistName = created.name
+                            activePlaylistThumbnail = null
+                            activePlaylistSongCountText = "0 songs"
+                            activePlaylistIsLiked = false
+                            activePlaylistIsLocal = true
+                            activePlaylistRawItem = null
+                            activePlaylistAuthorName = "You"
+                            activePlaylistAuthorAvatarUrl = null
+                            activePlaylistEditable = null
+                            playlistSongs = emptyList()
+                            isCreatingPlaylist = false
+                            showCreateDialog = false
+                            playlistsRefreshTrigger++
+                        }
+                    } else {
+                        // YouTube Music playlist — created on the real account.
+                        val newPlaylistId = withContext(Dispatchers.IO) {
+                            YouTube.createPlaylist(name).removePrefix("VL")
+                        }
+                        if (newPlaylistId.isBlank()) throw IllegalStateException("Empty playlist id")
+                        val accountInfo = SessionManager.getCachedAccountInfo(context)
+                        withContext(Dispatchers.Main) {
+                            activePlaylistHeader = "Playlist View"
+                            activePlaylistOpenedFromArtist = false
+                            activePlaylistId = newPlaylistId
+                            activePlaylistName = name
+                            activePlaylistThumbnail = null
+                            activePlaylistSongCountText = "0 songs"
+                            activePlaylistIsLiked = false
+                            activePlaylistIsLocal = false
+                            activePlaylistRawItem = null
+                            activePlaylistAuthorName = accountInfo?.name
+                            activePlaylistAuthorAvatarUrl = accountInfo?.thumbnailUrl
+                            activePlaylistEditable = null
+                            playlistSongs = emptyList()
+                            isCreatingPlaylist = false
+                            showCreateDialog = false
+                            playlistsRefreshTrigger++
+                        }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -359,16 +405,27 @@ fun PlaylistsScreen(
     }
 
     LaunchedEffect(selectedTab, playlistsRefreshTrigger, isUserSignedIn) {
-        if (!isUserSignedIn) {
-            gridItems = emptyList()
-            isLoadingGrid = false
-            return@LaunchedEffect
-        }
-
         isLoadingGrid = true
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                // Fetch playlists and subscribed artists concurrently
+                // On-device playlists are always available — signed in OR signed out.
+                // They are never synced to YouTube Music, but they persist across
+                // sign-in/sign-out so the library keeps its local lists.
+                val localPlaylists = LocalPlaylistManager.getPlaylists(context).map { local ->
+                    LibraryGridItem(
+                        id = local.id,
+                        title = local.name,
+                        subtitle = local.songCountText,
+                        thumbnailUrl = local.thumbnail,
+                        rawItem = null,
+                        authorName = "You",
+                        authorAvatarUrl = null,
+                        isArtist = false,
+                        isLocal = true
+                    )
+                }
+
+                // Fetch playlists and subscribed artists concurrently (signed in only)
                 val playlistsDeferred = async {
                     val list = mutableListOf<LibraryGridItem>()
                     try {
@@ -516,28 +573,38 @@ fun PlaylistsScreen(
                     list
                 }
 
-                val fetchedPlaylists = playlistsDeferred.await()
-                val fetchedArtists = artistsDeferred.await()
-
                 val fetchedItems = mutableListOf<LibraryGridItem>()
-                // Liked songs playlist
-                fetchedItems.add(
-                    LibraryGridItem(
-                        id = "LM",
-                        title = "Liked",
-                        subtitle = "Your liked songs",
-                        isLiked = true,
-                        isArtist = false
-                    )
-                )
 
-                // Interleave playlists and subscribed artists so artists appear among/between playlists
-                val pIter = fetchedPlaylists.iterator()
-                val aIter = fetchedArtists.iterator()
-                while (pIter.hasNext() || aIter.hasNext()) {
-                    if (pIter.hasNext()) fetchedItems.add(pIter.next())
-                    if (pIter.hasNext()) fetchedItems.add(pIter.next())
-                    if (aIter.hasNext()) fetchedItems.add(aIter.next())
+                if (isUserSignedIn) {
+                    val fetchedPlaylists = playlistsDeferred.await()
+                    val fetchedArtists = artistsDeferred.await()
+
+                    // Liked songs playlist (account-backed)
+                    fetchedItems.add(
+                        LibraryGridItem(
+                            id = "LM",
+                            title = "Liked",
+                            subtitle = "Your liked songs",
+                            isLiked = true,
+                            isArtist = false
+                        )
+                    )
+
+                    // On-device playlists sit right next to the Liked box.
+                    fetchedItems.addAll(localPlaylists)
+
+                    // Interleave playlists and subscribed artists so artists appear among/between playlists
+                    val pIter = fetchedPlaylists.iterator()
+                    val aIter = fetchedArtists.iterator()
+                    while (pIter.hasNext() || aIter.hasNext()) {
+                        if (pIter.hasNext()) fetchedItems.add(pIter.next())
+                        if (pIter.hasNext()) fetchedItems.add(pIter.next())
+                        if (aIter.hasNext()) fetchedItems.add(aIter.next())
+                    }
+                } else {
+                    // Signed out: the library is fully local — just the on-device playlists.
+                    // (The "+" create box is always rendered by the grid itself.)
+                    fetchedItems.addAll(localPlaylists)
                 }
 
                 withContext(Dispatchers.Main) {
@@ -571,7 +638,18 @@ fun PlaylistsScreen(
                 var tracks = emptyList<SongItem>()
                 val rawItem = activePlaylistRawItem
 
-                if (activePlaylistIsLiked || playlistId == "LM") {
+                if (LocalPlaylistManager.isLocalPlaylistId(playlistId)) {
+                    // On-device playlist — read straight from local storage.
+                    val local = LocalPlaylistManager.getPlaylist(context, playlistId)
+                    tracks = local?.songs.orEmpty()
+                    withContext(Dispatchers.Main) {
+                        local?.let { list ->
+                            activePlaylistName = list.name
+                            activePlaylistSongCountText = list.songCountText
+                            list.thumbnail?.let { activePlaylistThumbnail = it }
+                        }
+                    }
+                } else if (activePlaylistIsLiked || playlistId == "LM") {
                     val playlistResult = YouTube.playlist("LM")
                     if (playlistResult.isSuccess) {
                         tracks = playlistResult.getOrNull()?.songs.orEmpty()
@@ -777,6 +855,7 @@ fun PlaylistsScreen(
         // Close whatever is currently open and show the requested artist.
         activePlaylistId = null
         playlistSongs = emptyList()
+        activePlaylistIsLocal = false
         activePlaylistOpenedFromArtist = false
         activePlaylistHeader = "Playlist View"
         isSearchActive = false
@@ -1346,7 +1425,8 @@ fun PlaylistsScreen(
                 // quick action (owned playlists only — created in-app or the user's own).
                 // The loaded page's editable header is authoritative when present.
                 val cachedAccountName = remember(context) { SessionManager.getCachedAccountInfo(context)?.name }
-                val isUserOwnedPlaylist = activePlaylistId != null &&
+                val isUserOwnedPlaylist = activePlaylistIsLocal ||
+                    (activePlaylistId != null &&
                     activePlaylistId != "LM" &&
                     !activePlaylistIsLiked &&
                     (when (val raw = activePlaylistRawItem) {
@@ -1357,7 +1437,7 @@ fun PlaylistsScreen(
                                 (raw == null || (raw as? PlaylistItem)?.let { p ->
                                     p.isEditable || p.author?.name == cachedAccountName
                                 } == true))
-                    })
+                    }))
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1438,6 +1518,7 @@ fun PlaylistsScreen(
                                         playSoundAndHaptic()
                                         activePlaylistId = null
                                         playlistSongs = emptyList()
+                                        activePlaylistIsLocal = false
                                         activePlaylistOpenedFromArtist = false
                                         activePlaylistHeader = "Playlist View"
                                     },
@@ -1530,7 +1611,8 @@ fun PlaylistsScreen(
                                     val canRenamePlaylist = activePlaylistId != null &&
                                         activePlaylistId != "LM" &&
                                         !activePlaylistIsLiked &&
-                                        activePlaylistRawItem !is AlbumItem
+                                        activePlaylistRawItem !is AlbumItem &&
+                                        (activePlaylistIsLocal || activePlaylistRawItem !is ArtistItem)
 
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -1609,6 +1691,36 @@ fun PlaylistsScreen(
                                             color = Color.Gray,
                                             textAlign = TextAlign.Center
                                         )
+                                    }
+
+                                    // Local playlists get a small "Local playlist" tag in
+                                    // the detail view (kept out of the grid to save space).
+                                    if (activePlaylistIsLocal) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .background(Color.Gray.copy(alpha = 0.15f))
+                                                .border(1.dp, textColor.copy(alpha = 0.15f), CircleShape)
+                                                .padding(horizontal = 12.dp, vertical = 5.dp)
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    imageVector = Icons.Default.QueueMusic,
+                                                    contentDescription = null,
+                                                    tint = textColor.copy(alpha = 0.7f),
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(5.dp))
+                                                Text(
+                                                    text = "Local playlist",
+                                                    color = textColor.copy(alpha = 0.7f),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(12.dp))
                                     }
 
                                     Row(
@@ -1727,7 +1839,9 @@ fun PlaylistsScreen(
                                                                 }
                                                             }
                                                         )
-                                                    } else {
+                                                    } else if (!activePlaylistIsLocal) {
+                                                        // (Local playlists are never saved to the account,
+                                                        // so the "Already saved" row is skipped for them.)
                                                         DropdownMenuItem(
                                                             text = { Text("Already saved", color = textColor.copy(alpha = 0.5f)) },
                                                             leadingIcon = { Icon(Icons.Default.Favorite, contentDescription = "Saved", tint = textColor.copy(alpha = 0.5f)) },
@@ -1891,117 +2005,8 @@ fun PlaylistsScreen(
             }
 
             PlaylistsViewMode.LIBRARY_GRID -> {
-                if (!isUserSignedIn) {
-                    // ── SIGNED-OUT LIBRARY VIEW ──────────────────────────────────────
-                    val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
-                    val cardBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
-                    val cardBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(backgroundColor)
-                            .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 0.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Library",
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor
-                            )
-                        }
-
-                        PullToRefreshBox(
-                            isRefreshing = isRefreshing,
-                            onRefresh = { handleRefresh() },
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(bottom = 96.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(96.dp)
-                                        .shadow(elevation = 6.dp, shape = CircleShape)
-                                        .clip(CircleShape)
-                                        .background(cardBgColor)
-                                        .border(1.dp, cardBorderColor, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.AccountCircle,
-                                        contentDescription = "Sign in",
-                                        tint = textColor,
-                                        modifier = Modifier.size(52.dp)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(24.dp))
-
-                                Text(
-                                    text = "Sign in to YouTube Music",
-                                    color = textColor,
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center
-                                )
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                Text(
-                                    text = "Sign in to your YouTube Music account to view your playlists, liked tracks, and personalized music library.",
-                                    color = Color.Gray,
-                                    fontSize = 15.sp,
-                                    textAlign = TextAlign.Center,
-                                    lineHeight = 22.sp,
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                )
-
-                                Spacer(modifier = Modifier.height(32.dp))
-
-                                Button(
-                                    onClick = {
-                                        playSoundAndHaptic()
-                                        onNavigate(AppScreen.ACCOUNT)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000)),
-                                    shape = RoundedCornerShape(30.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(56.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.AccountCircle,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Sign In with YouTube",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // ── GRID VIEW ────────────────────────────────────────────────────
-                    Column(
+                // ── GRID VIEW (available signed in AND signed out) ────────────────
+                Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(backgroundColor)
@@ -2125,7 +2130,7 @@ fun PlaylistsScreen(
                             }
                         }
 
-                        // Library filter pills (All / Playlists / Artists)
+                        // Library filter pills (All / Playlists / Artists — Artists needs an account)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2133,7 +2138,8 @@ fun PlaylistsScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             val isPillDarkTheme = backgroundColor == Color.Black
-                            listOf("All", "Playlists", "Artists").forEach { tab ->
+                            val libraryTabs = if (isUserSignedIn) listOf("All", "Playlists", "Artists") else listOf("All", "Playlists")
+                            libraryTabs.forEach { tab ->
                                 val isSelected = libraryFilter == tab
                                 Box(
                                     modifier = Modifier
@@ -2177,38 +2183,23 @@ fun PlaylistsScreen(
                                 onRefresh = { handleRefresh() },
                                 modifier = Modifier.weight(1f)
                             ) {
-                                if (tabFilteredGridItems.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .verticalScroll(rememberScrollState())
-                                            .padding(bottom = 96.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "No playlists found in your library.",
-                                            color = Color.Gray,
-                                            fontSize = 15.sp,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
-                                } else {
-                                    LazyVerticalGrid(
-                                        columns = GridCells.Fixed(3),
-                                        verticalArrangement = Arrangement.spacedBy(24.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentPadding = PaddingValues(bottom = 96.dp)
-                                    ) {
-                                        // "New playlist" creation box — always the very first
-                                        // cell of the grid, even before the Liked songs box.
+                                // The grid always renders — signed in, signed out, empty or
+                                // not — so the "+" create box is never out of reach.
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(3),
+                                    verticalArrangement = Arrangement.spacedBy(24.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(bottom = 96.dp)
+                                ) {
+                                    // The create box always leads — signed in OR signed out.
                                         if (libraryFilter != "Artists" && searchQuery.isBlank()) {
                                             item(key = "new_playlist_box") {
                                                 Column(
                                                     horizontalAlignment = Alignment.CenterHorizontally,
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .clickable { createNewPlaylist() }
+                                                        .clickable { openCreateDialog() }
                                                 ) {
                                                     Box(
                                                         modifier = Modifier
@@ -2261,6 +2252,8 @@ fun PlaylistsScreen(
                                                             activePlaylistThumbnail = item.thumbnailUrl
                                                             activePlaylistSongCountText = item.subtitle
                                                             activePlaylistIsLiked = item.isLiked
+                                                            activePlaylistIsLocal = item.isLocal
+                                                            activePlaylistEditable = null
                                                             activePlaylistRawItem = item.rawItem
                                                             activePlaylistAuthorName = item.authorName
                                                             activePlaylistAuthorAvatarUrl = item.authorAvatarUrl
@@ -2283,6 +2276,16 @@ fun PlaylistsScreen(
                                                         AsyncImage(model = item.thumbnailUrl, contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                                                     } else if (item.isArtist) {
                                                         Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Artist", tint = backgroundColor, modifier = Modifier.size(44.dp))
+                                                    } else if (item.isLocal) {
+                                                        // On-device playlist: musical-note placeholder in a soft gray box.
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxSize()
+                                                                .background(Color.Gray.copy(alpha = 0.3f)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(imageVector = Icons.Default.QueueMusic, contentDescription = "Local playlist", tint = textColor, modifier = Modifier.size(44.dp))
+                                                        }
                                                     }
                                                 }
 
@@ -2292,8 +2295,20 @@ fun PlaylistsScreen(
                                                 Text(text = item.subtitle, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                                             }
                                         }
-                                    }
-                                }
+                                        // Hint when the library (signed in or signed out) is empty.
+                                        if (tabFilteredGridItems.isEmpty()) {
+                                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                                Text(
+                                                    text = "No playlists yet — tap the + box above to create your first one.",
+                                                    color = Color.Gray,
+                                                    fontSize = 14.sp,
+                                                    textAlign = TextAlign.Center,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(top = 28.dp, bottom = 8.dp)
+                                                )
+                                            }
+                                        }
                             }
                         }
                     }
@@ -2301,6 +2316,16 @@ fun PlaylistsScreen(
             }
         }
     }
+
+    // ── Create playlist popup: pick a name AND where the playlist lives ──────
+    // Shared with the Quick Action sheet's "Add to playlist" picker.
+    CreatePlaylistDialog(
+        show = showCreateDialog,
+        isSignedIn = isUserSignedIn,
+        isCreating = isCreatingPlaylist,
+        onDismiss = { showCreateDialog = false },
+        onCreate = { name, asLocal -> createPlaylist(name, asLocal) }
+    )
 
     // ── Rename playlist dialog (tapping the playlist name in the detail view) ──
     if (showRenameDialog) {
@@ -2343,12 +2368,18 @@ fun PlaylistsScreen(
                         val newName = renameDraft.trim()
                         if (pid == null || pid == "LM" || newName.isEmpty()) return@TextButton
                         isRenamingPlaylist = true
-                        coroutineScope.launch(Dispatchers.IO) {
-                            // Renames the playlist directly on the user's YouTube Music account.
-                            val result = YouTube.renamePlaylist(pid, newName)
+                        coroutineScope.launch {
+                            // Local playlists are renamed on-device; YouTube playlists on the account.
+                            val renamed = withContext(Dispatchers.IO) {
+                                if (LocalPlaylistManager.isLocalPlaylistId(pid)) {
+                                    LocalPlaylistManager.renamePlaylist(context, pid, newName)
+                                } else {
+                                    YouTube.renamePlaylist(pid, newName).isSuccess
+                                }
+                            }
                             withContext(Dispatchers.Main) {
                                 isRenamingPlaylist = false
-                                if (result.isSuccess) {
+                                if (renamed) {
                                     showRenameDialog = false
                                     activePlaylistName = newName
                                     // Keep the library grid cell in sync without a refetch.
@@ -2389,7 +2420,11 @@ fun PlaylistsScreen(
             title = { Text(text = "Delete playlist?", color = textColor, fontWeight = FontWeight.Bold) },
             text = {
                 Text(
-                    text = "\"${activePlaylistName}\" will be permanently deleted from your YouTube Music account. This can't be undone.",
+                    text = if (activePlaylistIsLocal) {
+                        "\"${activePlaylistName}\" will be permanently deleted from this device. This can't be undone."
+                    } else {
+                        "\"${activePlaylistName}\" will be permanently deleted from your YouTube Music account. This can't be undone."
+                    },
                     color = Color.Gray,
                     fontSize = 14.sp,
                     lineHeight = 20.sp
@@ -2402,15 +2437,22 @@ fun PlaylistsScreen(
                         playSoundAndHaptic()
                         val pid = activePlaylistId ?: return@TextButton
                         isDeletingPlaylist = true
-                        coroutineScope.launch(Dispatchers.IO) {
-                            // Deletes the playlist on the user's real YouTube Music account.
-                            val result = YouTube.deletePlaylist(pid)
+                        coroutineScope.launch {
+                            // Local playlists are removed from the device; YouTube playlists from the account.
+                            val deleted = withContext(Dispatchers.IO) {
+                                if (LocalPlaylistManager.isLocalPlaylistId(pid)) {
+                                    LocalPlaylistManager.deletePlaylist(context, pid)
+                                } else {
+                                    YouTube.deletePlaylist(pid).isSuccess
+                                }
+                            }
                             withContext(Dispatchers.Main) {
                                 isDeletingPlaylist = false
-                                if (result.isSuccess) {
+                                if (deleted) {
                                     showDeleteConfirmDialog = false
                                     activePlaylistId = null
                                     playlistSongs = emptyList()
+                                    activePlaylistIsLocal = false
                                     activePlaylistOpenedFromArtist = false
                                     activePlaylistHeader = "Playlist View"
                                     Toast.makeText(context, "Playlist deleted", Toast.LENGTH_SHORT).show()
