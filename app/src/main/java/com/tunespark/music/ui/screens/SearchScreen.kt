@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -47,6 +48,8 @@ import com.metrolist.innertube.models.ArtistItem
 import com.metrolist.innertube.models.SongItem
 import com.tunespark.music.AppScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
@@ -72,9 +75,24 @@ fun SearchScreen(
     val context = LocalContext.current
     val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
+    // Backing TextFieldValue so the caret can always sit at the END of the text —
+    // on re-entering the screen with a restored query, on ↗ arrow fills, suggestion
+    // taps and clears. (A plain String value would reset the caret to position 0.)
+    var textFieldValue by remember {
+        mutableStateOf(TextFieldValue(searchQuery, TextRange(searchQuery.length)))
+    }
+
     LaunchedEffect(Unit) {
         delay(100)
         focusRequester.requestFocus()
+        // Coming back to the screen with a restored query: keep the caret at the end.
+        if (textFieldValue.text.isNotEmpty() &&
+            textFieldValue.selection.start != textFieldValue.text.length
+        ) {
+            textFieldValue = textFieldValue.copy(
+                selection = TextRange(textFieldValue.text.length)
+            )
+        }
     }
 
     BackHandler {
@@ -110,25 +128,31 @@ fun SearchScreen(
                 suggestions = suggestionRes.getOrNull()?.queries.orEmpty()
             }
 
-            val resultsRes = withContext(Dispatchers.IO) {
-                YouTube.search(
-                    query = searchQuery,
-                    filter = YouTube.SearchFilter.FILTER_SONG
-                )
+            // Songs + artists are fetched CONCURRENTLY so the slower artist results
+            // no longer lag behind the songs (the skeletons reserve their space).
+            val (resultsRes, artistRes) = coroutineScope {
+                val songsDeferred = async(Dispatchers.IO) {
+                    YouTube.search(
+                        query = searchQuery,
+                        filter = YouTube.SearchFilter.FILTER_SONG
+                    )
+                }
+                val artistsDeferred = async(Dispatchers.IO) {
+                    YouTube.search(
+                        query = searchQuery,
+                        filter = YouTube.SearchFilter.FILTER_ARTIST
+                    )
+                }
+                songsDeferred.await() to artistsDeferred.await()
             }
+
             if (resultsRes.isSuccess) {
                 val items = resultsRes.getOrNull()?.items.orEmpty()
                 localResults = items.filterIsInstance<SongItem>()
             }
 
-            // Artist search: fetch matching artists alongside songs so users can
-            // navigate straight to an artist profile from the search screen.
-            val artistRes = withContext(Dispatchers.IO) {
-                YouTube.search(
-                    query = searchQuery,
-                    filter = YouTube.SearchFilter.FILTER_ARTIST
-                )
-            }
+            // Artist results: shown above the songs so users can navigate straight
+            // to an artist profile from the search screen.
             if (artistRes.isSuccess) {
                 artistResults = artistRes.getOrNull()?.items?.filterIsInstance<ArtistItem>().orEmpty()
             }
@@ -144,7 +168,6 @@ fun SearchScreen(
 
     // Backing TextFieldValue so the cursor can be placed at the end of the text
     // whenever the query is filled programmatically (e.g. via the ↗ arrow).
-    var textFieldValue by remember { mutableStateOf(TextFieldValue(searchQuery)) }
     LaunchedEffect(searchQuery) {
         if (searchQuery != textFieldValue.text) {
             // External change (arrow fill, suggestion tap, clear): move cursor to end.
@@ -217,23 +240,28 @@ fun SearchScreen(
                 .fillMaxWidth()
                 .height(60.dp)
                 .focusRequester(focusRequester)
+                .onFocusChanged { focusState ->
+                    // Whenever the field gains focus with text already in it, put the
+                    // caret at the END instead of letting it jump to the start.
+                    if (focusState.isFocused &&
+                        textFieldValue.text.isNotEmpty() &&
+                        textFieldValue.selection.start != textFieldValue.text.length
+                    ) {
+                        textFieldValue = textFieldValue.copy(
+                            selection = TextRange(textFieldValue.text.length)
+                        )
+                    }
+                }
         )
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        if (localIsSearching && localResults.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    color = textColor,
-                    modifier = Modifier.size(36.dp)
-                )
-            }
-        }
+        // While a live search is in flight, greyed-out skeletons occupy the Artists
+        // and Songs sections so the layout never shifts. Without this, the Songs
+        // list sat at the top for a split second until the slower artist results
+        // arrived and pushed it down — causing accidental taps on artists.
+        val showSearchSkeletons = localIsSearching && !isSearchCommitted
+        val skeletonColor = textColor.copy(alpha = 0.10f)
 
         LazyColumn(
             modifier = Modifier
@@ -366,6 +394,49 @@ fun SearchScreen(
                 item {
                     Spacer(modifier = Modifier.height(6.dp))
                 }
+            } else if (showSearchSkeletons) {
+                // Greyed-out artist placeholders keep the section's space reserved
+                // so the Songs list below never jumps up and steals a tap.
+                item {
+                    Text(
+                        text = "Artists",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor.copy(alpha = 0.4f),
+                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 8.dp)
+                    )
+                }
+                item {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        items(4) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.width(96.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(84.dp)
+                                        .clip(CircleShape)
+                                        .background(skeletonColor)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .height(10.dp)
+                                        .width(64.dp)
+                                        .clip(RoundedCornerShape(5.dp))
+                                        .background(skeletonColor)
+                                )
+                            }
+                        }
+                    }
+                }
+                item {
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
             }
 
             if (localResults.isNotEmpty()) {
@@ -455,6 +526,51 @@ fun SearchScreen(
                     }
                     }
                 }
+            } else if (showSearchSkeletons) {
+                // Greyed-out song placeholders reserve the list's space so the rows
+                // never jump around (or get mis-tapped) while the search loads.
+                item {
+                    Text(
+                        text = "Songs",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor.copy(alpha = 0.4f),
+                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 8.dp)
+                    )
+                }
+                items(6) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp, horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(skeletonColor)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.6f)
+                                    .height(14.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(skeletonColor)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.4f)
+                                    .height(11.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(skeletonColor)
+                            )
+                        }
+                    }
+                }
             } else if (!localIsSearching && searchQuery.isEmpty()) {
                 item {
                     Box(
@@ -465,6 +581,22 @@ fun SearchScreen(
                     ) {
                         Text(
                             text = "Explore millions of tracks. Type a query above!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else if (!localIsSearching && searchQuery.isNotEmpty() && artistResults.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No results found.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.Gray,
                             textAlign = TextAlign.Center
