@@ -2,7 +2,7 @@
 
 # 🎵 Tunespark
 
-<img width="250" alt="Group 39" src="https://github.com/user-attachments/assets/c127255e-89fc-4221-9c74-cd703f141b93" />
+<img width="220" alt="Group 39" src="https://github.com/user-attachments/assets/c127255e-89fc-4221-9c74-cd703f141b93" />
 
 **A modern, open-source Android music streaming player with an AI-powered radio experience.**
 
@@ -96,66 +96,50 @@ ElevenLabs integration includes:
 
 ---
 
-## 🏗️ Tech Stack
+## 📥 Download
 
-- **Kotlin**
-- **Jetpack Compose**
-- **Material 3**
-- **AndroidX Media3 / ExoPlayer**
-- **Ktor Client**
-- **OkHttp**
-- **Kotlinx Serialization**
-- **JSoup**
-- **JTransforms**
-- **LRC / LRCLIB**
-- **YouTube Music InnerTube**
-- **Gemini**
-- **ElevenLabs**
-- **RSS / Atom feeds**
+### Stable Release
 
----
+<div align="center">
 
-## 🚀 Getting Started
+<table>
+  <tr>
+    <th>Obtainium</th>
+    <th>GitHub</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/ItzHarshXD/Tunespark">
+        <img src="assets/badge_obtainium.png" width="300" alt="Add to Obtainium"/>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/ItzHarshXD/Tunespark/releases/latest/download/Tunespark.apk">
+        <img src="assets/get-it-on-github.png" width="300" alt="Get it on GitHub"/>
+      </a>
+    </td>
+  </tr>
+</table>
 
-### Requirements
+</div>
 
-- Android Studio
-- JDK compatible with the project's Gradle configuration
-- Android device or emulator
-- Internet connection
-
-Some Tunespark features require API keys configured from inside the application, such as AI/TTS functionality.
-
-### Build
-
-Clone the repository:
-
-```bash
-git clone https://github.com/ItzHarshXD/Tunespark.git
-cd Tunespark
-```
-
-Open the project in Android Studio and allow Gradle to sync.
-
-Then build and run the `app` module.
-
-For a signed release APK, use:
-
-**Build → Generate Signed App Bundle / APK → APK → release**
+> **Obtainium** — Install Tunespark directly from its GitHub releases and receive updates when new releases are published.
+>
+> **GitHub** — Download the latest stable APK directly from GitHub Releases.
 
 ---
 
-## 📱 Releases
+❤️ Support Tunespark
 
-Official APK releases are available through GitHub Releases:
+If you enjoy Tunespark and want to support its development, you can contribute through the platforms below.
 
-**https://github.com/ItzHarshXD/Tunespark/releases**
+<div align="center"> 
+  <a href="https://buymeacoffee.com/itzharshxd"> 
+    <img src="assets/buy-me-a-coffee.png" width="300" alt="Buy Me a Coffee"/> 
+  </a> 
+</div>
 
-The project uses versioned GitHub Releases for distributing stable APK builds.
-
----
-
-## 🤝 Contributing
+Every contribution helps support continued development, new features, maintenance, and improvements to Tunespark.
 
 Contributions, ideas, bug reports, and improvements are welcome!
 
