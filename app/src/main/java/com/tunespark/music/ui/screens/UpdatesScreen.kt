@@ -7,6 +7,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,10 +32,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunespark.music.AppScreen
+import com.tunespark.music.R
 import com.tunespark.music.update.*
 import java.io.File
 import java.text.SimpleDateFormat
@@ -709,6 +712,49 @@ fun UpdatesScreen(
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+
+        // Support Section — Buy Me a Coffee
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = cardBgColor),
+            border = BorderStroke(1.dp, cardBorderColor)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Support TuneSpark",
+                    color = textColor,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(
+                    text = "If you enjoy the app, consider supporting development.",
+                    color = textColor.copy(alpha = 0.6f),
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 16.dp)
+                )
+
+                Image(
+                    painter = painterResource(id = R.drawable.buy_me_a_coffee),
+                    contentDescription = "Buy me a coffee",
+                    modifier = Modifier
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            playClickSound()
+                            uriHandler.openUri("https://buymeacoffee.com/itzharshxd")
+                        }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Credits & Links Section
         Column(
