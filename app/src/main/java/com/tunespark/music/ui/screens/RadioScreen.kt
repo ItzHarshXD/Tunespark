@@ -428,14 +428,18 @@ fun RadioScreen(
                 val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
                 if (viewportHeight > 0) {
                     val scrollThreshold = itemHeightPx * 0.75f
+                    // Edge auto-scroll speed scales with the row height so moving a
+                    // song to a slot beyond the current screenful is quick instead of
+                    // creeping (was a fixed ~24px/16ms cap regardless of density).
+                    val maxEdgeScrollPx = itemHeightPx * 0.14f
                     var scrollAmount = 0f
 
                     if (currentTouchY < scrollThreshold) {
                         val ratio = ((scrollThreshold - currentTouchY) / scrollThreshold).coerceIn(0f, 2f)
-                        scrollAmount = -12f * ratio
+                        scrollAmount = -maxEdgeScrollPx * ratio
                     } else if (currentTouchY > viewportHeight - scrollThreshold) {
                         val ratio = ((currentTouchY - (viewportHeight - scrollThreshold)) / scrollThreshold).coerceIn(0f, 2f)
-                        scrollAmount = 12f * ratio
+                        scrollAmount = maxEdgeScrollPx * ratio
                     }
 
                     if (scrollAmount != 0f) {
@@ -1038,7 +1042,6 @@ fun RadioScreen(
                 val artworkUri = item.mediaMetadata.artworkUri
 
                 val isDragged = item.mediaId == draggedId
-                val translationY = if (isDragged) dragOffset else 0f
                 val zIndexValue = if (isDragged) 10f else 1f
 
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -1050,10 +1053,16 @@ fun RadioScreen(
                             .fillMaxWidth()
                             .zIndex(zIndexValue)
                             .graphicsLayer {
-                                this.translationY = translationY
-                                this.scaleX = if (isDragged) 1.05f else 1f
-                                this.scaleY = if (isDragged) 1.05f else 1f
-                                this.shadowElevation = if (isDragged) with(localDensity) { 8.dp.toPx() } else 0f
+                                // dragOffset is read in the draw phase, so every drag
+                                // movement frame only invalidates this row's layer —
+                                // the row composable itself never recomposes while the
+                                // song is being dragged across the queue.
+                                if (draggedId == item.mediaId) {
+                                    this.translationY = dragOffset
+                                    this.scaleX = 1.05f
+                                    this.scaleY = 1.05f
+                                    this.shadowElevation = 8.dp.toPx()
+                                }
                             }
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (isCurrent) secondaryColor else if (isDragged) secondaryColor.copy(alpha = 0.15f) else Color.Transparent)
@@ -2963,7 +2972,6 @@ fun RadioScreen(
                             val artworkUri = item.mediaMetadata.artworkUri
 
                             val isDragged = item.mediaId == draggedId
-                            val translationY = if (isDragged) dragOffset else 0f
                             val zIndexValue = if (isDragged) 10f else 1f
 
                             Column(modifier = Modifier.fillMaxWidth()) {
@@ -2975,10 +2983,14 @@ fun RadioScreen(
                                         .fillMaxWidth()
                                         .zIndex(zIndexValue)
                                         .graphicsLayer {
-                                            this.translationY = translationY
-                                            this.scaleX = if (isDragged) 1.05f else 1f
-                                            this.scaleY = if (isDragged) 1.05f else 1f
-                                            this.shadowElevation = if (isDragged) with(localDensity) { 8.dp.toPx() } else 0f
+                                            // dragOffset read in the draw phase (see the
+                                            // portrait queue) — drag frames never recompose.
+                                            if (draggedId == item.mediaId) {
+                                                this.translationY = dragOffset
+                                                this.scaleX = 1.05f
+                                                this.scaleY = 1.05f
+                                                this.shadowElevation = 8.dp.toPx()
+                                            }
                                         }
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(if (isCurrent) secondaryColor else if (isDragged) secondaryColor.copy(alpha = 0.15f) else Color.Transparent)

@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -153,6 +154,10 @@ fun PlaylistsScreen(
     onPlayNextSong: (SongItem) -> Unit = {},
     onAddToQueueSong: (SongItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
+    // When true, the playlist detail was opened via a deep link (e.g. tapping a Home
+    // community playlist card) that also revealed the Library overlay. Closing the
+    // detail then routes back HOME instead of stranding the user on the Library tab.
+    playlistDetailExitsLibrary: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -241,6 +246,14 @@ fun PlaylistsScreen(
     // Artist release shelves (Albums, Singles & EPs, etc.) from the artist page
     var artistSections by remember { mutableStateOf<List<ArtistSection>>(emptyList()) }
 
+    // Hoisted scroll state for the Artist Profile View LazyColumn. Owning it at
+    // this level — instead of `rememberLazyListState()` inside the mode branch —
+    // keeps the artist page's exact scroll position when an album/release is
+    // opened from a shelf (AnimatedContent swaps to PLAYLIST_DETAIL and *disposes*
+    // the artist branch) and Back returns: the branch recomposes against the
+    // same state object, so the user resumes where they left off.
+    val artistDetailListState = rememberLazyListState()
+
     var isArtistAllSongsVisible by remember { mutableStateOf(false) }
     var artistAllSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isArtistAllSongsLoading by remember { mutableStateOf(false) }
@@ -283,6 +296,21 @@ fun PlaylistsScreen(
         }
     }
 
+    // Closes the open playlist detail. When the detail was opened via a deep link that
+    // also revealed the Library overlay (playlistDetailExitsLibrary), route back HOME
+    // so the user isn't stranded on the Library tab; otherwise just clear the detail.
+    val exitPlaylistDetail: () -> Unit = {
+        if (playlistDetailExitsLibrary) {
+            onNavigate(AppScreen.HOME)
+        } else {
+            activePlaylistId = null
+            playlistSongs = emptyList()
+            activePlaylistIsLocal = false
+            activePlaylistOpenedFromArtist = false
+            activePlaylistHeader = "Playlist View"
+        }
+    }
+
     BackHandler {
         playSoundAndHaptic()
         if (isSearchActive) {
@@ -291,11 +319,7 @@ fun PlaylistsScreen(
         } else if (isArtistAllSongsVisible) {
             isArtistAllSongsVisible = false
         } else if (activePlaylistId != null) {
-            activePlaylistId = null
-            playlistSongs = emptyList()
-            activePlaylistIsLocal = false
-            activePlaylistOpenedFromArtist = false
-            activePlaylistHeader = "Playlist View"
+            exitPlaylistDetail()
         } else if (activeArtistId != null) {
             activeArtistId = null
             artistTopSongs = emptyList()
@@ -320,6 +344,16 @@ fun PlaylistsScreen(
     // sheet's picker). Lets the user pick a name AND choose whether the playlist is
     // a local playlist (on-device, never synced) or a YouTube Music playlist.
     var showCreateDialog by remember { mutableStateOf(false) }
+
+    // "Save playlist" popup — shared composable used by the playlist detail overflow
+    // menu. Lets the user save the open playlist as a local playlist (works signed
+    // out) or to their YouTube Music account (needs sign-in).
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var isSavingSave by remember { mutableStateOf(false) }
+
+    // True once the open playlist has been saved from the overflow menu this session
+    // (hides the "Save to library" row). Keyed on the playlist so it resets per item.
+    var isLocallySaved by remember(activePlaylistId) { mutableStateOf(false) }
 
     // Rename dialog state for the currently open playlist detail.
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -709,6 +743,13 @@ fun PlaylistsScreen(
         }
     }
 
+    // Reset the hoisted artist-view scroll state only when a DIFFERENT artist
+    // opens. Re-entering the SAME artist (Back from its album, refreshes,
+    // library closed + reopened mid-screen) keeps the position.
+    LaunchedEffect(activeArtistId) {
+        artistDetailListState.scrollToItem(0)
+    }
+
     LaunchedEffect(activeArtistId, playlistsRefreshTrigger) {
         val artistId = activeArtistId ?: return@LaunchedEffect
         isArtistSongsLoading = true
@@ -1052,6 +1093,7 @@ fun PlaylistsScreen(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             LazyColumn(
+                                state = artistDetailListState,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(horizontal = 16.dp),
@@ -1516,11 +1558,7 @@ fun PlaylistsScreen(
                                 IconButton(
                                     onClick = {
                                         playSoundAndHaptic()
-                                        activePlaylistId = null
-                                        playlistSongs = emptyList()
-                                        activePlaylistIsLocal = false
-                                        activePlaylistOpenedFromArtist = false
-                                        activePlaylistHeader = "Playlist View"
+                                        exitPlaylistDetail()
                                     },
                                     modifier = Modifier
                                         .size(44.dp)
@@ -1733,7 +1771,6 @@ fun PlaylistsScreen(
                                         val isSaved = remember(activePlaylistId, gridItems) {
                                             activePlaylistId == "LM" || activePlaylistIsLiked || gridItems.any { it.id == activePlaylistId }
                                         }
-                                        var isLocallySaved by remember(activePlaylistId) { mutableStateOf(false) }
                                         val showSaveOption = activePlaylistId != null && activePlaylistId != "LM" && !isSaved && !isLocallySaved
 
                                         Button(
@@ -1819,24 +1856,7 @@ fun PlaylistsScreen(
                                                             onClick = {
                                                                 playSoundAndHaptic()
                                                                 menuExpanded = false
-                                                                if (!SessionManager.isUserSignedIn(context)) {
-                                                                    Toast.makeText(context, "Please sign in to your account first.", Toast.LENGTH_SHORT).show()
-                                                                } else {
-                                                                    // Albums / singles / EPs are saved through their release
-                                                                    // playlist id, plain playlists through their own id.
-                                                                    val targetId = (activePlaylistRawItem as? AlbumItem)?.playlistId ?: currentActiveId
-                                                                    coroutineScope.launch {
-                                                                        val result = withContext(Dispatchers.IO) {
-                                                                            YouTube.likePlaylist(targetId, true)
-                                                                        }
-                                                                        if (result.isSuccess) {
-                                                                            isLocallySaved = true
-                                                                            Toast.makeText(context, "Saved '$activePlaylistName' to library!", Toast.LENGTH_SHORT).show()
-                                                                        } else {
-                                                                            Toast.makeText(context, "Failed to save to library.", Toast.LENGTH_SHORT).show()
-                                                                        }
-                                                                    }
-                                                                }
+                                                                showSaveDialog = true
                                                             }
                                                         )
                                                     } else if (!activePlaylistIsLocal) {
@@ -2325,6 +2345,44 @@ fun PlaylistsScreen(
         isCreating = isCreatingPlaylist,
         onDismiss = { showCreateDialog = false },
         onCreate = { name, asLocal -> createPlaylist(name, asLocal) }
+    )
+
+    // ── Save playlist popup: save the open playlist locally or to the account ──
+    SavePlaylistDialog(
+        show = showSaveDialog,
+        playlistName = activePlaylistName,
+        isSignedIn = isUserSignedIn,
+        isSaving = isSavingSave,
+        onDismiss = { showSaveDialog = false },
+        onSave = { asLocal ->
+            showSaveDialog = false
+            isSavingSave = true
+            coroutineScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    if (asLocal) {
+                        runCatching {
+                            LocalPlaylistManager.savePlaylistSnapshot(context, activePlaylistName, playlistSongs)
+                        }.isSuccess
+                    } else {
+                        // Albums / singles / EPs are saved through their release
+                        // playlist id, plain playlists through their own id.
+                        val targetId = (activePlaylistRawItem as? AlbumItem)?.playlistId ?: activePlaylistId
+                        targetId != null && YouTube.likePlaylist(targetId, true).isSuccess
+                    }
+                }
+                isSavingSave = false
+                if (ok) isLocallySaved = true
+                Toast.makeText(
+                    context,
+                    if (ok) {
+                        if (asLocal) "Saved '$activePlaylistName' as a local playlist"
+                        else "Saved '$activePlaylistName' to library!"
+                    } else "Failed to save playlist.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                if (ok && asLocal) playlistsRefreshTrigger++
+            }
+        }
     )
 
     // ── Rename playlist dialog (tapping the playlist name in the detail view) ──

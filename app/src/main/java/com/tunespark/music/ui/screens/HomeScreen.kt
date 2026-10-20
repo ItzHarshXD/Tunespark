@@ -68,6 +68,7 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
+import com.tunespark.music.LocalPlaylistManager
 import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -80,96 +81,6 @@ data class CommunityPlaylistData(
     val playlist: PlaylistItem,
     val songs: List<SongItem>
 )
-
-fun calculateRelevanceScore(
-    playlist: PlaylistItem,
-    songs: List<SongItem>,
-    favoriteArtists: Set<String>,
-    recentSongIds: Set<String>
-): Double {
-    var score = 0.0
-    if (songs.isEmpty()) return score
-
-    // 1. Exact song match from recent/history - highly personalized!
-    val playlistSongIds = songs.map { it.id }.toSet()
-    val songOverlap = playlistSongIds.intersect(recentSongIds).size
-    score += songOverlap * 100.0 // Massive weight (100 points per song overlap) to playlists containing actual listened songs
-
-    // 2. Artist relevance based on listening history
-    // Count the total number of songs in this playlist that are by the user's favorite artists
-    var artistMatchCount = 0
-    songs.forEach { song ->
-        val matches = song.artists.any { artist ->
-            favoriteArtists.contains(artist.name.lowercase().trim())
-        }
-        if (matches) {
-            artistMatchCount++
-        }
-    }
-    score += artistMatchCount * 15.0 // 15 points per song by a favorite artist
-
-    // 3. Favorite artist name matches in playlist title
-    val lowerTitle = playlist.title.lowercase()
-    var titleArtistMatchCount = 0
-    favoriteArtists.forEach { artist ->
-        if (artist.isNotBlank() && lowerTitle.contains(artist)) {
-            titleArtistMatchCount++
-        }
-    }
-    score += titleArtistMatchCount * 50.0 // 50 points per artist match in the playlist title
-
-    // 4. User-made community curators / collaboration popularity boost
-    val authorName = playlist.author?.name?.lowercase() ?: ""
-    val isUserMade = authorName.isNotEmpty() &&
-            !authorName.contains("official") &&
-            !authorName.contains("vevo") &&
-            !authorName.contains("records") &&
-            !authorName.contains("topic") &&
-            !playlist.title.lowercase().contains("official")
-
-    if (isUserMade) {
-        score += 20.0 // Boost community curators
-    }
-
-    // Curated keyword boost
-    val isCuratedKeyword = playlist.title.lowercase().let {
-        it.contains("favorites") || it.contains("my") || it.contains("mine") ||
-                it.contains("best of") || it.contains("vibes") || it.contains("study") ||
-                it.contains("workout") || it.contains("relax") || it.contains("chill")
-    }
-    if (isCuratedKeyword) {
-        score += 10.0
-    }
-
-    // 5. Slightly popular factor among similar listeners
-    // If songCountText contains view / play counts, extract the value as a tie-breaker
-    val popularityText = playlist.songCountText?.lowercase() ?: ""
-    var popularityBoost = 0.0
-    if (popularityText.contains("view") || popularityText.contains("play") || popularityText.contains("like")) {
-        val numberPart = popularityText.split(" ").firstOrNull()?.filter { it.isDigit() || it == '.' || it == 'k' || it == 'm' } ?: ""
-        val value = try {
-            if (numberPart.endsWith("m")) {
-                (numberPart.removeSuffix("m").toDoubleOrNull() ?: 0.0) * 1000.0
-            } else if (numberPart.endsWith("k")) {
-                numberPart.removeSuffix("k").toDoubleOrNull() ?: 0.0
-            } else {
-                (numberPart.toDoubleOrNull() ?: 0.0) / 1000.0
-            }
-        } catch (e: Exception) {
-            0.0
-        }
-        popularityBoost = Math.min(value / 100.0, 10.0) // Log-like smaller boost so it does not override personal history matches
-    }
-    score += popularityBoost
-
-    // 6. Stable collaborative factor
-    val idHash = playlist.id.hashCode()
-    val collaborativeFactor = (Math.abs(idHash) % 100) / 20.0 // 0.0 to 5.0
-    score += collaborativeFactor
-
-    return score
-}
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1611,6 +1522,9 @@ fun CommunityPlaylistCard(
     val playlist = data.playlist
     val songs = data.songs
 
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var isSavingPlaylist by remember { mutableStateOf(false) }
+
     val isDark = MaterialTheme.colorScheme.background == Color.Black
     val cardBg = if (isDark) Color(0xFF141414) else Color(0xFFF7F7F7)
     val cardBorderColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.08f)
@@ -1821,14 +1735,23 @@ fun CommunityPlaylistCard(
                 IconButton(
                     onClick = {
                         playSoundAndHaptic()
-                        coroutineScope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                YouTube.likePlaylist(playlist.id, true)
-                            }
-                            if (result.isSuccess) {
-                                Toast.makeText(context, "Saved '${playlist.title}' to library!", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Failed to save playlist to library.", Toast.LENGTH_SHORT).show()
+                        if (SessionManager.isUserSignedIn(context)) {
+                            showSaveDialog = true
+                        } else {
+                            coroutineScope.launch {
+                                isSavingPlaylist = true
+                                val ok = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        LocalPlaylistManager.savePlaylistSnapshot(context, playlist.title, songs)
+                                    }.isSuccess
+                                }
+                                isSavingPlaylist = false
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "Saved '${playlist.title}' as a local playlist"
+                                    else "Failed to save playlist.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
                         }
                     },
@@ -1847,6 +1770,40 @@ fun CommunityPlaylistCard(
                 }
             }
         }
+    }
+
+    if (showSaveDialog) {
+        SavePlaylistDialog(
+            show = showSaveDialog,
+            playlistName = playlist.title,
+            isSignedIn = true,
+            isSaving = isSavingPlaylist,
+            onDismiss = { showSaveDialog = false },
+            onSave = { asLocal ->
+                showSaveDialog = false
+                coroutineScope.launch {
+                    isSavingPlaylist = true
+                    val ok = withContext(Dispatchers.IO) {
+                        if (asLocal) {
+                            runCatching {
+                                LocalPlaylistManager.savePlaylistSnapshot(context, playlist.title, songs)
+                            }.isSuccess
+                        } else {
+                            YouTube.likePlaylist(playlist.id, true).isSuccess
+                        }
+                    }
+                    isSavingPlaylist = false
+                    Toast.makeText(
+                        context,
+                        if (ok) {
+                            if (asLocal) "Saved '${playlist.title}' as a local playlist"
+                            else "Saved '${playlist.title}' to your library!"
+                        } else "Failed to save playlist.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        )
     }
 }
 

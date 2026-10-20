@@ -95,6 +95,19 @@ object LocalPlaylistManager {
         return playlist
     }
 
+    /**
+     * Saves an arbitrary list of songs as a brand-new local playlist — used when the
+     * user saves a community / YouTube playlist onto the device. Creates the playlist
+     * and writes its whole song list in one step.
+     */
+    fun savePlaylistSnapshot(context: Context, name: String, songs: List<SongItem>): LocalPlaylist {
+        val created = createPlaylist(context, name)
+        if (songs.isNotEmpty()) {
+            setSongs(context, created.id, songs)
+        }
+        return getPlaylist(context, created.id) ?: created
+    }
+
     /** Renames a local playlist. Returns true when it was found and updated. */
     fun renamePlaylist(context: Context, playlistId: String, newName: String): Boolean {
         val cleanName = newName.trim()

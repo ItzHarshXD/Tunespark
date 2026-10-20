@@ -29,7 +29,6 @@ import com.tunespark.music.LocalPlaylistManager
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.Artist
 import com.metrolist.innertube.models.ArtistItem
-import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.tunespark.music.ui.theme.TunesparkTheme
 import com.tunespark.music.ui.screens.*
@@ -259,6 +258,11 @@ fun MainPlayerScreen(
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
     var isLibraryOpen by rememberSaveable { mutableStateOf(false) }
 
+    // True when the Library playlist detail was opened via a deep link from another
+    // screen (e.g. a Home community playlist card). The Playlists detail's back then
+    // returns HOME instead of leaving the user on the Library grid.
+    var libraryPlaylistFromExternal by remember { mutableStateOf(false) }
+
     // Initial artist navigation state for the Playlists screen (Search artist taps
     // and the Quick Action sheet's "Go to artist" / Info "View" action). Declared
     // before the overlay controls so `closeLibrary()` can clear it on close.
@@ -275,15 +279,12 @@ fun MainPlayerScreen(
 
     val openFullPlayer: () -> Unit = {
         isFullPlayerOpen = true
-        isSearchOpen = false
-        isLibraryOpen = false
+        // The Search / Library overlays that are already open stay composed and
+        // remain visible underneath the player (which slides in over them). This
+        // preserves their exact state — query results, scroll positions, open
+        // playlist/artist layers — so closing the player (system Back or the
+        // player's back button) returns to the exact previous screen.
         coroutineScope.launch {
-            launch {
-                searchProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
-            }
-            launch {
-                libraryProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
-            }
             fullPlayerProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = spring(
@@ -343,14 +344,10 @@ fun MainPlayerScreen(
 
     val openLibrary: () -> Unit = {
         isFullPlayerOpen = false
-        isSearchOpen = false
         isLibraryOpen = true
         coroutineScope.launch {
             launch {
                 fullPlayerProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
-            }
-            launch {
-                searchProgress.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
             }
             libraryProgress.animateTo(
                 targetValue = 1f,
@@ -364,6 +361,8 @@ fun MainPlayerScreen(
 
     val closeLibrary: () -> Unit = {
         isLibraryOpen = false
+        // Any pending external deep-link context is consumed once the library closes.
+        libraryPlaylistFromExternal = false
         // Drop stale artist deep-links so reopening the library starts at the grid
         // instead of resurrecting the last artist that was opened.
         initialArtistId = null
@@ -389,9 +388,16 @@ fun MainPlayerScreen(
             openLibrary()
         } else if (screen == AppScreen.HOME) {
             currentScreen = AppScreen.HOME
-            closeFullPlayer()
-            closeSearch()
-            closeLibrary()
+            if (searchProgress.value > 0.001f && libraryProgress.value > 0.001f) {
+                // The Library sits over an open Search overlay: leaving the library
+                // reveals the search that was beneath it (its state was preserved),
+                // instead of dumping the user on an unrelated screen.
+                closeLibrary()
+            } else {
+                closeFullPlayer()
+                closeSearch()
+                closeLibrary()
+            }
         } else {
             currentScreen = screen
             closeFullPlayer()
@@ -401,12 +407,14 @@ fun MainPlayerScreen(
     }
 
     BackHandler(enabled = fullPlayerProgress.value > 0f || searchProgress.value > 0f || libraryProgress.value > 0f || currentScreen != AppScreen.HOME) {
+        // Overlay pop order matches the visual z-order: the player is topmost,
+        // then the library (which may sit over the search overlay), then search.
         if (fullPlayerProgress.value > 0f) {
             closeFullPlayer()
-        } else if (searchProgress.value > 0f) {
-            closeSearch()
         } else if (libraryProgress.value > 0f) {
             closeLibrary()
+        } else if (searchProgress.value > 0f) {
+            closeSearch()
         } else if (currentScreen != AppScreen.HOME) {
             when (currentScreen) {
                 AppScreen.SETTINGS, AppScreen.RECENTS, AppScreen.DISCOVER -> {
@@ -1082,6 +1090,21 @@ fun MainPlayerScreen(
 
     var homeRefreshTrigger by remember { mutableStateOf(0) }
 
+    // Personalization bucket for the heavy Home feeds. `localHistorySize` grows
+    // every time a song has been listened to for 10 seconds, which during
+    // background playback used to re-key the Quick Picks / "From the community"
+    // / Speed Dial loaders on EVERY song — wiping their lists to skeletons and
+    // re-issuing dozens of network requests once per track (the "Home screen
+    // repeatedly reloads many times" bug). Bucketing the history size by 5
+    // keeps the intended taste-refresh behavior (personalization follows
+    // listening) but only every 5 *new* songs, instead of every song change.
+    val homePersonalizationBucket = localHistorySize / 5
+
+    // The community playlist engine makes many more network calls (genre
+    // shelves + playlist pages), so it refreshes on a coarser cadence than the
+    // other Home sections to avoid hammering the network every few songs.
+    val homeCommunityBucket = localHistorySize / 15
+
     var homeSpeedDialSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isHomeSpeedDialLoading by remember { mutableStateOf(false) }
 
@@ -1123,9 +1146,11 @@ fun MainPlayerScreen(
         }
     }
 
-    LaunchedEffect(userSignedIn, localHistorySize, homeRefreshTrigger) {
-        isHomeQuickPicksLoading = true
-        homeQuickPicksSongs = emptyList()
+    LaunchedEffect(userSignedIn, homePersonalizationBucket, homeRefreshTrigger) {
+        // Only show the skeleton while there is nothing to show yet (initial
+        // load or a failed earlier fetch). Automatic refreshes triggered by the
+        // personalization bucket swap the lists in place — no wipe, no flicker.
+        if (homeQuickPicksSongs.isEmpty()) isHomeQuickPicksLoading = true
         withContext(Dispatchers.IO) {
             try {
                 val songs = mutableListOf<SongItem>()
@@ -1254,9 +1279,12 @@ fun MainPlayerScreen(
         }
     }
 
-    LaunchedEffect(userSignedIn, currentSongTitle, homeRefreshTrigger) {
-        isHomeRecentsLoading = true
-        homeRecentsSongs = emptyList()
+    // Recents is a cheap local read that mirrors the listening history, so it
+    // re-keys on the history size (which already grows as songs are captured)
+    // instead of `currentSongTitle` — the old key re-ran on every track change,
+    // wiping the section to its skeleton even when nothing new had been added.
+    LaunchedEffect(userSignedIn, localHistorySize, homeRefreshTrigger) {
+        if (homeRecentsSongs.isEmpty()) isHomeRecentsLoading = true
         withContext(Dispatchers.IO) {
             try {
                 val songs = mutableListOf<SongItem>()
@@ -1277,178 +1305,26 @@ fun MainPlayerScreen(
         }
     }
 
-    LaunchedEffect(userSignedIn, localHistorySize, homeRefreshTrigger) {
-        isHomeCommunityLoading = true
-        homeCommunityPlaylists = emptyList()
-        withContext(Dispatchers.IO) {
-            try {
-                val playlistDataList = mutableListOf<CommunityPlaylistData>()
-                val fetchedPlaylists = mutableListOf<PlaylistItem>()
-
-                val favoriteArtists = mutableSetOf<String>()
-                val recentSongIds = mutableSetOf<String>()
-
-                val localHistory = SessionManager.getLocalHistory(context)
-                if (localHistory.size >= 3) {
-                    localHistory.forEach { song ->
-                        recentSongIds.add(song.id)
-                        song.artists.forEach { artist ->
-                            if (artist.name.isNotBlank()) {
-                                favoriteArtists.add(artist.name.lowercase().trim())
-                            }
-                        }
-                    }
-
-                    val queriesToRun = favoriteArtists.take(3).ifEmpty { listOf("Chill Mix", "Today's Hits") }
-                    val searchJobs = queriesToRun.map { query ->
-                        async {
-                            val searchResult = YouTube.search(query, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST)
-                            if (searchResult.isSuccess) {
-                                searchResult.getOrNull()?.items?.filterIsInstance<PlaylistItem>().orEmpty()
-                            } else emptyList()
-                        }
-                    }
-                    val searchResultsList = searchJobs.awaitAll()
-                    searchResultsList.forEach { fetchedPlaylists.addAll(it) }
-
-                    val candidates = fetchedPlaylists.distinctBy { it.id }.take(3)
-                    val jobs = candidates.map { playlist ->
-                        async {
-                            val pageResult = YouTube.playlist(playlist.id)
-                            if (pageResult.isSuccess) {
-                                val page = pageResult.getOrNull()
-                                if (page != null && page.songs.isNotEmpty()) {
-                                    CommunityPlaylistData(playlist = playlist, songs = page.songs)
-                                } else null
-                            } else null
-                        }
-                    }
-                    val fetchedCandidates = jobs.awaitAll().filterNotNull()
-
-                    val rankedCandidates = fetchedCandidates.map { data ->
-                        val score = calculateRelevanceScore(data.playlist, data.songs, favoriteArtists, recentSongIds)
-                        data to score
-                    }.sortedByDescending { it.second }.map { it.first }
-
-                    playlistDataList.addAll(rankedCandidates)
-                } else {
-                    if (userSignedIn) {
-                        // Personalized: Extract favorite artists & recent song IDs from user's actual recent activity
-                        val recentResult = YouTube.libraryRecentActivity()
-                        if (recentResult.isSuccess) {
-                            val items = recentResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
-                            items.forEach { song ->
-                                recentSongIds.add(song.id)
-                                song.artists.forEach { artist ->
-                                    if (artist.name.isNotBlank()) {
-                                        favoriteArtists.add(artist.name.lowercase().trim())
-                                    }
-                                }
-                            }
-                        }
-
-                        // Supplement with Home recommended feeds
-                        val homeResult = YouTube.home()
-                        if (homeResult.isSuccess) {
-                            val homeSongs = homeResult.getOrNull()?.sections.orEmpty().flatMap { section ->
-                                section.items.filterIsInstance<SongItem>()
-                            }
-                            homeSongs.forEach { song ->
-                                song.artists.forEach { artist ->
-                                    if (artist.name.isNotBlank()) {
-                                        favoriteArtists.add(artist.name.lowercase().trim())
-                                    }
-                                }
-                            }
-                        }
-
-                        // Broader queries based on user's actual listening history for higher variety candidate retrieval (fetched concurrently)
-                        val queriesToRun = favoriteArtists.take(3).ifEmpty { listOf("Chill Mix", "Today's Hits") }
-                        val searchJobs = queriesToRun.map { query ->
-                            async {
-                                val searchResult = YouTube.search(query, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST)
-                                if (searchResult.isSuccess) {
-                                    searchResult.getOrNull()?.items?.filterIsInstance<PlaylistItem>().orEmpty()
-                                } else emptyList()
-                            }
-                        }
-                        val searchResultsList = searchJobs.awaitAll()
-                        searchResultsList.forEach { fetchedPlaylists.addAll(it) }
-
-                        // Retrieve unique candidate playlists up to 3 (Optimized from 5 to 3 to reduce network load/latency)
-                        val candidates = fetchedPlaylists.distinctBy { it.id }.take(3)
-
-                        // Fetch candidate playlist details concurrently using async coroutines
-                        val jobs = candidates.map { playlist ->
-                            async {
-                                val pageResult = YouTube.playlist(playlist.id)
-                                if (pageResult.isSuccess) {
-                                    val page = pageResult.getOrNull()
-                                    if (page != null && page.songs.isNotEmpty()) {
-                                        CommunityPlaylistData(playlist = playlist, songs = page.songs)
-                                    } else null
-                                } else null
-                            }
-                        }
-                        val fetchedCandidates = jobs.awaitAll().filterNotNull()
-
-                        // Compute algorithmic relevance score based on listening history & collaborative niche listener factors
-                        val rankedCandidates = fetchedCandidates.map { data ->
-                            val score = calculateRelevanceScore(data.playlist, data.songs, favoriteArtists, recentSongIds)
-                            data to score
-                        }.sortedByDescending { it.second }.map { it.first }
-
-                        // Take all ranked candidate playlists
-                        playlistDataList.addAll(rankedCandidates)
-
-                    } else {
-                        // Signed-out flow: fetch general popular community playlists (fetched concurrently)
-                        val generalQueries = listOf("Pop Hits Mix", "Chill Acoustic", "Lofi Study Beats")
-                        val searchJobs = generalQueries.map { query ->
-                            async {
-                                val searchResult = YouTube.search(query, YouTube.SearchFilter.FILTER_COMMUNITY_PLAYLIST)
-                                if (searchResult.isSuccess) {
-                                    searchResult.getOrNull()?.items?.filterIsInstance<PlaylistItem>().orEmpty()
-                                } else emptyList()
-                            }
-                        }
-                        val searchResultsList = searchJobs.awaitAll()
-                        searchResultsList.forEach { fetchedPlaylists.addAll(it) }
-
-                        // Retrieve unique candidate playlists up to 3 (Optimized from 5 to 3)
-                        val candidates = fetchedPlaylists.distinctBy { it.id }.take(3)
-                        val jobs = candidates.map { playlist ->
-                            async {
-                                val pageResult = YouTube.playlist(playlist.id)
-                                if (pageResult.isSuccess) {
-                                    val page = pageResult.getOrNull()
-                                    if (page != null && page.songs.isNotEmpty()) {
-                                        CommunityPlaylistData(playlist = playlist, songs = page.songs)
-                                    } else null
-                                } else null
-                            }
-                        }
-                        val fetchedCandidates = jobs.awaitAll().filterNotNull()
-                        playlistDataList.addAll(fetchedCandidates)
-                    }
+    LaunchedEffect(userSignedIn, homeCommunityBucket, homeRefreshTrigger) {
+        if (homeCommunityPlaylists.isEmpty()) isHomeCommunityLoading = true
+        try {
+            val recommendations = CommunityRecommendations.recommend(context, userSignedIn)
+            withContext(Dispatchers.Main) {
+                if (recommendations.isNotEmpty()) {
+                    homeCommunityPlaylists = recommendations
                 }
-
-                withContext(Dispatchers.Main) {
-                    homeCommunityPlaylists = playlistDataList
-                    isHomeCommunityLoading = false
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) {
-                    isHomeCommunityLoading = false
-                }
+                isHomeCommunityLoading = false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            withContext(Dispatchers.Main) {
+                isHomeCommunityLoading = false
             }
         }
     }
 
-    LaunchedEffect(userSignedIn, localHistorySize, homeRefreshTrigger) {
-        isHomeSpeedDialLoading = true
-        homeSpeedDialSongs = emptyList()
+    LaunchedEffect(userSignedIn, homePersonalizationBucket, homeRefreshTrigger) {
+        if (homeSpeedDialSongs.isEmpty()) isHomeSpeedDialLoading = true
         withContext(Dispatchers.IO) {
             try {
                 val songs = mutableListOf<SongItem>()
@@ -1827,6 +1703,9 @@ fun MainPlayerScreen(
                                     initialPlaylistAuthorName = data.playlist.author?.name
                                     initialPlaylistAuthorAvatarUrl = data.playlist.authorAvatarUrl
                                     initialPlaylistSongs = data.songs
+                                    // Opening from Home: back from the detail should return
+                                    // HOME, not strand the user on the Library grid.
+                                    libraryPlaylistFromExternal = true
                                     currentScreen = AppScreen.PLAYLISTS
                                 },
                                 onRefresh = { homeRefreshTrigger++ },
@@ -1936,6 +1815,7 @@ fun MainPlayerScreen(
                                 initialArtistName = initialArtistName,
                                 initialArtistThumbnail = initialArtistThumbnail,
                                 initialArtistNavRequest = initialArtistNavRequest,
+                                playlistDetailExitsLibrary = libraryPlaylistFromExternal,
                                 onPlayPlaylist = { name, songs, startIndex ->
                                     playPlaylist(name, songs, startIndex)
                                     openFullPlayer()
@@ -2081,6 +1961,7 @@ fun MainPlayerScreen(
                         initialArtistName = initialArtistName,
                         initialArtistThumbnail = initialArtistThumbnail,
                         initialArtistNavRequest = initialArtistNavRequest,
+                        playlistDetailExitsLibrary = libraryPlaylistFromExternal,
                         onPlayPlaylist = { name, songs, startIndex ->
                             playPlaylist(name, songs, startIndex)
                             openFullPlayer()
