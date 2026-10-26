@@ -56,6 +56,7 @@ import com.tunespark.music.WeatherService
 import com.tunespark.music.rss.Article
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Sensors
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -67,6 +68,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import android.media.AudioManager
 import com.metrolist.innertube.YouTube
+import com.metrolist.innertube.models.AlbumItem
 import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
@@ -82,6 +84,21 @@ import kotlinx.coroutines.awaitAll
 
 data class CommunityPlaylistData(
     val playlist: PlaylistItem,
+    val songs: List<SongItem>
+)
+
+/**
+ * Unified playlist model for the Home "From your library" section.
+ * Merges on-device playlists (works signed out) with signed-in account
+ * playlists so both kinds render identically in the shelf.
+ */
+data class HomeLibraryPlaylist(
+    val id: String,
+    val name: String,
+    val thumbnail: String?,
+    val songCountText: String,
+    val isLocal: Boolean,
+    /** Preloaded songs (local playlists carry them in memory; account playlists resolve on tap). */
     val songs: List<SongItem>
 )
 
@@ -107,6 +124,10 @@ fun HomeScreen(
     isSpeedDialLoading: Boolean,
     communityPlaylists: List<CommunityPlaylistData>,
     isCommunityLoading: Boolean,
+    newReleaseAlbums: List<AlbumItem>,
+    isNewReleasesLoading: Boolean,
+    libraryPlaylists: List<HomeLibraryPlaylist>,
+    isLibraryLoading: Boolean,
     recentsSongs: List<SongItem>,
     isRecentsLoading: Boolean,
     quickPicksSongs: List<SongItem>,
@@ -236,7 +257,7 @@ fun HomeScreen(
                             Image(
                                 painter = painterResource(id = R.drawable.tunespark_logo),
                                 contentDescription = "Tunespark logo",
-                                modifier = Modifier.size(38.dp)
+                                modifier = Modifier.size(45.dp)
                             )
 
                             Row(
@@ -392,6 +413,10 @@ fun HomeScreen(
                             isSpeedDialLoading = isSpeedDialLoading,
                             communityPlaylists = communityPlaylists,
                             isCommunityLoading = isCommunityLoading,
+                            newReleaseAlbums = newReleaseAlbums,
+                            isNewReleasesLoading = isNewReleasesLoading,
+                            libraryPlaylists = libraryPlaylists,
+                            isLibraryLoading = isLibraryLoading,
                             recentsSongs = recentsSongs,
                             isRecentsLoading = isRecentsLoading,
                             quickPicksSongs = quickPicksSongs,
@@ -446,6 +471,10 @@ private fun IdleContent(
     isSpeedDialLoading: Boolean,
     communityPlaylists: List<CommunityPlaylistData>,
     isCommunityLoading: Boolean,
+    newReleaseAlbums: List<AlbumItem>,
+    isNewReleasesLoading: Boolean,
+    libraryPlaylists: List<HomeLibraryPlaylist>,
+    isLibraryLoading: Boolean,
     recentsSongs: List<SongItem>,
     isRecentsLoading: Boolean,
     quickPicksSongs: List<SongItem>,
@@ -521,6 +550,39 @@ private fun IdleContent(
             onSongLongPress = onSongLongPress,
             onPlaylistClick = onPlaylistClick
         )
+
+        // "New releases" — latest albums from YouTube Music's new-releases
+        // shelf (via the :innertube module's existing newReleaseAlbums API).
+        // Sits at the bottom of the Home screen, below From the community.
+        // Hidden entirely when the shelf comes back empty.
+        if (isNewReleasesLoading || newReleaseAlbums.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(40.dp))
+
+            NewReleasesView(
+                albums = newReleaseAlbums,
+                isLoading = isNewReleasesLoading,
+                textColor = textColor,
+                primaryColor = primaryColor,
+                onPlayPlaylist = onPlayPlaylist,
+                onSongLongPress = onSongLongPress
+            )
+        }
+
+        // "From your library" — the user's own playlists (on-device + account
+        // synced). Sits at the very bottom of the Home screen. Only rendered
+        // when the user has 3 or more playlists, so a brand-new library never
+        // shows a near-empty shelf.
+        if (libraryPlaylists.size >= 3) {
+            Spacer(modifier = Modifier.height(40.dp))
+
+            FromYourLibraryView(
+                playlists = libraryPlaylists,
+                isLoading = isLibraryLoading,
+                textColor = textColor,
+                primaryColor = primaryColor,
+                onPlayPlaylist = onPlayPlaylist
+            )
+        }
 
         Spacer(modifier = Modifier.height(40.dp))
     }
@@ -2998,6 +3060,428 @@ fun RecentsHistoryDetailView(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Home "New releases" section — latest albums from YouTube Music's
+// new-releases shelf via the :innertube module's existing
+// `YouTube.newReleaseAlbums()` API (no module changes).
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun NewReleasesView(
+    albums: List<AlbumItem>,
+    isLoading: Boolean,
+    textColor: Color,
+    primaryColor: Color,
+    onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {}
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "New releases",
+            color = textColor,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        if (isLoading && albums.isEmpty()) {
+            NewReleasesSkeleton()
+        } else {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(end = 16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(albums.take(10)) { album ->
+                    NewReleaseCard(
+                        album = album,
+                        textColor = textColor,
+                        onPlayPlaylist = onPlayPlaylist,
+                        onSongLongPress = onSongLongPress
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun NewReleaseCard(
+    album: AlbumItem,
+    textColor: Color,
+    onPlayPlaylist: (String, List<SongItem>, Int) -> Unit,
+    onSongLongPress: (SongItem) -> Unit = {}
+) {
+    val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val playSoundAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+    val longPressAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    }
+    val coroutineScope = rememberCoroutineScope()
+    var isLoadingRelease by remember { mutableStateOf(false) }
+    // Resolved tracklist cache — populated on the first tap/long-press so the
+    // Quick Action View opens instantly on subsequent long-presses.
+    var cachedSongs by remember { mutableStateOf<List<SongItem>?>(null) }
+
+    val resolveAlbumSongs: () -> Unit = {
+        coroutineScope.launch {
+            val songs = withContext(Dispatchers.IO) {
+                runCatching { YouTube.albumSongs(album.playlistId, album).getOrNull() }
+                    .getOrNull().orEmpty()
+            }
+            cachedSongs = songs
+            isLoadingRelease = false
+            if (songs.isNotEmpty()) {
+                onPlayPlaylist(album.title, songs, 0)
+            } else {
+                Toast.makeText(context, "Couldn't load \"${album.title}\"", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val playAlbum = {
+        if (!isLoadingRelease) {
+            playSoundAndHaptic()
+            val existing = cachedSongs
+            if (!existing.isNullOrEmpty()) {
+                onPlayPlaylist(album.title, existing, 0)
+            } else {
+                isLoadingRelease = true
+                resolveAlbumSongs()
+            }
+        }
+    }
+
+    // Long-press opens the Quick Action View for the release's first song —
+    // the same panel every other song row on Home uses. The tracklist is
+    // resolved (and cached) on demand; the first fetch shows the panel as
+    // soon as it arrives.
+    val openQuickActions = {
+        longPressAndHaptic()
+        val existing = cachedSongs
+        if (!existing.isNullOrEmpty()) {
+            onSongLongPress(existing.first())
+        } else if (!isLoadingRelease) {
+            isLoadingRelease = true
+            coroutineScope.launch {
+                val songs = withContext(Dispatchers.IO) {
+                    runCatching { YouTube.albumSongs(album.playlistId, album).getOrNull() }
+                        .getOrNull().orEmpty()
+                }
+                cachedSongs = songs
+                isLoadingRelease = false
+                if (songs.isNotEmpty()) {
+                    onSongLongPress(songs.first())
+                } else {
+                    Toast.makeText(context, "Couldn't load \"${album.title}\"", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .width(124.dp)
+            .combinedClickable(
+                onClick = { playAlbum() },
+                onLongClick = { openQuickActions() }
+            )
+    ) {
+        AsyncImage(
+            model = album.thumbnail.toHighResThumbnail(),
+            contentDescription = album.title,
+            modifier = Modifier
+                .size(124.dp)
+                .clip(RoundedCornerShape(16.dp)),
+            contentScale = ContentScale.Crop
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = album.title,
+            color = textColor,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = buildString {
+                append(album.artists.orEmpty().joinToString(", ") { it.name })
+                album.year?.let {
+                    if (isNotEmpty()) append(" • ")
+                    append(it)
+                }
+            }.ifBlank { "Album" },
+            color = textColor.copy(alpha = 0.55f),
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+fun NewReleasesSkeleton() {
+    val infiniteTransition = rememberInfiniteTransition(label = "newReleasesShimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        repeat(3) {
+            Column(modifier = Modifier.width(124.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(124.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Gray.copy(alpha = alpha))
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.8f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.Gray.copy(alpha = alpha))
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .height(11.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.Gray.copy(alpha = alpha))
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Home "From your library" section — the user's own playlists (on-device
+// local playlists + signed-in account playlists merged). Only rendered when
+// the user has 3 or more playlists in total.
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun FromYourLibraryView(
+    playlists: List<HomeLibraryPlaylist>,
+    isLoading: Boolean,
+    textColor: Color,
+    primaryColor: Color,
+    onPlayPlaylist: (String, List<SongItem>, Int) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "From your library",
+            color = textColor,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        if (isLoading && playlists.isEmpty()) {
+            FromYourLibrarySkeleton()
+        } else {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(end = 16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(playlists.take(10)) { playlist ->
+                    LibraryPlaylistCard(
+                        playlist = playlist,
+                        textColor = textColor,
+                        primaryColor = primaryColor,
+                        onPlayPlaylist = onPlayPlaylist
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun LibraryPlaylistCard(
+    playlist: HomeLibraryPlaylist,
+    textColor: Color,
+    primaryColor: Color,
+    onPlayPlaylist: (String, List<SongItem>, Int) -> Unit
+) {
+    val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val playSoundAndHaptic = {
+        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+    val coroutineScope = rememberCoroutineScope()
+    var isLoadingPlaylist by remember { mutableStateOf(false) }
+
+    val playThisPlaylist = {
+        if (!isLoadingPlaylist) {
+            playSoundAndHaptic()
+            if (playlist.isLocal) {
+                // Local playlists already carry their songs in memory.
+                if (playlist.songs.isNotEmpty()) {
+                    onPlayPlaylist(playlist.name, playlist.songs, 0)
+                } else {
+                    Toast.makeText(context, "\"${playlist.name}\" is empty", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                // Account playlists resolve their tracklist on tap.
+                isLoadingPlaylist = true
+                coroutineScope.launch {
+                    val songs = withContext(Dispatchers.IO) {
+                        runCatching { YouTube.playlist(playlist.id).getOrNull() }
+                            .getOrNull()?.songs.orEmpty()
+                    }
+                    isLoadingPlaylist = false
+                    if (songs.isNotEmpty()) {
+                        onPlayPlaylist(playlist.name, songs, 0)
+                    } else {
+                        Toast.makeText(context, "Couldn't load \"${playlist.name}\"", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .width(124.dp)
+            .combinedClickable(
+                onClick = { playThisPlaylist() }
+            )
+    ) {
+        Box(
+            modifier = Modifier.size(124.dp)
+        ) {
+            if (!playlist.thumbnail.isNullOrBlank()) {
+                AsyncImage(
+                    model = playlist.thumbnail.toHighResThumbnail(),
+                    contentDescription = playlist.name,
+                    modifier = Modifier
+                        .size(124.dp)
+                        .clip(RoundedCornerShape(16.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                // Grey artwork placeholder with a musical-note icon (matches
+                // the local playlist cells in the Library grid).
+                Box(
+                    modifier = Modifier
+                        .size(124.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Gray.copy(alpha = 0.25f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QueueMusic,
+                        contentDescription = playlist.name,
+                        tint = textColor.copy(alpha = 0.6f),
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = playlist.name,
+            color = textColor,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = if (playlist.isLocal) "${playlist.songCountText} • Local playlist"
+            else playlist.songCountText.ifBlank { "Playlist" },
+            color = textColor.copy(alpha = 0.55f),
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+fun FromYourLibrarySkeleton() {
+    val infiniteTransition = rememberInfiniteTransition(label = "libraryShimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        repeat(3) {
+            Column(modifier = Modifier.width(124.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(124.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Gray.copy(alpha = alpha))
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.8f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.Gray.copy(alpha = alpha))
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .height(11.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.Gray.copy(alpha = alpha))
+                )
             }
         }
     }

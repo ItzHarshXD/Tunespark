@@ -27,8 +27,10 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.metrolist.innertube.YouTube
 import com.tunespark.music.LocalPlaylistManager
 import com.metrolist.innertube.models.SongItem
+import com.metrolist.innertube.models.AlbumItem
 import com.metrolist.innertube.models.Artist
 import com.metrolist.innertube.models.ArtistItem
+import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.tunespark.music.ui.theme.TunesparkTheme
 import com.tunespark.music.ui.screens.*
@@ -1117,6 +1119,14 @@ fun MainPlayerScreen(
     var homeQuickPicksSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var isHomeQuickPicksLoading by remember { mutableStateOf(false) }
 
+    // Home "New releases" section (YouTube Music's new-releases album shelf)
+    var homeNewReleaseAlbums by remember { mutableStateOf<List<AlbumItem>>(emptyList()) }
+    var isHomeNewReleasesLoading by remember { mutableStateOf(false) }
+
+    // Home "From your library" section (on-device + account playlists merged)
+    var homeLibraryPlaylists by remember { mutableStateOf<List<HomeLibraryPlaylist>>(emptyList()) }
+    var isHomeLibraryLoading by remember { mutableStateOf(false) }
+
     // RSS Discover feed state
     var discoverArticles by remember { mutableStateOf<List<Article>>(emptyList()) }
     var isDiscoverLoading by remember { mutableStateOf(false) }
@@ -1274,6 +1284,89 @@ fun MainPlayerScreen(
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     isHomeQuickPicksLoading = false
+                }
+            }
+        }
+    }
+
+    // ── Home "New releases" section loader ──
+    // Uses the :innertube module's existing newReleaseAlbums() browse
+    // (FEmusic_new_releases_albums). The shelf is identical signed in or out.
+    // Re-fetches on pull-to-refresh; automatic refreshes swap the list in place.
+    LaunchedEffect(homeRefreshTrigger) {
+        if (homeNewReleaseAlbums.isEmpty()) isHomeNewReleasesLoading = true
+        withContext(Dispatchers.IO) {
+            try {
+                val albums = YouTube.newReleaseAlbums().getOrNull().orEmpty().take(10)
+                withContext(Dispatchers.Main) {
+                    homeNewReleaseAlbums = albums
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            withContext(Dispatchers.Main) {
+                isHomeNewReleasesLoading = false
+            }
+        }
+    }
+
+    // ── Home "From your library" section loader ──
+    // Merges on-device playlists (works fully signed out) with the signed-in
+    // account's own YouTube Music playlists (auto-lists excluded). Re-runs
+    // whenever the user returns to Home so local playlist changes (created /
+    // renamed / deleted in the Library) are reflected without a pull-to-refresh.
+    // The section itself only renders when there are 3 or more playlists.
+    LaunchedEffect(currentScreen, userSignedIn, homeRefreshTrigger) {
+        if (currentScreen != AppScreen.HOME) return@LaunchedEffect
+        if (homeLibraryPlaylists.isEmpty()) isHomeLibraryLoading = true
+        withContext(Dispatchers.IO) {
+            try {
+                val local = LocalPlaylistManager.getPlaylists(context).map {
+                    HomeLibraryPlaylist(
+                        id = it.id,
+                        name = it.name,
+                        thumbnail = it.thumbnail,
+                        songCountText = it.songCountText,
+                        isLocal = true,
+                        songs = it.songs
+                    )
+                }
+
+                var account = emptyList<HomeLibraryPlaylist>()
+                if (userSignedIn) {
+                    try {
+                        val result = YouTube.library("FEmusic_liked_playlists")
+                        account = result.getOrNull()?.items.orEmpty()
+                            .filterIsInstance<PlaylistItem>()
+                            // Exclude YouTube's auto-lists (Liked is surfaced in the Library grid itself)
+                            .filter {
+                                val titleLower = it.title.lowercase()
+                                titleLower != "liked music" && titleLower != "episodes for later"
+                            }
+                            .map {
+                                HomeLibraryPlaylist(
+                                    id = it.id.removePrefix("VL"),
+                                    name = it.title,
+                                    thumbnail = it.thumbnail,
+                                    songCountText = it.songCountText ?: "",
+                                    isLocal = false,
+                                    songs = emptyList()
+                                )
+                            }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
+                val merged = local + account
+                withContext(Dispatchers.Main) {
+                    homeLibraryPlaylists = merged
+                    isHomeLibraryLoading = false
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    isHomeLibraryLoading = false
                 }
             }
         }
@@ -1713,6 +1806,10 @@ fun MainPlayerScreen(
                                 isSpeedDialLoading = isHomeSpeedDialLoading,
                                 communityPlaylists = homeCommunityPlaylists,
                                 isCommunityLoading = isHomeCommunityLoading,
+                                newReleaseAlbums = homeNewReleaseAlbums,
+                                isNewReleasesLoading = isHomeNewReleasesLoading,
+                                libraryPlaylists = homeLibraryPlaylists,
+                                isLibraryLoading = isHomeLibraryLoading,
                                 recentsSongs = homeRecentsSongs,
                                 isRecentsLoading = isHomeRecentsLoading,
                                 quickPicksSongs = homeQuickPicksSongs,
