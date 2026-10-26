@@ -334,7 +334,8 @@ object SessionManager {
     }
 
     fun getShowTimeWeather(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_SHOW_TIME_WEATHER, true)
+        // OFF by default for first-time users; respects the user's saved preference.
+        return getPrefs(context).getBoolean(KEY_SHOW_TIME_WEATHER, false)
     }
 
     fun saveShowTimeWeather(context: Context, show: Boolean) {
@@ -395,7 +396,8 @@ object SessionManager {
         )
         val prefs = getPrefs(context)
         return categories.map { category ->
-            category to prefs.getBoolean("discover_category_$category", true)
+            // All interest categories default to OFF for first-time users.
+            category to prefs.getBoolean("discover_category_$category", false)
         }
     }
 
@@ -431,10 +433,10 @@ object SessionManager {
 
     /**
      * Returns whether the Discover feed is enabled (master toggle).
-     * Defaults to true (ON).
+     * Defaults to false (OFF) for first-time users.
      */
     fun isDiscoverFeedEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_DISCOVER_FEED_ENABLED, true)
+        return getPrefs(context).getBoolean(KEY_DISCOVER_FEED_ENABLED, false)
     }
 
     /**

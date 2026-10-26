@@ -30,6 +30,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -69,6 +71,7 @@ import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.tunespark.music.LocalPlaylistManager
+import com.tunespark.music.R
 import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -229,11 +232,11 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = "Tunespark",
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor
+                            // Minimal app logo instead of the text wordmark
+                            Image(
+                                painter = painterResource(id = R.drawable.tunespark_logo),
+                                contentDescription = "Tunespark logo",
+                                modifier = Modifier.size(38.dp)
                             )
 
                             Row(
@@ -258,12 +261,25 @@ fun HomeScreen(
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.AccountCircle,
-                                        contentDescription = "Account",
-                                        tint = weatherTextColor,
-                                        modifier = Modifier.size(22.dp)
-                                    )
+                                    // Signed-in users see their profile photo; signed-out see the account icon
+                                    val accountInfo = remember { SessionManager.getCachedAccountInfo(context) }
+                                    if (SessionManager.isUserSignedIn(context) && !accountInfo?.thumbnailUrl.isNullOrEmpty()) {
+                                        AsyncImage(
+                                            model = accountInfo?.thumbnailUrl,
+                                            contentDescription = "Profile",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clip(CircleShape)
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.AccountCircle,
+                                            contentDescription = "Account",
+                                            tint = weatherTextColor,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
                                 }
 
                                 Box(
@@ -557,24 +573,29 @@ fun SpeedDialView(
                     .height(350.dp)
             ) { pageIndex ->
                 val pageSongs = pages[pageIndex]
-                Column(
+                BoxWithConstraints(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    contentAlignment = Alignment.Center
                 ) {
-                    for (rowIndex in 0..2) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            for (colIndex in 0..2) {
-                                val songIndex = rowIndex * 3 + colIndex
-                                if (songIndex < pageSongs.size) {
-                                    val song = pageSongs[songIndex]
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .aspectRatio(1f)
-                                            .clip(RoundedCornerShape(12.dp))
+                    // Cap the tile size so the 3x3 grid also fits in landscape orientation
+                    // and on tablets, where the available width is much larger than the
+                    // fixed pager height (portrait: width/3 is naturally the limiting factor).
+                    val cellSize = minOf((maxWidth - 20.dp) / 3, 110.dp)
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        for (rowIndex in 0..2) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                for (colIndex in 0..2) {
+                                    val songIndex = rowIndex * 3 + colIndex
+                                    if (songIndex < pageSongs.size) {
+                                        val song = pageSongs[songIndex]
+                                        Box(
+                                            modifier = Modifier
+                                                .size(cellSize)
+                                                .clip(RoundedCornerShape(12.dp))
                                             .combinedClickable(
                                                 onClick = {
                                                     playSoundAndHaptic()
@@ -617,11 +638,12 @@ fun SpeedDialView(
                                         )
                                     }
                                 } else {
-                                    Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
+                                    Spacer(modifier = Modifier.size(cellSize))
                                 }
                             }
                         }
                     }
+                }
                 }
             }
 
@@ -665,18 +687,17 @@ fun SpeedDialSkeleton() {
 
     Column(
         modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         repeat(3) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 repeat(3) {
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .aspectRatio(1f)
+                            .size(110.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(Color.Gray.copy(alpha = alpha))
                     )

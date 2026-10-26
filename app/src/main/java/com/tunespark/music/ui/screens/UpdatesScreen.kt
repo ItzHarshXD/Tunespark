@@ -382,17 +382,16 @@ fun UpdatesScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(max = 240.dp)
+                                    .heightIn(max = 300.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(if (isDarkTheme) Color(0xFF0D0D0E) else Color(0xFFE8E8EC))
                                     .padding(14.dp)
                                     .verticalScroll(rememberScrollState())
                             ) {
-                                Text(
-                                    text = release.releaseNotes.trim(),
-                                    color = textColor.copy(alpha = 0.85f),
-                                    fontSize = 13.sp,
-                                    lineHeight = 19.sp
+                                MarkdownText(
+                                    markdown = release.releaseNotes.trim(),
+                                    textColor = textColor,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
                         }

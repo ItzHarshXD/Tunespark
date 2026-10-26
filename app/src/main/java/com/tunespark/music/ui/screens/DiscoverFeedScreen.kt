@@ -55,7 +55,7 @@ fun DiscoverFeedScreen(
         }
     }
 
-    // Master toggle state - ON by default, but respects the user's saved preference
+    // Master toggle state - OFF by default for first-time users, but respects the user's saved preference
     var isDiscoverEnabled by remember { mutableStateOf(SessionManager.isDiscoverFeedEnabled(context)) }
 
     // Auto-sync helper: if all interests are off, master toggle turns off automatically.
