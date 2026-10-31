@@ -493,6 +493,34 @@ fun MainPlayerScreen(
     var isLoadingProfile by remember { mutableStateOf(false) }
     var profileError by remember { mutableStateOf<String?>(null) }
 
+    // Opens a playlist / album tapped inside the Search screen's **Explore** feed in
+    // the app's dedicated playlist screen. The Library overlay slides in *over* the
+    // Search overlay (which stays composed), and back from the detail closes the
+    // Library again — revealing the mood / genre page exactly where it was left,
+    // just like the Home community playlist deep links.
+    val openExplorePlaylist: (
+        rawItem: com.metrolist.innertube.models.YTItem,
+        id: String,
+        name: String,
+        thumbnail: String?,
+        subtitle: String?
+    ) -> Unit = { rawItem, itemId, name, thumbnail, subtitle ->
+        val playlistItem = rawItem as? PlaylistItem
+        initialPlaylistId = itemId
+        initialPlaylistName = name
+        initialPlaylistThumbnail = thumbnail
+        initialPlaylistSongCountText = subtitle ?: ""
+        initialPlaylistIsLiked = false
+        initialPlaylistRawItem = rawItem
+        initialPlaylistAuthorName = playlistItem?.author?.name
+        initialPlaylistAuthorAvatarUrl = playlistItem?.authorAvatarUrl
+        initialPlaylistSongs = emptyList()
+        // Back from the detail must return to the Explore page underneath, not to
+        // the Library grid — the "external deep link" behaviour.
+        libraryPlaylistFromExternal = true
+        currentScreen = AppScreen.PLAYLISTS
+    }
+
     LaunchedEffect(Unit) {
         if (SessionManager.isUserSignedIn(context)) {
             isLoadingProfile = true
@@ -1851,12 +1879,15 @@ fun MainPlayerScreen(
                                     playSong(song)
                                     openFullPlayer()
                                 },
+                                onSongLongPress = showQuickActions,
                                 onArtistClick = { artist ->
                                     initialArtistId = artist.id
                                     initialArtistName = artist.title
                                     initialArtistThumbnail = artist.thumbnail
                                     navigateHandler(AppScreen.PLAYLISTS)
                                 },
+                                onOpenExploreItem = openExplorePlaylist,
+                                isUserSignedIn = userSignedIn,
                                 onPlayNextSong = onQuickActionPlayNext,
                                 onAddToQueueSong = onQuickActionAddToQueue,
                                 onNavigate = navigateHandler
@@ -2020,6 +2051,8 @@ fun MainPlayerScreen(
                             initialArtistThumbnail = artist.thumbnail
                             navigateHandler(AppScreen.PLAYLISTS)
                         },
+                        onOpenExploreItem = openExplorePlaylist,
+                        isUserSignedIn = userSignedIn,
                         onNavigate = navigateHandler
                     )
                 }

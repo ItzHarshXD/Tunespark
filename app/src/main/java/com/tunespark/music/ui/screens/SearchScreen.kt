@@ -4,6 +4,13 @@ import android.content.Context
 import android.media.AudioManager
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,7 +18,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -46,7 +55,10 @@ import coil.compose.AsyncImage
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.ArtistItem
 import com.metrolist.innertube.models.SongItem
+import com.metrolist.innertube.models.YTItem
+import com.metrolist.innertube.pages.BrowseResult
 import com.tunespark.music.AppScreen
+import com.tunespark.music.ExploreFeed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -66,6 +78,11 @@ fun SearchScreen(
     onPlayNextSong: (SongItem) -> Unit = {},
     onAddToQueueSong: (SongItem) -> Unit = {},
     onArtistClick: (ArtistItem) -> Unit = {},
+    // Opens a playlist / album tapped inside Explore in the app's dedicated
+    // playlist screen (the Library overlay, deep-linked on top of Search).
+    onOpenExploreItem: (rawItem: YTItem, id: String, name: String, thumbnail: String?, subtitle: String?) -> Unit =
+        { _, _, _, _, _ -> },
+    isUserSignedIn: Boolean = false,
     onNavigate: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -82,21 +99,35 @@ fun SearchScreen(
         mutableStateOf(TextFieldValue(searchQuery, TextRange(searchQuery.length)))
     }
 
-    LaunchedEffect(Unit) {
-        delay(100)
-        focusRequester.requestFocus()
-        // Coming back to the screen with a restored query: keep the caret at the end.
-        if (textFieldValue.text.isNotEmpty() &&
-            textFieldValue.selection.start != textFieldValue.text.length
-        ) {
-            textFieldValue = textFieldValue.copy(
-                selection = TextRange(textFieldValue.text.length)
-            )
-        }
-    }
+    // NOTE: the field is deliberately NOT auto-focused any more — entering Search
+    // shows the Explore feed with the keyboard closed; tapping the bar opens it.
+
+    // ── Explore (YouTube Music "Moods & genres") state ────────────────────────
+    var exploreEntries by remember { mutableStateOf<List<ExploreFeed.ExploreEntry>>(emptyList()) }
+    var exploreBanners by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var isExploreLoading by remember { mutableStateOf(true) }
+    var exploreRetry by remember { mutableStateOf(0) }
+    // The mood / genre whose page is currently open (null → the Explore grid).
+    var activeExploreGenre by remember { mutableStateOf<ExploreFeed.ExploreEntry?>(null) }
+    var exploreGenrePage by remember { mutableStateOf<BrowseResult?>(null) }
+    var isExploreGenreLoading by remember { mutableStateOf(false) }
+    var exploreGenreRetry by remember { mutableStateOf(0) }
+
+    // Hoisted scroll state: survives AnimatedContent swaps, playlist deep-links and
+    // the Library overlay sliding over this screen — so every Back lands exactly
+    // where the user left off.
+    val exploreGridState = rememberLazyGridState()
+    val exploreGenreListState = rememberLazyListState()
 
     BackHandler {
-        onNavigate(AppScreen.HOME)
+        if (activeExploreGenre != null) {
+            // Back out of a mood / genre page onto the Explore grid (position kept).
+            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
+            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            activeExploreGenre = null
+        } else {
+            onNavigate(AppScreen.HOME)
+        }
     }
 
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -175,6 +206,65 @@ fun SearchScreen(
         }
     }
 
+    // ── Explore loaders & handlers ────────────────────────────────────────────
+
+    // Offline-first: the persisted catalogue + banner urls render the grid instantly
+    // (the images themselves come from Coil's disk cache). The network is only used
+    // when there is no snapshot yet, the user explicitly retried, the snapshot went
+    // stale (12h) or some tiles never got a banner — and the grid keeps showing the
+    // previous data while that background refresh runs.
+    LaunchedEffect(exploreRetry) {
+        val isRetry = exploreRetry > 0
+        val persisted = if (isRetry) null else ExploreFeed.loadPersisted(context)
+        if (persisted != null) {
+            exploreEntries = persisted
+            exploreBanners = ExploreFeed.cachedBanners()
+            isExploreLoading = false
+        }
+
+        val needsRefresh = isRetry || persisted == null ||
+            ExploreFeed.isStale(context) ||
+            persisted.any { it.bannerUrl == null }
+        if (needsRefresh) {
+            if (persisted == null) isExploreLoading = true
+            val entries = ExploreFeed.loadEntries(context, forceRefresh = true)
+            // A failed refresh must never wipe an already-visible grid.
+            val effective = entries.ifEmpty { persisted.orEmpty() }
+            if (effective.isNotEmpty()) {
+                exploreEntries = effective
+                exploreBanners = ExploreFeed.cachedBanners()
+            }
+            isExploreLoading = false
+
+            ExploreFeed.prefetchBanners(context, effective) { key, url ->
+                exploreBanners = exploreBanners + (key to url)
+            }
+        }
+    }
+
+    // Opens a mood / genre page — instantly when the banner prefetch already cached
+    // that page, otherwise after the browse call below lands.
+    val openExploreGenre: (ExploreFeed.ExploreEntry) -> Unit = { entry ->
+        activeExploreGenre = entry
+        exploreGenrePage = ExploreFeed.cachedPage(entry.browseId, entry.params)
+        isExploreGenreLoading = exploreGenrePage == null
+    }
+
+    // Loads the open mood / genre page (skipped when it is already cached).
+    LaunchedEffect(activeExploreGenre?.key, exploreGenreRetry) {
+        val entry = activeExploreGenre ?: return@LaunchedEffect
+        if (exploreGenrePage != null) return@LaunchedEffect
+        isExploreGenreLoading = true
+        exploreGenrePage = ExploreFeed.loadGenrePage(entry.browseId, entry.params)
+        isExploreGenreLoading = false
+    }
+
+    // A freshly opened mood / genre starts at the top; re-entering the SAME one
+    // (e.g. returning from a playlist detail) keeps its exact position.
+    LaunchedEffect(activeExploreGenre?.key) {
+        if (activeExploreGenre != null) exploreGenreListState.scrollToItem(0)
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -182,6 +272,16 @@ fun SearchScreen(
             .padding(top = 16.dp, start = 16.dp, end = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Everything under (or instead of) the search bar: the **Explore** feed
+        // (YouTube Music moods & genres) while there is no active query, and the
+        // live suggestions / artists / songs list the moment the user types or
+        // commits a search.
+        val showExplore = searchQuery.isEmpty() && !isSearchCommitted
+        // A mood / genre page is a full-screen Explore view — the search bar is
+        // hidden while one is open; Back returns to the grid with the bar.
+        val isExploreGenreOpen = showExplore && activeExploreGenre != null
+
+        if (!isExploreGenreOpen) {
         OutlinedTextField(
             value = textFieldValue,
             onValueChange = {
@@ -255,7 +355,61 @@ fun SearchScreen(
         )
 
         Spacer(modifier = Modifier.height(12.dp))
+        }
 
+        if (showExplore) {
+            AnimatedContent(
+                targetState = activeExploreGenre,
+                transitionSpec = {
+                    if (targetState != null) {
+                        (slideInHorizontally(tween(280)) { width -> width } + fadeIn(tween(200))) togetherWith
+                                (slideOutHorizontally(tween(280)) { width -> -width } + fadeOut(tween(140)))
+                    } else {
+                        (slideInHorizontally(tween(280)) { width -> -width } + fadeIn(tween(200))) togetherWith
+                                (slideOutHorizontally(tween(280)) { width -> width } + fadeOut(tween(140)))
+                    }
+                },
+                label = "ExploreTransition",
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) { genre ->
+                if (genre == null) {
+                    ExploreGridView(
+                        entries = exploreEntries.map { entry ->
+                            entry.copy(
+                                bannerUrl = exploreBanners[entry.key] ?: entry.bannerUrl
+                            )
+                        },
+                        isLoading = isExploreLoading,
+                        gridState = exploreGridState,
+                        onGenreClick = openExploreGenre,
+                        onRetry = { exploreRetry++ },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    ExploreGenreView(
+                        entry = genre,
+                        page = exploreGenrePage,
+                        isLoading = isExploreGenreLoading,
+                        listState = exploreGenreListState,
+                        onBack = { activeExploreGenre = null },
+                        onPlaySong = onPlaySong,
+                        onSongLongPress = onSongLongPress,
+                        onPlayNextSong = onPlayNextSong,
+                        onAddToQueueSong = onAddToQueueSong,
+                        onOpenItem = onOpenExploreItem,
+                        onOpenArtist = onArtistClick,
+                        onRetry = {
+                            exploreGenrePage = null
+                            ExploreFeed.invalidatePage(genre.browseId, genre.params)
+                            exploreGenreRetry++
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        } else {
         // While a live search is in flight, greyed-out skeletons occupy the Artists
         // and Songs sections so the layout never shifts. Without this, the Songs
         // list sat at the top for a split second until the slower artist results
@@ -604,6 +758,7 @@ fun SearchScreen(
                     }
                 }
             }
+        }
         }
     }
 }
