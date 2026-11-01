@@ -57,7 +57,11 @@ fun DiscoverScreen(
     onPlaySong: ((Any) -> Unit)? = null,
     // Pending AI summary article (set when user taps AI icon on Home carousel)
     pendingAiSummaryArticle: Article? = null,
-    onPendingAiSummaryConsumed: () -> Unit = {}
+    onPendingAiSummaryConsumed: () -> Unit = {},
+    // When the Discover screen is composed off-screen as the pre-warmed
+    // counterpart page of the Home swipe stage, its back handler must stay
+    // disabled so it never swallows the system back press meant for Home.
+    isBackHandlerEnabled: Boolean = true
 ) {
     val context = LocalContext.current
     val backgroundColor = MaterialTheme.colorScheme.background
@@ -146,7 +150,7 @@ fun DiscoverScreen(
         onPendingAiSummaryConsumed()
     }
 
-    BackHandler {
+    BackHandler(enabled = isBackHandlerEnabled) {
         onNavigate(AppScreen.HOME)
     }
 

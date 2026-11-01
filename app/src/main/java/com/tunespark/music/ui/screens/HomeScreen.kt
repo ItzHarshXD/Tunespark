@@ -53,7 +53,7 @@ import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
 import com.tunespark.music.WeatherInfo
 import com.tunespark.music.WeatherService
-import com.tunespark.music.rss.Article
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.QueueMusic
@@ -64,7 +64,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import android.media.AudioManager
 import com.metrolist.innertube.YouTube
@@ -132,11 +131,14 @@ fun HomeScreen(
     isRecentsLoading: Boolean,
     quickPicksSongs: List<SongItem>,
     isQuickPicksLoading: Boolean,
-    discoverArticles: List<Article>,
-    isDiscoverLoading: Boolean,
+    // Gates the launcher-style swipe-to-Discover gesture. No Discover UI remains
+    // on the Home screen itself — the full Discover screen is slid in live by
+    // MainActivity's swipe stage as the user drags.
     isDiscoverEnabled: Boolean,
-    onAiSummaryClick: (Article) -> Unit = {},
-    
+    onDiscoverSwipeStart: () -> Unit = {},
+    onDiscoverSwipeDrag: (Float) -> Unit = {},
+    onDiscoverSwipeSettle: (Float) -> Unit = {},
+
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -225,6 +227,41 @@ fun HomeScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                // Launcher-style swipe: dragging the Home screen from left to
+                // right slides the full Discover screen in, tracking the finger
+                // 1:1 (the stage lives in MainActivity). Gated on the Discover
+                // feed setting — when it is OFF no swipe is registered at all.
+                // Built on the default (main) pointer pass, so children keep
+                // priority: the Speed Dial pager, carousel LazyRows and the
+                // vertical scroll consume their own drags and are unaffected.
+                // Commit vs. fall-back is decided on release from the drag
+                // position and fling velocity.
+                .pointerInput(isDiscoverEnabled) {
+                    if (!isDiscoverEnabled) return@pointerInput
+                    var lastTimeMillis = 0L
+                    var velocityX = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            lastTimeMillis = 0L
+                            velocityX = 0f
+                            onDiscoverSwipeStart()
+                        },
+                        onDragCancel = { onDiscoverSwipeSettle(0f) },
+                        onDragEnd = {
+                            onDiscoverSwipeSettle(velocityX)
+                        }
+                    ) { change, dragAmount ->
+                        change.consume()
+                        val timeMillis = change.uptimeMillis
+                        if (lastTimeMillis != 0L) {
+                            val deltaSeconds = (timeMillis - lastTimeMillis).coerceAtLeast(1L) / 1000f
+                            // Exponentially-smoothed fling velocity estimate (px/s).
+                            velocityX = 0.8f * velocityX + 0.2f * (dragAmount / deltaSeconds)
+                        }
+                        lastTimeMillis = timeMillis
+                        onDiscoverSwipeDrag(dragAmount)
+                    }
+                }
                 .padding(innerPadding)
                 .consumeWindowInsets(innerPadding)
                 .padding(horizontal = 16.dp)
@@ -421,18 +458,10 @@ fun HomeScreen(
                             isRecentsLoading = isRecentsLoading,
                             quickPicksSongs = quickPicksSongs,
                             isQuickPicksLoading = isQuickPicksLoading,
-                            discoverArticles = discoverArticles,
-                            isDiscoverLoading = isDiscoverLoading,
-                            isDiscoverEnabled = isDiscoverEnabled,
                             onShowAllClick = {
                                 playSoundAndHaptic()
                                 onNavigate(AppScreen.RECENTS)
                             },
-                            onDiscoverShowAllClick = {
-                                playSoundAndHaptic()
-                                onNavigate(AppScreen.DISCOVER)
-                            },
-                            onAiSummaryClick = onAiSummaryClick,
                             onPlaySong = { song ->
                                 playSoundAndHaptic()
                                 onPlaySong(song)
@@ -479,12 +508,7 @@ private fun IdleContent(
     isRecentsLoading: Boolean,
     quickPicksSongs: List<SongItem>,
     isQuickPicksLoading: Boolean,
-    discoverArticles: List<Article>,
-    isDiscoverLoading: Boolean,
-    isDiscoverEnabled: Boolean,
     onShowAllClick: () -> Unit,
-    onDiscoverShowAllClick: () -> Unit,
-    onAiSummaryClick: (Article) -> Unit = {},
     onPlaySong: (SongItem) -> Unit,
     onSongLongPress: (SongItem) -> Unit = {},
     onStartRadio: () -> Unit,
@@ -494,18 +518,6 @@ private fun IdleContent(
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-        if (isDiscoverEnabled) {
-            DiscoverView(
-                articles = discoverArticles,
-                isLoading = isDiscoverLoading,
-                textColor = textColor,
-                onShowAllClick = onDiscoverShowAllClick,
-                onAiSummaryClick = onAiSummaryClick
-            )
-
-            Spacer(modifier = Modifier.height(40.dp))
-        }
-
         RecentsView(
             songs = recentsSongs,
             isLoading = isRecentsLoading,
@@ -2533,210 +2545,6 @@ fun QuickPicksSkeleton() {
                     .background(Color.Gray.copy(alpha = alpha))
             )
         }
-    }
-}
-
-@Composable
-fun DiscoverView(
-    articles: List<Article>,
-    isLoading: Boolean,
-    textColor: Color,
-    onShowAllClick: () -> Unit,
-    onAiSummaryClick: (Article) -> Unit = {}
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Discover",
-                color = textColor,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
-            )
-
-            val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
-            val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
-            val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
-            val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
-
-            Box(
-                modifier = Modifier
-                    .shadow(elevation = 6.dp, shape = CircleShape)
-                    .clip(CircleShape)
-                    .background(weatherBgColor)
-                    .border(1.dp, weatherBorderColor, CircleShape)
-                    .clickable { onShowAllClick() }
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = "Show all",
-                    color = weatherTextColor,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        if (isLoading) {
-            // Loading skeleton
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(end = 16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(3) {
-                    Column(modifier = Modifier.width(280.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .width(280.dp)
-                                .height(160.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color.Gray.copy(alpha = 0.2f))
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.8f)
-                                .height(14.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color.Gray.copy(alpha = 0.15f))
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.5f)
-                                .height(11.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color.Gray.copy(alpha = 0.15f))
-                        )
-                    }
-                }
-            }
-        } else if (articles.isEmpty()) {
-            Text(
-                text = "No discover items.",
-                color = textColor.copy(alpha = 0.4f),
-                fontSize = 14.sp,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-        } else {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(end = 16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(articles.take(10)) { article ->
-                    DiscoverCard(
-                        article = article,
-                        textColor = textColor,
-                        onAiSummaryClick = { onAiSummaryClick(article) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DiscoverCard(
-    article: Article,
-    textColor: Color,
-    onAiSummaryClick: () -> Unit = {}
-) {
-    val context = LocalContext.current
-    val view = androidx.compose.ui.platform.LocalView.current
-    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
-    val playSoundAndHaptic = {
-        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
-        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-    }
-
-    Column(
-        modifier = Modifier
-            .width(280.dp)
-            .clickable {
-                playSoundAndHaptic()
-                // Open the article URL in the browser
-                val intent = android.content.Intent(
-                    android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse(article.url)
-                )
-                context.startActivity(intent)
-            }
-    ) {
-        AsyncImage(
-            model = article.thumbnail,
-            contentDescription = article.title,
-            modifier = Modifier
-                .width(280.dp)
-                .height(160.dp)
-                .clip(RoundedCornerShape(16.dp)),
-            contentScale = ContentScale.Crop
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Headline row: title + AI icon button (dedicated space, doesn't affect layout)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top
-        ) {
-            Text(
-                text = article.title,
-                color = textColor,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
-            val weatherBgColor = if (isDarkTheme) Color(0xFF16161A) else Color(0xFFF2F2F5)
-            val weatherTextColor = if (isDarkTheme) Color.White else Color.Black
-            val weatherBorderColor = if (isDarkTheme) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f)
-
-            // AI summary icon button with its own dedicated space
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .shadow(elevation = 6.dp, shape = CircleShape)
-                    .clip(CircleShape)
-                    .background(weatherBgColor)
-                    .border(1.dp, weatherBorderColor, CircleShape)
-                    .clickable {
-                        playSoundAndHaptic()
-                        onAiSummaryClick()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.AutoAwesome,
-                    contentDescription = "Generate AI summary",
-                    tint = weatherTextColor,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        Text(
-            text = "${article.source} • ${article.timeAgo()}",
-            color = textColor.copy(alpha = 0.55f),
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 

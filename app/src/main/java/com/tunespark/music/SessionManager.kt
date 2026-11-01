@@ -396,8 +396,9 @@ object SessionManager {
         )
         val prefs = getPrefs(context)
         return categories.map { category ->
-            // All interest categories default to OFF for first-time users.
-            category to prefs.getBoolean("discover_category_$category", false)
+            // All interest categories default to ON for first-time users so the
+            // (default-enabled) Discover feed shows real content out of the box.
+            category to prefs.getBoolean("discover_category_$category", true)
         }
     }
 
@@ -433,10 +434,11 @@ object SessionManager {
 
     /**
      * Returns whether the Discover feed is enabled (master toggle).
-     * Defaults to false (OFF) for first-time users.
+     * Defaults to true (ON) for first-time users — the Discover screen is a
+     * core part of the Home swipe experience, so it is available out of the box.
      */
     fun isDiscoverFeedEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_DISCOVER_FEED_ENABLED, false)
+        return getPrefs(context).getBoolean(KEY_DISCOVER_FEED_ENABLED, true)
     }
 
     /**

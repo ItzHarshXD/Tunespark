@@ -38,8 +38,6 @@ import com.tunespark.music.ui.screens.LyricLine
 import com.tunespark.music.ui.screens.cleanYouTubeTitle
 import com.tunespark.music.ui.screens.parseLyricsToLines
 import com.metrolist.lrclib.LrcLib
-import com.tunespark.music.rss.Article
-import com.tunespark.music.rss.RssRepository
 import com.tunespark.music.LikedSongManager
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.BackHandler
@@ -48,6 +46,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
@@ -1155,32 +1156,16 @@ fun MainPlayerScreen(
     var homeLibraryPlaylists by remember { mutableStateOf<List<HomeLibraryPlaylist>>(emptyList()) }
     var isHomeLibraryLoading by remember { mutableStateOf(false) }
 
-    // RSS Discover feed state
-    var discoverArticles by remember { mutableStateOf<List<Article>>(emptyList()) }
-    var isDiscoverLoading by remember { mutableStateOf(false) }
+    // Discover feed enabled state — gates the Home screen's launcher-style
+    // swipe-to-Discover gesture (the carousel itself was removed from Home;
+    // the full Discover screen opens on the swipe).
     var isDiscoverEnabled by remember { mutableStateOf(SessionManager.isDiscoverFeedEnabled(context)) }
-
-    // Pending AI summary article (set when user taps AI icon on Home carousel)
-    var pendingAiSummaryArticle by remember { mutableStateOf<Article?>(null) }
 
     // Re-read the discover enabled state whenever the user navigates back to Home
     // (e.g., after changing it in the Discover Feed settings screen)
     LaunchedEffect(currentScreen) {
         if (currentScreen == AppScreen.HOME) {
             isDiscoverEnabled = SessionManager.isDiscoverFeedEnabled(context)
-        }
-    }
-
-    LaunchedEffect(homeRefreshTrigger) {
-        isDiscoverLoading = true
-        withContext(Dispatchers.IO) {
-            // Force refresh when the user pulls-to-refresh (homeRefreshTrigger > 0),
-            // otherwise use cached data on initial load
-            val articles = RssRepository.getArticles(context, forceRefresh = homeRefreshTrigger > 0)
-            withContext(Dispatchers.Main) {
-                discoverArticles = articles
-                isDiscoverLoading = false
-            }
         }
     }
 
@@ -1771,7 +1756,278 @@ fun MainPlayerScreen(
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val screenHeight = maxHeight
+            // Width used by the Home <-> Discover swipe stage (px).
+            val stageScreenWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
+
+            // ---------- Home <-> Discover interactive swipe transition ----------
+            // Home and Discover behave like two adjacent launcher pages: the
+            // finger moves them 1:1 during the swipe, and on release the pair
+            // either commits (springs to full) or falls back (springs home).
+            // Positive offset = Home pushed right (Discover revealed from the
+            // left); negative offset = Discover pushed left (Home revealed
+            // from the right).
+            val discoverSwipeAnimatable = remember { Animatable(0f) }
+            var isDiscoverSwipeActive by remember { mutableStateOf(false) }
+            val discoverSwipeSpring = spring<Float>(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+            val discoverSwipeFlingPx = with(LocalDensity.current) { 700.dp.toPx() }
+            val swipeFeedbackView = androidx.compose.ui.platform.LocalView.current
+            val playSwipeCommitFeedback = {
+                val audioManager = context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+                audioManager.playSoundEffect(android.media.AudioManager.FX_KEY_CLICK, 1.0f)
+                swipeFeedbackView.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            }
+
+            // Forward swipe (Home -> Discover), driven by HomeScreen's gesture.
+            val onHomeDiscoverSwipeStart: () -> Unit = {
+                if (currentScreen == AppScreen.HOME) isDiscoverSwipeActive = true
+            }
+            val onHomeDiscoverSwipeDrag: (Float) -> Unit = { delta ->
+                if (currentScreen == AppScreen.HOME) {
+                    val target = (discoverSwipeAnimatable.value + delta).coerceIn(0f, stageScreenWidthPx)
+                    coroutineScope.launch { discoverSwipeAnimatable.snapTo(target) }
+                }
+            }
+            val onHomeDiscoverSwipeSettle: (Float) -> Unit = { velocityX ->
+                if (currentScreen == AppScreen.HOME && isDiscoverSwipeActive) {
+                    val commit = discoverSwipeAnimatable.value > stageScreenWidthPx * 0.4f ||
+                            (velocityX > discoverSwipeFlingPx && discoverSwipeAnimatable.value > stageScreenWidthPx * 0.06f)
+                    coroutineScope.launch {
+                        if (commit) {
+                            playSwipeCommitFeedback()
+                            discoverSwipeAnimatable.animateTo(stageScreenWidthPx, discoverSwipeSpring)
+                            currentScreen = AppScreen.DISCOVER
+                        } else {
+                            discoverSwipeAnimatable.animateTo(0f, discoverSwipeSpring)
+                        }
+                        isDiscoverSwipeActive = false
+                        discoverSwipeAnimatable.snapTo(0f)
+                    }
+                } else if (currentScreen == AppScreen.HOME) {
+                    isDiscoverSwipeActive = false
+                    coroutineScope.launch { discoverSwipeAnimatable.snapTo(0f) }
+                }
+            }
+
+            // Back swipe (Discover -> Home), attached to the Discover page.
+            val onDiscoverBackSwipeStart: () -> Unit = {
+                if (currentScreen == AppScreen.DISCOVER) isDiscoverSwipeActive = true
+            }
+            val onDiscoverBackSwipeDrag: (Float) -> Unit = { delta ->
+                if (currentScreen == AppScreen.DISCOVER) {
+                    val target = (discoverSwipeAnimatable.value + delta).coerceIn(-stageScreenWidthPx, 0f)
+                    coroutineScope.launch { discoverSwipeAnimatable.snapTo(target) }
+                }
+            }
+            val onDiscoverBackSwipeSettle: (Float) -> Unit = { velocityX ->
+                if (currentScreen == AppScreen.DISCOVER && isDiscoverSwipeActive) {
+                    val commit = -discoverSwipeAnimatable.value > stageScreenWidthPx * 0.4f ||
+                            (velocityX < -discoverSwipeFlingPx && -discoverSwipeAnimatable.value > stageScreenWidthPx * 0.06f)
+                    coroutineScope.launch {
+                        if (commit) {
+                            playSwipeCommitFeedback()
+                            discoverSwipeAnimatable.animateTo(-stageScreenWidthPx, discoverSwipeSpring)
+                            currentScreen = AppScreen.HOME
+                        } else {
+                            discoverSwipeAnimatable.animateTo(0f, discoverSwipeSpring)
+                        }
+                        isDiscoverSwipeActive = false
+                        discoverSwipeAnimatable.snapTo(0f)
+                    }
+                } else if (currentScreen == AppScreen.DISCOVER) {
+                    isDiscoverSwipeActive = false
+                    coroutineScope.launch { discoverSwipeAnimatable.snapTo(0f) }
+                }
+            }
+
+            // Animated slide-back used by the Discover screen's back button and
+            // the system back gesture — the same motion as the back swipe.
+            val navigateFromDiscover: (AppScreen) -> Unit = { screen ->
+                if (screen == AppScreen.HOME && currentScreen == AppScreen.DISCOVER && !isDiscoverSwipeActive) {
+                    isDiscoverSwipeActive = true
+                    coroutineScope.launch {
+                        discoverSwipeAnimatable.animateTo(-stageScreenWidthPx, discoverSwipeSpring)
+                        currentScreen = AppScreen.HOME
+                        isDiscoverSwipeActive = false
+                        discoverSwipeAnimatable.snapTo(0f)
+                    }
+                } else {
+                    navigateHandler(screen)
+                }
+            }
+
+            val homeDiscoverStageActive = currentScreen == AppScreen.HOME || currentScreen == AppScreen.DISCOVER
+
+            // Shared screen content, so the swipe stage and the AnimatedContent
+            // render identical Home / Discover instances.
+            val homeScreenContent: @Composable () -> Unit = {
+                HomeScreen(
+                    currentSongTitle = currentSongTitle,
+                    currentSongArtist = currentSongArtist,
+                    currentSongArtwork = currentSongArtwork,
+                    isPlaying = isPlaying,
+                    onPlayPauseToggle = {
+                        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                    },
+                    isShuffling = isShuffling,
+                    onNavigate = navigateHandler,
+                    onShufflePlay = shufflePlay,
+                    onPlaySong = { song ->
+                        playSong(song)
+                        openFullPlayer()
+                    },
+                    onSongLongPress = showQuickActions,
+                    onPlayPlaylist = { name, songs, startIndex ->
+                        playPlaylist(name, songs, startIndex)
+                        openFullPlayer()
+                    },
+                    onPlaylistClick = { data ->
+                        initialPlaylistId = data.playlist.id
+                        initialPlaylistName = data.playlist.title
+                        initialPlaylistThumbnail = data.playlist.thumbnail ?: data.songs.firstOrNull()?.thumbnail
+                        initialPlaylistSongCountText = data.playlist.songCountText ?: "${data.songs.size} songs"
+                        initialPlaylistIsLiked = false
+                        initialPlaylistRawItem = data.playlist
+                        initialPlaylistAuthorName = data.playlist.author?.name
+                        initialPlaylistAuthorAvatarUrl = data.playlist.authorAvatarUrl
+                        initialPlaylistSongs = data.songs
+                        // Opening from Home: back from the detail should return
+                        // HOME, not strand the user on the Library grid.
+                        libraryPlaylistFromExternal = true
+                        currentScreen = AppScreen.PLAYLISTS
+                    },
+                    onRefresh = { homeRefreshTrigger++ },
+                    speedDialSongs = homeSpeedDialSongs,
+                    isSpeedDialLoading = isHomeSpeedDialLoading,
+                    communityPlaylists = homeCommunityPlaylists,
+                    isCommunityLoading = isHomeCommunityLoading,
+                    newReleaseAlbums = homeNewReleaseAlbums,
+                    isNewReleasesLoading = isHomeNewReleasesLoading,
+                    libraryPlaylists = homeLibraryPlaylists,
+                    isLibraryLoading = isHomeLibraryLoading,
+                    recentsSongs = homeRecentsSongs,
+                    isRecentsLoading = isHomeRecentsLoading,
+                    quickPicksSongs = homeQuickPicksSongs,
+                    isQuickPicksLoading = isHomeQuickPicksLoading,
+                    isDiscoverEnabled = isDiscoverEnabled,
+                    onDiscoverSwipeStart = onHomeDiscoverSwipeStart,
+                    onDiscoverSwipeDrag = onHomeDiscoverSwipeDrag,
+                    onDiscoverSwipeSettle = onHomeDiscoverSwipeSettle
+                )
+            }
+            // The back handler is only enabled while Discover is genuinely the
+            // current screen (the pre-warmed off-screen instance must not
+            // swallow the system back press meant for Home).
+            val discoverScreenContent: @Composable () -> Unit = {
+                DiscoverScreen(
+                    onNavigate = navigateFromDiscover,
+                    isBackHandlerEnabled = currentScreen == AppScreen.DISCOVER
+                )
+            }
             Box(modifier = Modifier.fillMaxSize()) {
+                // ---------- Home <-> Discover interactive swipe stage ----------
+                // Renders the Home and Discover screens as two adjacent launcher-
+                // style pages that track the finger 1:1 during the swipe gesture.
+                // Drawn beneath the AnimatedContent (which renders nothing for
+                // HOME/DISCOVER while the stage is active), so every other screen
+                // transition works exactly as before.
+                if (homeDiscoverStageActive) {
+                    val swipeOffset = discoverSwipeAnimatable.value
+                    val swipeProgress = (kotlin.math.abs(swipeOffset) / stageScreenWidthPx).coerceIn(0f, 1f)
+                    val forwardSwipe = swipeOffset >= 0f
+                    // The idle counterpart page is kept composed (pre-warmed) so a
+                    // swipe starts with real content instead of skeletons.
+                    val homeLayerVisible = currentScreen == AppScreen.HOME ||
+                            currentScreen == AppScreen.DISCOVER ||
+                            (isDiscoverSwipeActive && swipeOffset < -0.5f)
+                    val discoverLayerVisible = currentScreen == AppScreen.HOME ||
+                            currentScreen == AppScreen.DISCOVER ||
+                            (isDiscoverSwipeActive && swipeOffset > 0.5f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            // Exactly the same system-bar insets the
+                            // AnimatedContent applies to every other screen, so
+                            // the stage pages sit precisely where the screens
+                            // always did.
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
+                    ) {
+                        // Home page layer — pushed right on the forward swipe,
+                        // slides back in from the right on the way home.
+                        if (homeLayerVisible) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .zIndex(if (swipeOffset < 0f) 0f else 1f)
+                                    .graphicsLayer {
+                                        translationX = when {
+                                            !isDiscoverSwipeActive -> if (currentScreen == AppScreen.HOME) 0f else stageScreenWidthPx
+                                            forwardSwipe -> swipeOffset
+                                            else -> stageScreenWidthPx + swipeOffset
+                                        }
+                                        // Dim the departing page slightly for depth.
+                                        alpha = if (isDiscoverSwipeActive && forwardSwipe) 1f - 0.3f * swipeProgress else 1f
+                                    }
+                            ) {
+                                homeScreenContent()
+                            }
+                        }
+                        // Discover page layer — revealed from the left on the
+                        // forward swipe, pushed left on the way back.
+                        if (discoverLayerVisible) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .zIndex(if (swipeOffset > 0f) 0f else 1f)
+                                    .graphicsLayer {
+                                        translationX = when {
+                                            !isDiscoverSwipeActive -> if (currentScreen == AppScreen.DISCOVER) 0f else -stageScreenWidthPx
+                                            forwardSwipe -> swipeOffset - stageScreenWidthPx
+                                            else -> swipeOffset
+                                        }
+                                        alpha = if (isDiscoverSwipeActive && !forwardSwipe) 1f - 0.3f * swipeProgress else 1f
+                                    }
+                            ) {
+                                // Back-swipe gesture: dragging left slides Home in
+                                // from the right, tracking the finger 1:1.
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .pointerInput(Unit) {
+                                            var lastTimeMillis = 0L
+                                            var velocityX = 0f
+                                            detectHorizontalDragGestures(
+                                                onDragStart = {
+                                                    lastTimeMillis = 0L
+                                                    velocityX = 0f
+                                                    onDiscoverBackSwipeStart()
+                                                },
+                                                onDragCancel = { onDiscoverBackSwipeSettle(0f) },
+                                                onDragEnd = {
+                                                    onDiscoverBackSwipeSettle(velocityX)
+                                                }
+                                            ) { change, dragAmount ->
+                                                change.consume()
+                                                val timeMillis = change.uptimeMillis
+                                                if (lastTimeMillis != 0L) {
+                                                    val deltaSeconds = (timeMillis - lastTimeMillis).coerceAtLeast(1L) / 1000f
+                                                    // Exponentially-smoothed fling velocity estimate (px/s).
+                                                    velocityX = 0.8f * velocityX + 0.2f * (dragAmount / deltaSeconds)
+                                                }
+                                                lastTimeMillis = timeMillis
+                                                onDiscoverBackSwipeDrag(dragAmount)
+                                            }
+                                        }
+                                ) {
+                                    discoverScreenContent()
+                                }
+                            }
+                        }
+                    }
+                }
                 Box(modifier = Modifier.fillMaxSize()) {
                     AnimatedContent(
                         targetState = currentScreen,
@@ -1794,63 +2050,14 @@ fun MainPlayerScreen(
                     ) { targetScreen ->
                         when (targetScreen) {
                             AppScreen.HOME -> {
-                            HomeScreen(
-                                currentSongTitle = currentSongTitle,
-                                currentSongArtist = currentSongArtist,
-                                currentSongArtwork = currentSongArtwork,
-                                isPlaying = isPlaying,
-                                onPlayPauseToggle = {
-                                    if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                },
-                                isShuffling = isShuffling,
-                                onNavigate = navigateHandler,
-                                onShufflePlay = shufflePlay,
-                                onPlaySong = { song ->
-                                    playSong(song)
-                                    openFullPlayer()
-                                },
-                                onSongLongPress = showQuickActions,
-                                onPlayPlaylist = { name, songs, startIndex ->
-                                    playPlaylist(name, songs, startIndex)
-                                    openFullPlayer()
-                                },
-                                onPlaylistClick = { data ->
-                                    initialPlaylistId = data.playlist.id
-                                    initialPlaylistName = data.playlist.title
-                                    initialPlaylistThumbnail = data.playlist.thumbnail ?: data.songs.firstOrNull()?.thumbnail
-                                    initialPlaylistSongCountText = data.playlist.songCountText ?: "${data.songs.size} songs"
-                                    initialPlaylistIsLiked = false
-                                    initialPlaylistRawItem = data.playlist
-                                    initialPlaylistAuthorName = data.playlist.author?.name
-                                    initialPlaylistAuthorAvatarUrl = data.playlist.authorAvatarUrl
-                                    initialPlaylistSongs = data.songs
-                                    // Opening from Home: back from the detail should return
-                                    // HOME, not strand the user on the Library grid.
-                                    libraryPlaylistFromExternal = true
-                                    currentScreen = AppScreen.PLAYLISTS
-                                },
-                                onRefresh = { homeRefreshTrigger++ },
-                                speedDialSongs = homeSpeedDialSongs,
-                                isSpeedDialLoading = isHomeSpeedDialLoading,
-                                communityPlaylists = homeCommunityPlaylists,
-                                isCommunityLoading = isHomeCommunityLoading,
-                                newReleaseAlbums = homeNewReleaseAlbums,
-                                isNewReleasesLoading = isHomeNewReleasesLoading,
-                                libraryPlaylists = homeLibraryPlaylists,
-                                isLibraryLoading = isHomeLibraryLoading,
-                                recentsSongs = homeRecentsSongs,
-                                isRecentsLoading = isHomeRecentsLoading,
-                                quickPicksSongs = homeQuickPicksSongs,
-                                isQuickPicksLoading = isHomeQuickPicksLoading,
-                                discoverArticles = discoverArticles,
-                                isDiscoverLoading = isDiscoverLoading,
-                                isDiscoverEnabled = isDiscoverEnabled,
-                                onAiSummaryClick = { article ->
-                                    pendingAiSummaryArticle = article
-                                    navigateHandler(AppScreen.DISCOVER)
+                                // Rendered by the interactive swipe stage while
+                                // Home/Discover are active; AnimatedContent only
+                                // renders Home here for transitions to/from the
+                                // other screens (so their slide animations work).
+                                if (!homeDiscoverStageActive) {
+                                    homeScreenContent()
                                 }
-                            )
-                        }
+                            }
                         AppScreen.SETTINGS -> {
                             SettingsScreen(
                                 onNavigate = navigateHandler
@@ -1993,13 +2200,11 @@ fun MainPlayerScreen(
                                 )
                             }
                             AppScreen.DISCOVER -> {
-                                DiscoverScreen(
-                                    onNavigate = navigateHandler,
-                                    pendingAiSummaryArticle = pendingAiSummaryArticle,
-                                    onPendingAiSummaryConsumed = {
-                                        pendingAiSummaryArticle = null
-                                    }
-                                )
+                                // Rendered by the swipe stage while Home/Discover
+                                // are active (see the HOME branch note).
+                                if (!homeDiscoverStageActive) {
+                                    discoverScreenContent()
+                                }
                             }
                             AppScreen.DISCOVER_FEED -> {
                                 DiscoverFeedScreen(
