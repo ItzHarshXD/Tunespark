@@ -21,6 +21,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -29,6 +31,15 @@ class PlaybackService : MediaSessionService() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var lastSeededVideoId: String? = null
     private val seedingVideoIds = mutableSetOf<String>()
+    // Stream resolutions currently in flight (videoId set), so a restore and a
+    // play-press racing each other can never kick off duplicate network calls.
+    private val resolvingVideoIds = mutableSetOf<String>()
+
+    // Restore-session state: the service rebuilt the last saved song paused at
+    // its saved position. Queue seeding, AI commentary and session bookkeeping
+    // are deferred until the user actually presses play.
+    private var isRestoredPaused = false
+    private var pendingRestoreSeekMs = -1L
 
     private var playlistSongsPlayedSinceCommentary = 0
     private var lastCommentaryCheckedVideoId: String? = null
@@ -80,8 +91,27 @@ class PlaybackService : MediaSessionService() {
 
         exoPlayer.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                if (mediaItem == null) return
+                if (mediaItem == null) {
+                    // Queue cleared (e.g. the Radio screen's "Stop Radio") —
+                    // never resurrect a deliberately stopped session next launch.
+                    isRestoredPaused = false
+                    pendingRestoreSeekMs = -1L
+                    PlaybackStateStore.clear(this@PlaybackService)
+                    return
+                }
+                persistPlaybackState(exoPlayer)
                 handleCurrentMediaItem(exoPlayer, mediaItem)
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                // The user pressed play on a restored (paused) session — now is
+                // the moment to run the normal queue-seeding pipeline for the
+                // restored song.
+                if (playWhenReady && isRestoredPaused) {
+                    isRestoredPaused = false
+                    pendingRestoreSeekMs = -1L
+                    exoPlayer.currentMediaItem?.let { handleCurrentMediaItem(exoPlayer, it) }
+                }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -120,6 +150,84 @@ class PlaybackService : MediaSessionService() {
             .setCallback(CustomSessionCallback())
             .setSessionActivity(pendingIntent)
             .build()
+
+        // Resume feature: rebuild the last saved song paused at its saved
+        // timestamp before the first controller connects.
+        restoreLastPlaybackSession(exoPlayer)
+
+        // Periodically persist the playback snapshot so an unexpected process
+        // death while backgrounded (system kill) still resumes at the latest
+        // position. Cheap SharedPreferences writes every 5 seconds.
+        serviceScope.launch {
+            while (isActive) {
+                delay(5_000L)
+                persistPlaybackState(exoPlayer)
+            }
+        }
+    }
+
+    /**
+     * Resume feature: rebuilds the last saved playback snapshot as a paused
+     * session at the saved position. The song is queued with the app's standard
+     * "tunespark://unresolved/<videoId>" placeholder, so the normal lazy stream
+     * resolution pipeline resolves it (and its duration) in the background —
+     * the user sees the paused song with its timestamp and pressing play
+     * continues exactly where they left off.
+     */
+    private fun restoreLastPlaybackSession(exoPlayer: ExoPlayer) {
+        val saved = PlaybackStateStore.load(this) ?: return
+        if (saved.videoId.isBlank()) return
+
+        val restoredItem = MediaItem.Builder()
+            .setUri(android.net.Uri.parse(unresolvedMediaUri(saved.videoId)))
+            .setMediaId(saved.videoId)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(saved.title)
+                    .setArtist(saved.artist)
+                    .setArtworkUri(
+                        if (saved.thumbnail.isNotBlank()) android.net.Uri.parse(saved.thumbnail) else null
+                    )
+                    .build()
+            )
+            .build()
+
+        isRestoredPaused = true
+        pendingRestoreSeekMs = saved.positionMs
+
+        exoPlayer.setMediaItem(restoredItem, saved.positionMs)
+        exoPlayer.playWhenReady = false
+        exoPlayer.prepare()
+        android.util.Log.d(
+            PLAYBACK_SERVICE_TAG,
+            "restoreLastPlaybackSession: restored '${saved.title}' paused at ${saved.positionMs}ms"
+        )
+    }
+
+    /**
+     * Persists the current playback snapshot (song metadata + position) so the
+     * session can be resumed after the app is closed or the process is killed.
+     * AI-commentary interludes are skipped (only real songs are resumable), and
+     * an emptied queue clears the snapshot instead.
+     */
+    private fun persistPlaybackState(player: Player) {
+        val item = player.currentMediaItem
+        if (item == null) {
+            if (player.mediaItemCount == 0) PlaybackStateStore.clear(this)
+            return
+        }
+        if (isCommentaryMediaItem(item)) return
+        val videoId = videoIdFromMediaId(item.mediaId)
+        if (videoId.isBlank()) return
+        val metadata = item.mediaMetadata
+        PlaybackStateStore.save(
+            context = this,
+            videoId = videoId,
+            title = metadata.title?.toString() ?: "",
+            artist = metadata.artist?.toString() ?: "",
+            thumbnail = metadata.artworkUri?.toString() ?: "",
+            positionMs = player.currentPosition
+        )
     }
 
     private fun handleCurrentMediaItem(exoPlayer: ExoPlayer, mediaItem: MediaItem) {
@@ -128,6 +236,17 @@ class PlaybackService : MediaSessionService() {
 
         if (isCommentaryMediaItem(mediaItem)) {
             preFetchNextMediaItem(exoPlayer)
+            return
+        }
+
+        // A restored (paused) session must stay quiet: resolve the stream in the
+        // background (so the duration/timestamps show and play is instant) but
+        // defer commentary, radio seeding and session bookkeeping until the
+        // user actually presses play (see onPlayWhenReadyChanged).
+        if (isRestoredPaused) {
+            if (isUnresolvedMediaItem(mediaItem)) {
+                resolveCurrentMediaItem(exoPlayer, videoId)
+            }
             return
         }
 
@@ -365,12 +484,16 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun resolveCurrentMediaItem(exoPlayer: ExoPlayer, videoId: String) {
+        // De-dupe concurrent resolutions (a restore and a play-press can race
+        // into this method for the same videoId).
+        if (!resolvingVideoIds.add(videoId)) return
         serviceScope.launch(Dispatchers.IO) {
             android.util.Log.d(PLAYBACK_SERVICE_TAG, "resolveCurrentMediaItem started for videoId: $videoId")
             val resolvedUrl = StreamUrlResolver.resolveStreamUrl(videoId)
             if (resolvedUrl != null) {
                 android.util.Log.d(PLAYBACK_SERVICE_TAG, "resolveCurrentMediaItem successfully resolved URL for videoId: $videoId")
                 withContext(Dispatchers.Main) {
+                    resolvingVideoIds.remove(videoId)
                     val currentIndex = exoPlayer.currentMediaItemIndex
                     if (currentIndex < exoPlayer.mediaItemCount && videoIdFromMediaId(exoPlayer.getMediaItemAt(currentIndex).mediaId) == videoId) {
                         val originalItem = exoPlayer.getMediaItemAt(currentIndex)
@@ -384,12 +507,20 @@ class PlaybackService : MediaSessionService() {
                         )
                         exoPlayer.replaceMediaItem(currentIndex, resolvedItem)
                         exoPlayer.prepare()
-                        exoPlayer.play()
+                        // Never force playback: a restored session stays paused at
+                        // its saved position until the user presses play.
+                        if (exoPlayer.playWhenReady) {
+                            exoPlayer.play()
+                        } else if (pendingRestoreSeekMs > 0) {
+                            // Guarantee the saved timestamp survived the item swap.
+                            exoPlayer.seekTo(pendingRestoreSeekMs)
+                        }
+                        pendingRestoreSeekMs = -1L
                         if (isPlaylistMode) {
-                            checkAndInsertPlaylistCommentary(exoPlayer, videoId)
+                            if (!isRestoredPaused) checkAndInsertPlaylistCommentary(exoPlayer, videoId)
                             preFetchNextMediaItem(exoPlayer)
                         } else {
-                            seedRecommendations(exoPlayer, videoId)
+                            if (!isRestoredPaused) seedRecommendations(exoPlayer, videoId)
                             preFetchNextMediaItem(exoPlayer)
                         }
                     }
@@ -397,6 +528,7 @@ class PlaybackService : MediaSessionService() {
             } else {
                 android.util.Log.e(PLAYBACK_SERVICE_TAG, "resolveCurrentMediaItem failed to resolve URL for videoId: $videoId")
                 withContext(Dispatchers.Main) {
+                    resolvingVideoIds.remove(videoId)
                     val currentIndex = exoPlayer.currentMediaItemIndex
                     if (currentIndex < exoPlayer.mediaItemCount && videoIdFromMediaId(exoPlayer.getMediaItemAt(currentIndex).mediaId) == videoId) {
                         Toast.makeText(this@PlaybackService, "Failed to resolve stream for this song. Skipping...", Toast.LENGTH_SHORT).show()
@@ -734,11 +866,15 @@ class PlaybackService : MediaSessionService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession?.player
         player?.pause()
+        // Snapshot the final paused position before the service tears down, so
+        // the next launch resumes this song exactly where the user left off.
+        player?.let { persistPlaybackState(it) }
         stopSelf()
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
+        mediaSession?.player?.let { persistPlaybackState(it) }
         serviceScope.cancel()
         mediaSession?.run {
             player.release()
