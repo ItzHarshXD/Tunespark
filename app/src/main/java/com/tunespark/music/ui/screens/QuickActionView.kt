@@ -87,6 +87,7 @@ import com.metrolist.innertube.models.YouTubeClient
 import com.tunespark.music.LikedSongManager
 import com.tunespark.music.LocalPlaylistManager
 import com.tunespark.music.SessionManager
+import com.tunespark.music.provider.AudioProviderIds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -166,6 +167,12 @@ fun QuickActionView(
         infoAlbumName = infoTarget.album?.name
         infoDurationSeconds = infoTarget.duration
         isLoadingInfoDetails = infoTarget.album?.name == null || infoTarget.duration == null
+        // JioSaavn results already carry album and duration; InnerTube's
+        // watch-next/player endpoints cannot look up a JioSaavn id.
+        if (AudioProviderIds.isJioSaavnId(infoTarget.id)) {
+            isLoadingInfoDetails = false
+            return@LaunchedEffect
+        }
         if (!isLoadingInfoDetails) return@LaunchedEffect
         try {
             val enriched = withContext(Dispatchers.IO) {
@@ -225,7 +232,9 @@ fun QuickActionView(
         pickerPlaylists = emptyList()
         pickerLocalPlaylists = LocalPlaylistManager.getPlaylists(context)
         try {
-            if (SessionManager.isUserSignedIn(context)) {
+            // JioSaavn tracks cannot be added to a YouTube Music playlist.
+            val canUseYouTube = displayedSong?.let { !AudioProviderIds.isJioSaavnId(it.id) } ?: false
+            if (canUseYouTube && SessionManager.isUserSignedIn(context)) {
                 val result = withContext(Dispatchers.IO) { YouTube.library("FEmusic_liked_playlists") }
                 // Only the user's OWN playlists: songs can't be added to someone else's
                 // playlist. The EDIT menu flag marks owned playlists; the author-name
@@ -579,9 +588,16 @@ fun QuickActionView(
 
         if (showPlaylistPicker) {
             val songToAdd = currentSong
+            val isJioSaavnSong = AudioProviderIds.isJioSaavnId(songToAdd.id)
             // YouTube Music playlist add — syncs to the real account.
             val startAddToPlaylist: (PlaylistItem) -> Unit = { playlist ->
-                if (addingToPlaylistId == null) {
+                if (isJioSaavnSong) {
+                    Toast.makeText(
+                        context,
+                        "JioSaavn tracks can only be added to local playlists",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else if (addingToPlaylistId == null) {
                     addingToPlaylistId = playlist.id
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
@@ -838,7 +854,13 @@ fun QuickActionView(
             onDismiss = { showCreateFromPicker = false },
             onCreate = { name, asLocal ->
                 val songToCreateFor = currentSong
-                if (songToCreateFor != null && !isCreatingFromPicker) {
+                if (AudioProviderIds.isJioSaavnId(songToCreateFor.id) && !asLocal) {
+                    Toast.makeText(
+                        context,
+                        "JioSaavn tracks can only be saved to local playlists",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else if (!isCreatingFromPicker) {
                     isCreatingFromPicker = true
                     scope.launch {
                         try {

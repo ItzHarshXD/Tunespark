@@ -48,6 +48,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
+import com.tunespark.music.provider.AudioProviderIds
+import com.tunespark.music.provider.SongLinks
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.*
@@ -260,6 +262,8 @@ fun RadioTabBar(
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         if (!isSignedIn) {
                             Toast.makeText(context, "Sign in to like songs", Toast.LENGTH_SHORT).show()
+                        } else if (currentVideoId != null && AudioProviderIds.isJioSaavnId(currentVideoId)) {
+                            Toast.makeText(context, "JioSaavn tracks can't be liked in YouTube Music", Toast.LENGTH_SHORT).show()
                         } else if (currentVideoId != null) {
                             scope.launch {
                                 LikedSongManager.toggleLike(currentVideoId, context)
@@ -288,7 +292,7 @@ fun RadioTabBar(
                             audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             if (currentVideoId != null) {
-                                val shareUrl = "https://music.youtube.com/watch?v=$currentVideoId"
+                                val shareUrl = SongLinks.shareUrl(currentVideoId, currentSongTitle, currentSongArtist)
                                 val sendIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
                                     putExtra(Intent.EXTRA_SUBJECT, "$currentSongTitle - $currentSongArtist")
@@ -320,6 +324,7 @@ fun RadioScreen(
     currentSongTitle: String,
     currentSongArtist: String,
     currentSongArtwork: String?,
+    nowPlayingSourceLine: String? = null,
     isPlaying: Boolean,
     isLoading: Boolean,
     errorMessage: String?,
@@ -1763,6 +1768,18 @@ fun RadioScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
 
+                                if (!nowPlayingSourceLine.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Text(
+                                        text = nowPlayingSourceLine,
+                                        fontSize = 11.sp,
+                                        color = textColor.copy(alpha = 0.42f),
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
                                 if (isCommentaryEnabled && isMusicContextChecked) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Box(
@@ -2348,6 +2365,16 @@ fun RadioScreen(
                             textAlign = TextAlign.Center
                         )
 
+                        if (!nowPlayingSourceLine.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = nowPlayingSourceLine,
+                                fontSize = 12.sp,
+                                color = textColor.copy(alpha = 0.42f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
                         if (isCommentaryEnabled && isMusicContextChecked) {
                             Spacer(modifier = Modifier.height(14.dp))
                             Box(
@@ -2515,6 +2542,16 @@ fun RadioScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            if (!nowPlayingSourceLine.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = nowPlayingSourceLine,
+                                    fontSize = 11.sp,
+                                    color = textColor.copy(alpha = 0.42f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
 
                         if (isCommentaryEnabled && isMusicContextChecked) {

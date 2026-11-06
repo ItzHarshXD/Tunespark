@@ -40,6 +40,8 @@ object SessionManager {
     private const val KEY_USED_BRIEFING_ARTICLE_URLS = "used_briefing_article_urls"
     private const val KEY_CUSTOM_INSTRUCTIONS = "custom_instructions"
     private const val KEY_RADIO_LAYOUT_STATE = "radio_layout_state"
+    private const val KEY_JIOSAAVN_ENABLED = "jiosaavn_enabled"
+    private const val KEY_STATS_FOR_NERDS = "stats_for_nerds_enabled"
 
     @Volatile
     private var cachedHistory: List<Pair<SongItem, Long>>? = null
@@ -331,6 +333,31 @@ object SessionManager {
 
     fun saveKeepScreenOn(context: Context, keepOn: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_KEEP_SCREEN_ON, keepOn).apply()
+    }
+
+    /**
+     * JioSaavn is an optional second audio source. It is OFF by default: the
+     * app uses YouTube Music exactly as before until the user opts in from
+     * Player and Audio settings.
+     */
+    fun isJioSaavnEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_JIOSAAVN_ENABLED, false)
+    }
+
+    fun saveJioSaavnEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_JIOSAAVN_ENABLED, enabled).apply()
+    }
+
+    /**
+     * "Stats for nerds" controls the optional `Provider · Codec · bitrate`
+     * line in Now Playing. It is OFF by default.
+     */
+    fun isStatsForNerdsEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_STATS_FOR_NERDS, false)
+    }
+
+    fun saveStatsForNerdsEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_STATS_FOR_NERDS, enabled).apply()
     }
 
     fun getShowTimeWeather(context: Context): Boolean {

@@ -34,6 +34,9 @@ import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.tunespark.music.ui.theme.TunesparkTheme
 import com.tunespark.music.ui.screens.*
+import com.tunespark.music.provider.AudioProviderIds
+import com.tunespark.music.provider.SongLinks
+import com.tunespark.music.provider.StreamMetadata
 import com.tunespark.music.ui.screens.LyricLine
 import com.tunespark.music.ui.screens.cleanYouTubeTitle
 import com.tunespark.music.ui.screens.parseLyricsToLines
@@ -120,17 +123,21 @@ private fun isGenuineAuthFailure(throwable: Throwable?): Boolean {
  * requirement). Use [MainPlayerScreen]s uniqueQueueMediaId helper to derive
  * it so the same song can be queued multiple times without crashing.
  */
+private fun songMediaMetadata(song: SongItem): MediaMetadata {
+    val base = MediaMetadata.Builder()
+        .setTitle(song.title)
+        .setArtist(song.artists.joinToString(", ") { it.name })
+        .setArtworkUri(android.net.Uri.parse(song.thumbnail))
+        .setAlbumTitle(song.album?.name)
+        .build()
+    return StreamMetadata.withSongInfo(base, song.album?.name, song.duration)
+}
+
 private fun buildQueueMediaItem(song: SongItem, mediaId: String): MediaItem {
     return MediaItem.Builder()
         .setUri(android.net.Uri.parse("tunespark://unresolved/${song.id}"))
         .setMediaId(mediaId)
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle(song.title)
-                .setArtist(song.artists.joinToString(", ") { it.name })
-                .setArtworkUri(android.net.Uri.parse(song.thumbnail))
-                .build()
-        )
+        .setMediaMetadata(songMediaMetadata(song))
         .build()
 }
 
@@ -588,6 +595,15 @@ fun MainPlayerScreen(
     var currentSongTitle by remember { mutableStateOf("No Track Loaded") }
     var currentSongArtist by remember { mutableStateOf("") }
     var currentSongArtwork by remember { mutableStateOf<String?>(null) }
+    // Verified stream details of the current item ("stats for nerds" line).
+    var nowPlayingMetadata by remember { mutableStateOf<MediaMetadata?>(null) }
+    var statsForNerdsEnabled by remember {
+        mutableStateOf(SessionManager.isStatsForNerdsEnabled(context))
+    }
+    // Hidden entirely when stats-for-nerds is off.
+    val nowPlayingSourceLine = nowPlayingMetadata?.let {
+        StreamMetadata.displayLine(it, includeStats = statsForNerdsEnabled)
+    }
 
     var hoistedLyricsLines by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
     var hoistedIsLyricsLoading by remember { mutableStateOf(false) }
@@ -768,6 +784,7 @@ fun MainPlayerScreen(
                 currentSongTitle = mediaMetadata.title?.toString() ?: "No Track Loaded"
                 currentSongArtist = mediaMetadata.artist?.toString() ?: ""
                 currentSongArtwork = mediaMetadata.artworkUri?.toString()
+                nowPlayingMetadata = mediaMetadata
             }
 
             override fun onEvents(player: Player, events: Player.Events) {
@@ -782,6 +799,7 @@ fun MainPlayerScreen(
         currentSongTitle = exoPlayer.mediaMetadata.title?.toString() ?: "No Track Loaded"
         currentSongArtist = exoPlayer.mediaMetadata.artist?.toString() ?: ""
         currentSongArtwork = exoPlayer.mediaMetadata.artworkUri?.toString()
+        nowPlayingMetadata = exoPlayer.mediaMetadata
         updateQueue()
 
         if (playbackState == Player.STATE_READY) {
@@ -842,12 +860,20 @@ fun MainPlayerScreen(
             currentSongTitle = targetSong.title
             currentSongArtist = targetSong.artists.joinToString(", ") { it.name }
             currentSongArtwork = targetSong.thumbnail
+            nowPlayingMetadata = null
 
-            val fetchedUrl = withContext(Dispatchers.IO) {
-                StreamUrlResolver.resolveStreamUrl(targetSong.id)
+            val resolvedStream = withContext(Dispatchers.IO) {
+                StreamUrlResolver.resolveStream(
+                    songId = targetSong.id,
+                    title = targetSong.title,
+                    artist = targetSong.artists.joinToString(", ") { it.name },
+                    album = targetSong.album?.name,
+                    durationSeconds = targetSong.duration,
+                    jioSaavnEnabled = SessionManager.isJioSaavnEnabled(context),
+                )
             }
 
-            if (fetchedUrl != null) {
+            if (resolvedStream != null) {
                 try {
                     var commentaryException: Exception? = null
                     val geminiKey = SessionManager.getGeminiApiKey(context)
@@ -917,27 +943,17 @@ fun MainPlayerScreen(
 
                         val item = if (index == startIndex) {
                             MediaItem.Builder()
-                                .setUri(fetchedUrl)
+                                .setUri(resolvedStream.url)
                                 .setMediaId(uniquePlaylistMediaId(song.id))
                                 .setMediaMetadata(
-                                    MediaMetadata.Builder()
-                                        .setTitle(song.title)
-                                        .setArtist(song.artists.joinToString(", ") { it.name })
-                                        .setArtworkUri(android.net.Uri.parse(song.thumbnail))
-                                        .build()
+                                    StreamMetadata.withStreamInfo(songMediaMetadata(song), resolvedStream)
                                 )
                                 .build()
                         } else {
                             MediaItem.Builder()
                                 .setUri(android.net.Uri.parse("tunespark://unresolved/${song.id}"))
                                 .setMediaId(uniquePlaylistMediaId(song.id))
-                                .setMediaMetadata(
-                                    MediaMetadata.Builder()
-                                        .setTitle(song.title)
-                                        .setArtist(song.artists.joinToString(", ") { it.name })
-                                        .setArtworkUri(android.net.Uri.parse(song.thumbnail))
-                                        .build()
-                                )
+                                .setMediaMetadata(songMediaMetadata(song))
                                 .build()
                         }
                         exoPlayer.addMediaItem(item)
@@ -975,13 +991,21 @@ fun MainPlayerScreen(
         currentSongTitle = song.title
         currentSongArtist = song.artists.joinToString(", ") { it.name }
         currentSongArtwork = song.thumbnail
+        nowPlayingMetadata = null
         statusMessage = "Fetching stream..."
 
         coroutineScope.launch {
-            val fetchedUrl = withContext(Dispatchers.IO) {
-                StreamUrlResolver.resolveStreamUrl(song.id)
+            val resolvedStream = withContext(Dispatchers.IO) {
+                StreamUrlResolver.resolveStream(
+                    songId = song.id,
+                    title = song.title,
+                    artist = song.artists.joinToString(", ") { it.name },
+                    album = song.album?.name,
+                    durationSeconds = song.duration,
+                    jioSaavnEnabled = SessionManager.isJioSaavnEnabled(context),
+                )
             }
-            if (fetchedUrl != null) {
+            if (resolvedStream != null) {
                 try {
                     // Generate introductory start commentary if Gemini key is present
                     // and the "Session opener" element is checked
@@ -1027,14 +1051,10 @@ fun MainPlayerScreen(
                     } else null
 
                     val mediaItem = MediaItem.Builder()
-                        .setUri(fetchedUrl)
+                        .setUri(resolvedStream.url)
                         .setMediaId(song.id)
                         .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(song.title)
-                                .setArtist(song.artists.joinToString(", ") { it.name })
-                                .setArtworkUri(android.net.Uri.parse(song.thumbnail))
-                                .build()
+                            StreamMetadata.withStreamInfo(songMediaMetadata(song), resolvedStream)
                         )
                         .build()
 
@@ -1179,7 +1199,10 @@ fun MainPlayerScreen(
                 val songs = mutableListOf<SongItem>()
                 val localHistory = SessionManager.getLocalHistory(context)
                 if (localHistory.size >= 3) {
-                    val seedTracks = localHistory.distinctBy { it.id }.take(3)
+                    val seedTracks = localHistory.distinctBy { it.id }
+                        // JioSaavn ids have no YouTube watch-next page.
+                        .filter { !AudioProviderIds.isJioSaavnId(it.id) }
+                        .take(3)
                     if (seedTracks.isNotEmpty()) {
                         val jobs = seedTracks.map { seed ->
                             async {
@@ -1436,7 +1459,10 @@ fun MainPlayerScreen(
                 val songs = mutableListOf<SongItem>()
                 val localHistory = SessionManager.getLocalHistory(context)
                 if (localHistory.size >= 3) {
-                    val seeds = localHistory.distinctBy { it.id }.take(10)
+                    val seeds = localHistory.distinctBy { it.id }
+                        // JioSaavn ids have no YouTube watch-next page.
+                        .filter { !AudioProviderIds.isJioSaavnId(it.id) }
+                        .take(10)
                     val jobs = seeds.map { seed ->
                         async {
                             val nextResult = YouTube.next(WatchEndpoint(videoId = seed.id))
@@ -1602,7 +1628,9 @@ fun MainPlayerScreen(
     }
 
     val onQuickActionLike: (SongItem) -> Unit = { song ->
-        if (!SessionManager.isUserSignedIn(context)) {
+        if (AudioProviderIds.isJioSaavnId(song.id)) {
+            Toast.makeText(context, "JioSaavn tracks can't be liked in YouTube Music", Toast.LENGTH_SHORT).show()
+        } else if (!SessionManager.isUserSignedIn(context)) {
             Toast.makeText(context, "Sign in to like songs", Toast.LENGTH_SHORT).show()
         } else {
             val wasLiked = LikedSongManager.isLiked(song.id)
@@ -1665,7 +1693,7 @@ fun MainPlayerScreen(
         val sendIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, "${song.title} - ${song.artists.joinToString(", ") { it.name }}")
-            putExtra(Intent.EXTRA_TEXT, song.shareLink)
+            putExtra(Intent.EXTRA_TEXT, SongLinks.shareUrl(song.id, song.title, song.artists.joinToString(", ") { it.name }))
         }
         context.startActivity(Intent.createChooser(sendIntent, "Share song"))
     }
@@ -2122,7 +2150,8 @@ fun MainPlayerScreen(
                         }
                         AppScreen.PLAYER_AUDIO -> {
                             PlayerAndAudioScreen(
-                                onNavigate = navigateHandler
+                                onNavigate = navigateHandler,
+                                onStatsForNerdsChanged = { statsForNerdsEnabled = it }
                             )
                         }
                         AppScreen.LOCATION -> {
@@ -2380,6 +2409,7 @@ fun MainPlayerScreen(
                             currentSongTitle = "No Track Loaded"
                             currentSongArtist = ""
                             currentSongArtwork = null
+                            nowPlayingMetadata = null
                             playQueue = emptyList()
                             currentTrackIndex = -1
                             hasPreviousTrack = false
@@ -2388,6 +2418,7 @@ fun MainPlayerScreen(
                         },
                         lyricsLines = hoistedLyricsLines,
                         isLyricsLoading = hoistedIsLyricsLoading,
+                        nowPlayingSourceLine = nowPlayingSourceLine,
                         fullPlayerProgress = fullPlayerProgress
                     )
                 }
@@ -2439,6 +2470,7 @@ fun MainPlayerScreen(
                                 currentSongTitle = "No Track Loaded"
                                 currentSongArtist = ""
                                 currentSongArtwork = null
+                                nowPlayingMetadata = null
                                 playQueue = emptyList()
                                 currentTrackIndex = -1
                                 hasPreviousTrack = false

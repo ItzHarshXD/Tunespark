@@ -59,6 +59,8 @@ import com.metrolist.innertube.models.YTItem
 import com.metrolist.innertube.pages.BrowseResult
 import com.tunespark.music.AppScreen
 import com.tunespark.music.ExploreFeed
+import com.tunespark.music.SessionManager
+import com.tunespark.music.provider.JioSaavnSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -180,6 +182,17 @@ fun SearchScreen(
             if (resultsRes.isSuccess) {
                 val items = resultsRes.getOrNull()?.items.orEmpty()
                 localResults = items.filterIsInstance<SongItem>()
+            }
+
+            // Fallback-only JioSaavn: YouTube Music stays the primary catalogue,
+            // and JioSaavn rows are shown only when it returned no songs at all.
+            if (localResults.isEmpty() && SessionManager.isJioSaavnEnabled(context)) {
+                val saavnResults = withContext(Dispatchers.IO) {
+                    runCatching { JioSaavnSource.search(searchQuery) }.getOrDefault(emptyList())
+                }
+                if (localResults.isEmpty()) {
+                    localResults = saavnResults
+                }
             }
 
             // Artist results: shown above the songs so users can navigate straight

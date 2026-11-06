@@ -31,6 +31,7 @@ import com.tunespark.music.SessionManager
 @Composable
 fun PlayerAndAudioScreen(
     onNavigate: (AppScreen) -> Unit,
+    onStatsForNerdsChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -43,6 +44,14 @@ fun PlayerAndAudioScreen(
 
     var keepScreenOn by remember {
         mutableStateOf(SessionManager.getKeepScreenOn(context))
+    }
+
+    var jioSaavnEnabled by remember {
+        mutableStateOf(SessionManager.isJioSaavnEnabled(context))
+    }
+
+    var statsForNerdsEnabled by remember {
+        mutableStateOf(SessionManager.isStatsForNerdsEnabled(context))
     }
 
     val backgroundColor = MaterialTheme.colorScheme.background
@@ -119,6 +128,120 @@ fun PlayerAndAudioScreen(
             )
         }
         
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .clickable {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                    val newValue = !jioSaavnEnabled
+                    jioSaavnEnabled = newValue
+                    SessionManager.saveJioSaavnEnabled(context, newValue)
+                }
+                .padding(
+                    horizontal = 10.dp,
+                    vertical = 10.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "JioSaavn audio source",
+                    color = textColor,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Use JioSaavn only when it offers a verified better stream than YouTube Music. YouTube Music always stays the fallback.",
+                    color = Color.Gray,
+                    fontSize = 14.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            SimpleToggleSwitch(
+                checked = jioSaavnEnabled,
+                onCheckedChange = {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                    jioSaavnEnabled = it
+                    SessionManager.saveJioSaavnEnabled(context, it)
+                },
+                backgroundColor = backgroundColor,
+                textColor = textColor
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .clickable {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                    val newValue = !statsForNerdsEnabled
+                    statsForNerdsEnabled = newValue
+                    SessionManager.saveStatsForNerdsEnabled(context, newValue)
+                    onStatsForNerdsChanged(newValue)
+                }
+                .padding(
+                    horizontal = 10.dp,
+                    vertical = 10.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "Stats for nerds",
+                    color = textColor,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Show the provider, codec and bitrate in Now Playing.",
+                    color = Color.Gray,
+                    fontSize = 14.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            SimpleToggleSwitch(
+                checked = statsForNerdsEnabled,
+                onCheckedChange = {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+                    statsForNerdsEnabled = it
+                    SessionManager.saveStatsForNerdsEnabled(context, it)
+                    onStatsForNerdsChanged(it)
+                },
+                backgroundColor = backgroundColor,
+                textColor = textColor
+            )
+        }
+
         Spacer(modifier = Modifier.height(110.dp))
     }
 }
