@@ -40,7 +40,7 @@ import com.tunespark.music.provider.StreamMetadata
 import com.tunespark.music.ui.screens.LyricLine
 import com.tunespark.music.ui.screens.cleanYouTubeTitle
 import com.tunespark.music.ui.screens.parseLyricsToLines
-import com.metrolist.lrclib.LrcLib
+import com.tunespark.music.lyrics.LyricsRepository
 import com.tunespark.music.LikedSongManager
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.BackHandler
@@ -74,6 +74,7 @@ private fun getScreenDepth(screen: AppScreen): Int {
         AppScreen.APPEARANCE,
         AppScreen.AI_VOICE,
         AppScreen.COMMENTARY,
+        AppScreen.LYRICS,
         AppScreen.PLAYER_AUDIO,
         AppScreen.LOCATION,
         AppScreen.UPDATES,
@@ -241,6 +242,7 @@ enum class AppScreen {
     APPEARANCE,
     AI_VOICE,
     COMMENTARY,
+    LYRICS,
     PLAYER_AUDIO,
     LOCATION,
     UPDATES,
@@ -431,7 +433,7 @@ fun MainPlayerScreen(
                     navigateHandler(AppScreen.HOME)
                 }
                 AppScreen.APPEARANCE, AppScreen.AI_VOICE, AppScreen.COMMENTARY,
-                AppScreen.PLAYER_AUDIO, AppScreen.LOCATION, AppScreen.UPDATES,
+                AppScreen.LYRICS, AppScreen.PLAYER_AUDIO, AppScreen.LOCATION, AppScreen.UPDATES,
                 AppScreen.ACCOUNT, AppScreen.DISCOVER_FEED -> {
                     navigateHandler(AppScreen.SETTINGS)
                 }
@@ -607,8 +609,22 @@ fun MainPlayerScreen(
 
     var hoistedLyricsLines by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
     var hoistedIsLyricsLoading by remember { mutableStateOf(false) }
+    // Which provider actually supplied the displayed lyrics (null when none).
+    var hoistedLyricsProviderId by remember { mutableStateOf<String?>(null) }
+    // On-the-spot provider choice made from the Now Playing indicator. It is
+    // scoped to the current track and never touches the saved settings.
+    var lyricsProviderOverride by remember { mutableStateOf<String?>(null) }
+    var lyricsOverrideSongKey by remember { mutableStateOf("") }
+    // Bumped when the user changes lyrics providers, so the current song is
+    // re-fetched immediately instead of waiting for the next track.
+    var lyricsSettingsVersion by remember { mutableStateOf(0) }
+    var lyricsFetchVersion by remember { mutableStateOf(0) }
 
-    LaunchedEffect(currentSongTitle, currentSongArtist) {
+    val currentSongKey = "$currentSongTitle|$currentSongArtist"
+    val effectiveLyricsOverride = lyricsProviderOverride
+        .takeIf { lyricsOverrideSongKey == currentSongKey }
+
+    LaunchedEffect(currentSongTitle, currentSongArtist, lyricsSettingsVersion, lyricsFetchVersion) {
         if (currentSongTitle.startsWith("AI") || currentSongTitle == "Music Context" || currentSongTitle.startsWith("commentary_")) {
             val description = exoPlayer.currentMediaItem?.mediaMetadata?.description?.toString() ?: ""
             if (description.isNotBlank()) {
@@ -616,56 +632,44 @@ fun MainPlayerScreen(
             } else {
                 hoistedLyricsLines = listOf(LyricLine(-1L, "AI is speaking..."))
             }
+            hoistedLyricsProviderId = null
             hoistedIsLyricsLoading = false
             return@LaunchedEffect
         }
 
         if (currentSongTitle.isEmpty() || currentSongTitle == "No Track Loaded") {
             hoistedLyricsLines = listOf(LyricLine(-1L, "No lyrics available for this track."))
+            hoistedLyricsProviderId = null
             hoistedIsLyricsLoading = false
             return@LaunchedEffect
         }
 
         hoistedIsLyricsLoading = true
         hoistedLyricsLines = emptyList()
+        hoistedLyricsProviderId = null
 
-        // Get duration on the Main/UI thread before switching context to IO dispatcher
+        // Read playback values on the Main/UI thread before switching dispatchers.
         val durationMs = exoPlayer.duration
         val durationSec = if (durationMs > 0) (durationMs / 1000).toInt() else -1
+        val videoId = exoPlayer.currentMediaItem?.mediaId?.substringBefore('#')
 
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             try {
-                // 1. Clean track metadata to eliminate YouTube specific promotional garbage
+                // Clean track metadata to eliminate YouTube specific promotional garbage.
                 val cleanedTitle = cleanYouTubeTitle(currentSongTitle)
                 val cleanedArtist = currentSongArtist.trim()
 
-                // 2. Primary Query: Cleaned Title + Artist + Duration (most precise)
-                var result = LrcLib.getLyrics(
+                // The repository walks the user's enabled providers in priority
+                // order and returns the first synced result (or a plain fallback).
+                val result = LyricsRepository.fetch(
+                    context = context,
                     title = cleanedTitle,
                     artist = cleanedArtist,
-                    duration = durationSec
+                    durationSec = durationSec,
+                    videoId = videoId,
+                    overrideProviderId = effectiveLyricsOverride,
                 )
-                var rawLyrics = result.getOrNull()
-
-                // 3. Fallback 1: Drop strict duration constraints (search name only)
-                if (rawLyrics == null) {
-                    result = LrcLib.getLyrics(
-                        title = cleanedTitle,
-                        artist = cleanedArtist,
-                        duration = -1
-                    )
-                    rawLyrics = result.getOrNull()
-                }
-
-                // 4. Fallback 2: General text query (drop standard fields, perform text lookup)
-                if (rawLyrics == null) {
-                    val searchResult = LrcLib.lyrics(artist = cleanedArtist, title = cleanedTitle)
-                    val tracks = searchResult.getOrNull()
-                    if (!tracks.isNullOrEmpty()) {
-                        val matchedTrack = tracks.firstOrNull { it.syncedLyrics != null || it.plainLyrics != null }
-                        rawLyrics = matchedTrack?.syncedLyrics ?: matchedTrack?.plainLyrics
-                    }
-                }
+                val rawLyrics = result?.rawLyrics
 
                 withContext(Dispatchers.Main) {
                     if (rawLyrics != null) {
@@ -674,11 +678,13 @@ fun MainPlayerScreen(
                     } else {
                         hoistedLyricsLines = listOf(LyricLine(-1L, "No lyrics found for this song."))
                     }
+                    hoistedLyricsProviderId = result?.providerId
                     hoistedIsLyricsLoading = false
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     hoistedLyricsLines = listOf(LyricLine(-1L, "Could not load lyrics: ${e.localizedMessage ?: "Unknown error"}"))
+                    hoistedLyricsProviderId = null
                     hoistedIsLyricsLoading = false
                 }
             }
@@ -2148,6 +2154,12 @@ fun MainPlayerScreen(
                                 onNavigate = navigateHandler
                             )
                         }
+                        AppScreen.LYRICS -> {
+                            LyricsScreen(
+                                onNavigate = navigateHandler,
+                                onSettingsChanged = { lyricsSettingsVersion++ }
+                            )
+                        }
                         AppScreen.PLAYER_AUDIO -> {
                             PlayerAndAudioScreen(
                                 onNavigate = navigateHandler,
@@ -2418,6 +2430,15 @@ fun MainPlayerScreen(
                         },
                         lyricsLines = hoistedLyricsLines,
                         isLyricsLoading = hoistedIsLyricsLoading,
+                        lyricsProviderId = hoistedLyricsProviderId,
+                        lyricsProviderOverride = effectiveLyricsOverride,
+                        onLyricsProviderSelected = { providerId ->
+                            // Applied to the current track only; the saved
+                            // Settings order is left untouched.
+                            lyricsProviderOverride = providerId
+                            lyricsOverrideSongKey = currentSongKey
+                            lyricsFetchVersion++
+                        },
                         nowPlayingSourceLine = nowPlayingSourceLine,
                         fullPlayerProgress = fullPlayerProgress
                     )

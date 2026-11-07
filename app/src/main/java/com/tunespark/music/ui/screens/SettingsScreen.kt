@@ -11,6 +11,7 @@ import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Lyrics
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Palette
@@ -61,6 +62,7 @@ fun SettingsScreen(
             "Discover feed" to Icons.AutoMirrored.Outlined.List,
             "AI and Voice" to Icons.Outlined.Mic,
             "Commentary" to Icons.Outlined.ChatBubbleOutline,
+            "Lyrics" to Icons.Outlined.Lyrics,
             "Player and Audio" to Icons.Outlined.MusicNote,
             "Location" to Icons.Outlined.LocationOn,
             "Updates" to Icons.Outlined.Info
@@ -80,6 +82,7 @@ fun SettingsScreen(
                             "Discover feed" -> AppScreen.DISCOVER_FEED
                             "AI and Voice" -> AppScreen.AI_VOICE
                             "Commentary" -> AppScreen.COMMENTARY
+                            "Lyrics" -> AppScreen.LYRICS
                             "Player and Audio" -> AppScreen.PLAYER_AUDIO
                             "Location" -> AppScreen.LOCATION
                             "Updates" -> AppScreen.UPDATES

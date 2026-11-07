@@ -6,6 +6,7 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.AccountInfo
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.Artist
+import com.tunespark.music.lyrics.LyricsProviderRegistry
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +43,8 @@ object SessionManager {
     private const val KEY_RADIO_LAYOUT_STATE = "radio_layout_state"
     private const val KEY_JIOSAAVN_ENABLED = "jiosaavn_enabled"
     private const val KEY_STATS_FOR_NERDS = "stats_for_nerds_enabled"
+    private const val KEY_LYRICS_PROVIDER_ORDER = "lyrics_provider_order"
+    private const val KEY_LYRICS_ENABLED_PROVIDERS = "lyrics_enabled_providers"
 
     @Volatile
     private var cachedHistory: List<Pair<SongItem, Long>>? = null
@@ -358,6 +361,41 @@ object SessionManager {
 
     fun saveStatsForNerdsEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_STATS_FOR_NERDS, enabled).apply()
+    }
+
+    /**
+     * Lyrics providers are tried from first to last. The saved order is
+     * normalised so unknown ids are dropped and newly added providers appear
+     * automatically without resetting the user's customisation.
+     */
+    fun getLyricsProviderOrder(context: Context): List<String> {
+        val saved = getPrefs(context)
+            .getString(KEY_LYRICS_PROVIDER_ORDER, null)
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+        return LyricsProviderRegistry.normalizeOrder(saved)
+    }
+
+    fun saveLyricsProviderOrder(context: Context, order: List<String>) {
+        getPrefs(context)
+            .edit()
+            .putString(KEY_LYRICS_PROVIDER_ORDER, order.joinToString(","))
+            .apply()
+    }
+
+    /**
+     * All supported lyrics providers are ON by default. An absent preference
+     * means the user has never changed the setting.
+     */
+    fun getEnabledLyricsProviders(context: Context): Set<String> {
+        val saved = getPrefs(context).getStringSet(KEY_LYRICS_ENABLED_PROVIDERS, null)
+        return LyricsProviderRegistry.normalizeEnabled(saved)
+    }
+
+    fun saveEnabledLyricsProviders(context: Context, ids: Set<String>) {
+        getPrefs(context).edit().putStringSet(KEY_LYRICS_ENABLED_PROVIDERS, ids).apply()
     }
 
     fun getShowTimeWeather(context: Context): Boolean {

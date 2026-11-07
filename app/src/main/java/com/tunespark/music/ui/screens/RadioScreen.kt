@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -48,6 +49,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
+import com.tunespark.music.lyrics.LyricsProviderRegistry
 import com.tunespark.music.provider.AudioProviderIds
 import com.tunespark.music.provider.SongLinks
 import kotlinx.coroutines.delay
@@ -335,6 +337,9 @@ fun RadioScreen(
     onStopRadio: () -> Unit,
     lyricsLines: List<LyricLine>,
     isLyricsLoading: Boolean,
+    lyricsProviderId: String? = null,
+    lyricsProviderOverride: String? = null,
+    onLyricsProviderSelected: (String?) -> Unit = {},
     fullPlayerProgress: Animatable<Float, *>? = null,
     modifier: Modifier = Modifier
 ) {
@@ -702,9 +707,18 @@ fun RadioScreen(
     }
 
     val LyricsView = @Composable { contentModifier: Modifier ->
+        Column(modifier = contentModifier) {
+        LyricsProviderIndicator(
+            providerId = lyricsProviderOverride ?: lyricsProviderId,
+            isLoading = isLyricsLoading,
+            textColor = textColor,
+            audioManager = audioManager,
+            view = view,
+            onProviderSelected = onLyricsProviderSelected
+        )
         if (isLyricsLoading) {
             Box(
-                modifier = contentModifier,
+                modifier = Modifier.fillMaxWidth().weight(1f),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = primaryColor)
@@ -786,7 +800,7 @@ fun RadioScreen(
             }
 
             Box(
-                modifier = contentModifier
+                modifier = Modifier.fillMaxWidth().weight(1f)
             ) {
                 LazyColumn(
                     state = listState,
@@ -964,6 +978,7 @@ fun RadioScreen(
                     }
                 }
             }
+        }
         }
     }
 
@@ -2654,6 +2669,14 @@ fun RadioScreen(
 
                 // 5. Content Area (Lyrics or Queue)
                 if (activeTab == "lyrics") {
+                    LyricsProviderIndicator(
+                        providerId = lyricsProviderOverride ?: lyricsProviderId,
+                        isLoading = isLyricsLoading,
+                        textColor = textColor,
+                        audioManager = audioManager,
+                        view = view,
+                        onProviderSelected = onLyricsProviderSelected
+                    )
                     if (isLyricsLoading) {
                         Box(
                             modifier = Modifier
@@ -3190,6 +3213,87 @@ private fun BriefingArticleCard(
                         rotationZ = 180f // point right
                     }
             )
+        }
+    }
+}
+/**
+ * Small, tap-to-change indicator shown above the lyrics. It displays which
+ * provider supplied the current lyrics and opens a menu that applies an
+ * on-the-spot choice for this track only.
+ */
+@Composable
+private fun LyricsProviderIndicator(
+    providerId: String?,
+    isLoading: Boolean,
+    textColor: Color,
+    audioManager: AudioManager,
+    view: android.view.View,
+    onProviderSelected: (String?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val info = providerId?.let { LyricsProviderRegistry.info(it) }
+    val label = when {
+        isLoading -> "Searching lyrics…"
+        info != null -> "Lyrics · ${info.displayName}"
+        else -> "Lyrics source"
+    }
+
+    Box(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .clickable {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    expanded = true
+                }
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = label,
+                color = textColor.copy(alpha = 0.6f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Icon(
+                imageVector = Icons.Outlined.KeyboardArrowDown,
+                contentDescription = "Change lyrics source",
+                tint = textColor.copy(alpha = 0.55f),
+                modifier = Modifier.size(14.dp)
+            )
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Auto (priority order)", fontSize = 14.sp) },
+                onClick = {
+                    expanded = false
+                    onProviderSelected(null)
+                }
+            )
+            LyricsProviderRegistry.all.forEach { provider ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = provider.displayName,
+                            fontSize = 14.sp,
+                            fontWeight = if (provider.id == providerId) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onProviderSelected(provider.id)
+                    }
+                )
+            }
         }
     }
 }
