@@ -20,8 +20,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,10 +37,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +69,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -75,8 +84,15 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import android.view.SoundEffectConstants
 import android.view.HapticFeedbackConstants
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.animation.core.animateDpAsState
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class LyricLine(val timestampMs: Long, val text: String)
 
@@ -150,6 +166,292 @@ fun parseLyricsToLines(rawLyrics: String): List<LyricLine> {
         }
     }
     return cleanLines
+}
+
+/**
+ * Eases the list so [index] settles around [viewportFraction] of the way down
+ * the viewport. The chase loop re-measures the live item offset on every frame,
+ * so it stays perfectly smooth even while the focused line is growing.
+ */
+private suspend fun LazyListState.animateScrollToLyric(
+    index: Int,
+    viewportFraction: Float = 0.28f
+) {
+    if (index < 0 || index >= layoutInfo.totalItemsCount) return
+
+    val targetOffset = (layoutInfo.viewportSize.height * viewportFraction)
+        .roundToInt()
+        .coerceAtLeast(0)
+    val visibleItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+
+    if (visibleItem == null) {
+        // Far away (initial load or a seek tap): jump without animating, then
+        // nudge the line down so it does not sit flush against the top edge.
+        scrollToItem(index)
+        if (targetOffset > 0) scrollBy(-targetOffset.toFloat())
+        return
+    }
+
+    scroll {
+        var lastValue = 0f
+        animate(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = 560,
+                easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+            )
+        ) { currentValue, _ ->
+            val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+            if (item != null) {
+                val remainingDelta = item.offset - targetOffset
+                val denominator = 1f - lastValue
+                val stepFraction = if (denominator > 0.001f) {
+                    (currentValue - lastValue) / denominator
+                } else {
+                    1f
+                }
+                scrollBy(remainingDelta * stepFraction)
+                lastValue = currentValue
+            }
+        }
+    }
+}
+
+/**
+ * Builds a karaoke-style annotated string: words are revealed as the track
+ * plays. Word timings are interpolated from the line's start/end because the
+ * providers expose line-level LRC timing; the interpolation is weighted by word
+ * length so longer words stay lit a little longer. Only colours change, never
+ * glyph metrics, so the line can never re-wrap mid-transition.
+ */
+private fun buildKaraokeText(
+    text: String,
+    wordRanges: List<IntRange>,
+    progress: Float,
+    textColor: Color,
+    accentColor: Color,
+    lineAlpha: Float
+): AnnotatedString {
+    if (wordRanges.isEmpty()) return AnnotatedString(text)
+
+    val weights = wordRanges.map { (it.last - it.first + 2).toFloat() }
+    val total = weights.sum().coerceAtLeast(1f)
+    val sungChars = progress.coerceIn(0f, 1f) * total
+
+    return buildAnnotatedString {
+        append(text)
+        var consumed = 0f
+        wordRanges.forEachIndexed { i, range ->
+            val weight = weights[i]
+            val wordProgress = ((sungChars - consumed) / weight).coerceIn(0f, 1f)
+            val alpha = lineAlpha * (0.55f + 0.45f * wordProgress)
+            addStyle(
+                SpanStyle(
+                    color = lerp(textColor, accentColor, wordProgress).copy(alpha = alpha)
+                ),
+                range.first,
+                range.last + 1
+            )
+            consumed += weight
+        }
+    }
+}
+
+/**
+ * One line of lyrics.
+ *
+ * Layout is deliberately static: emphasis is applied with
+ * [Modifier.graphicsLayer] (scale + translation) instead of font-size or width
+ * changes, so words never re-wrap while a line grows. Lines below the active
+ * one lift up with a small staggered delay, and the active line's words
+ * highlight karaoke-style.
+ */
+@Composable
+private fun LyricLineRow(
+    text: String,
+    index: Int,
+    activeLyricIndex: Int,
+    isPlaceholder: Boolean,
+    textColor: Color,
+    accentColor: Color,
+    lineStartMs: Long,
+    lineEndMs: Long,
+    currentPositionMs: Long,
+    seekTimestamp: Long?,
+    onSeek: (Long) -> Unit
+) {
+    if (isPlaceholder) {
+        Text(
+            text = text,
+            color = textColor.copy(alpha = 0.55f),
+            fontSize = 22.sp,
+            fontWeight = FontWeight.SemiBold,
+            lineHeight = 32.sp,
+            textAlign = TextAlign.Center,
+            style = LocalTextStyle.current.copy(
+                lineHeightStyle = LineHeightStyle(
+                    alignment = LineHeightStyle.Alignment.Center,
+                    trim = LineHeightStyle.Trim.None
+                )
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        )
+        return
+    }
+
+    val isActive = index == activeLyricIndex
+    val isFocused = isActive
+
+    // Lines below the active one sit slightly lower and animate upwards with a
+    // cascading delay as the focus moves down the song.
+    val distanceBelow = (index - activeLyricIndex).coerceAtLeast(0)
+    val cascadeDelay = distanceBelow.coerceAtMost(4) * 40
+
+    // Every line other than the one currently being sung uses the same dimmed
+    // opacity. There is deliberately no distance-based gradient here — the
+    // active line alone carries full brightness.
+    val targetAlpha = if (isActive) 1f else 0.45f
+
+    val animatedAlpha by animateFloatAsState(
+        targetValue = targetAlpha,
+        animationSpec = tween(
+            durationMillis = 440,
+            delayMillis = cascadeDelay,
+            easing = FastOutSlowInEasing
+        ),
+        label = "LyricAlpha"
+    )
+
+    val focus by animateFloatAsState(
+        targetValue = if (isFocused) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "LyricFocus"
+    )
+
+    val lift by animateDpAsState(
+        targetValue = if (distanceBelow > 0) {
+            (distanceBelow.coerceAtMost(4) * 1.5f).dp
+        } else {
+            0.dp
+        },
+        animationSpec = tween(
+            durationMillis = 480,
+            delayMillis = cascadeDelay,
+            easing = FastOutSlowInEasing
+        ),
+        label = "LyricCascade"
+    )
+
+    val barFraction by animateFloatAsState(
+        targetValue = if (isFocused) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "LyricBar"
+    )
+
+    val wordSyncEnabled = isActive && lineStartMs >= 0 && lineEndMs > lineStartMs
+    val wordProgress = if (wordSyncEnabled) {
+        ((currentPositionMs - lineStartMs).toFloat() / (lineEndMs - lineStartMs))
+            .coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val wordRanges = remember(text) {
+        Regex("\\S+").findAll(text).map { it.range }.toList()
+    }
+    val displayText = remember(
+        text,
+        wordRanges,
+        wordSyncEnabled,
+        wordProgress,
+        animatedAlpha,
+        textColor,
+        accentColor
+    ) {
+        if (wordSyncEnabled) {
+            buildKaraokeText(
+                text,
+                wordRanges,
+                wordProgress,
+                textColor,
+                accentColor,
+                animatedAlpha
+            )
+        } else {
+            AnnotatedString(text)
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { translationY = lift.toPx() }
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Fixed-size slot: the rail grows inside it, so the row height never
+        // changes and nothing below it shifts.
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+                    .graphicsLayer {
+                        scaleY = barFraction
+                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                    }
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(accentColor.copy(alpha = 0.9f * focus))
+            )
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Box(modifier = Modifier.weight(1f).padding(end = 18.dp)) {
+
+            Text(
+                text = displayText,
+                color = textColor.copy(alpha = animatedAlpha),
+                fontSize = 23.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 33.sp,
+                style = LocalTextStyle.current.copy(
+                    lineHeightStyle = LineHeightStyle(
+                        alignment = LineHeightStyle.Alignment.Center,
+                        trim = LineHeightStyle.Trim.None
+                    )
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        val scale = 1f + 0.06f * focus
+                        scaleX = scale
+                        scaleY = scale
+                        transformOrigin = TransformOrigin(0f, 0.5f)
+                        translationY = -1.dp.toPx() * focus
+                    }
+                    .then(
+                        if (seekTimestamp != null) {
+                            Modifier.clickable { onSeek(seekTimestamp) }
+                        } else {
+                            Modifier
+                        }
+                    )
+            )
+        }
+    }
 }
 
 @Composable
@@ -343,11 +645,29 @@ fun RadioScreen(
     fullPlayerProgress: Animatable<Float, *>? = null,
     modifier: Modifier = Modifier
 ) {
+    var isAodMode by remember { mutableStateOf(false) }
+
     BackHandler {
-        onNavigate(AppScreen.HOME)
+        if (isAodMode) {
+            isAodMode = false
+        } else {
+            onNavigate(AppScreen.HOME)
+        }
     }
 
     val context = LocalContext.current
+    val activityWindow = remember(context) {
+        var ctx = context
+        var window: android.view.Window? = null
+        while (ctx is android.content.ContextWrapper) {
+            if (ctx is android.app.Activity) {
+                window = ctx.window
+                break
+            }
+            ctx = ctx.baseContext
+        }
+        window
+    }
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val nowPlayingScrollState = rememberScrollState()
     val keepScreenOnSetting = remember(context) { com.tunespark.music.SessionManager.getKeepScreenOn(context) }
@@ -489,6 +809,29 @@ fun RadioScreen(
         }
     }
 
+    // AOD (always-on display) hides the status and navigation bars so only the
+    // clock, disc and song title remain on a pure-black screen. Bars come back
+    // as soon as AOD is dismissed or the player is left.
+    LaunchedEffect(isAodMode, activityWindow) {
+        val window = activityWindow ?: return@LaunchedEffect
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (isAodMode) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    DisposableEffect(activityWindow) {
+        onDispose {
+            activityWindow?.let { window ->
+                WindowCompat.getInsetsController(window, window.decorView)
+                    .show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
     var activeTab by remember(context) { mutableStateOf(com.tunespark.music.SessionManager.getRadioLayoutState(context)) }
@@ -543,12 +886,15 @@ fun RadioScreen(
         }
     }
 
-    LaunchedEffect(exoPlayer, currentTrackIndex) {
+    LaunchedEffect(exoPlayer, currentTrackIndex, activeTab) {
+        // Poll faster while lyrics are visible so karaoke word highlighting
+        // lands close to the actual vocal. Other tabs keep the cheaper cadence.
+        val interval = if (activeTab == "lyrics") 100L else 250L
         while (true) {
             currentPosition = exoPlayer.currentPosition
             val d = exoPlayer.duration
             duration = if (d == C.TIME_UNSET || d < 0) 0L else d
-            delay(250)
+            delay(interval)
         }
     }
 
@@ -612,6 +958,28 @@ fun RadioScreen(
     val onSecondaryColor = MaterialTheme.colorScheme.onSecondary
 
     val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+
+    // Tapping the song-info area (artwork / title / artist) while Lyrics or Up
+    // Next is open collapses the panel and returns to the full artwork view.
+    val collapseLyricsOrQueue = {
+        if (activeTab != "none") {
+            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            activeTab = "none"
+            com.tunespark.music.SessionManager.saveRadioLayoutState(context, "none")
+        }
+    }
+
+    // Stable seek callback so the lyrics rows do not recompose on every
+    // position tick just because a new lambda was allocated.
+    val onSeekLyric: (Long) -> Unit = remember(exoPlayer, audioManager, view) {
+        { timestamp ->
+            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            exoPlayer.seekTo(timestamp)
+            currentPosition = timestamp
+        }
+    }
 
     val dragModifier = if (fullPlayerProgress != null) {
         Modifier.pointerInput(activeTab, listState, queueListState) {
@@ -755,46 +1123,21 @@ fun RadioScreen(
                 }
             }
 
+            LaunchedEffect(lyricsLines) {
+                // New song / refreshed source: start from the top again.
+                if (lyricsLines.isNotEmpty()) {
+                    userHasScrolledAway = false
+                    listState.scrollToItem(0)
+                }
+            }
+
             LaunchedEffect(activeLyricIndex) {
-                if (!userHasScrolledAway && activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
-                    val targetOffset = -10
-                    val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                    if (initialVisibleItem == null) {
-                        listState.scrollToItem(activeLyricIndex, targetOffset)
-                    } else {
-                        isAutoScrolling = true
-                        try {
-                            listState.scroll {
-                                var lastValue = 0f
-                                animate(
-                                    initialValue = 0f,
-                                    targetValue = 1f,
-                                    animationSpec = tween(
-                                        durationMillis = 600,
-                                        easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                    )
-                                ) { currentValue, _ ->
-                                    val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                                    if (visibleItem != null) {
-                                        val currentOffset = visibleItem.offset
-                                        val remainingDelta = currentOffset - targetOffset
-
-                                        val denominator = 1f - lastValue
-                                        val stepFraction = if (denominator > 0.001f) {
-                                            (currentValue - lastValue) / denominator
-                                        } else {
-                                            1f
-                                        }
-                                        val scrollAmount = remainingDelta * stepFraction
-
-                                        scrollBy(scrollAmount)
-                                        lastValue = currentValue
-                                    }
-                                }
-                            }
-                        } finally {
-                            isAutoScrolling = false
-                        }
+                if (!userHasScrolledAway && activeLyricIndex in lyricsLines.indices) {
+                    isAutoScrolling = true
+                    try {
+                        listState.animateScrollToLyric(activeLyricIndex)
+                    } finally {
+                        isAutoScrolling = false
                     }
                 }
             }
@@ -814,115 +1157,32 @@ fun RadioScreen(
                                         line.text.startsWith("Could not") ||
                                         line.text.startsWith("No track"))
 
-                        val isActive = index == activeLyricIndex
-
-                        val targetAlpha = when {
-                            isPlaceholder -> 0.5f
-                            isActive -> 1f
-                            activeLyricIndex == -1 -> {
-                                when {
-                                    index < 2 -> 1f
-                                    index in 2..4 -> 0.9f
-                                    index in 5..7 -> 0.75f
-                                    index in 8..10 -> 0.6f
-                                    else -> 0.45f
-                                }
-                            }
-                            else -> {
-                                val distance = kotlin.math.abs(index - activeLyricIndex)
-                                when {
-                                    distance == 1 -> 0.85f
-                                    distance == 2 -> 0.7f
-                                    distance == 3 -> 0.55f
-                                    else -> 0.4f
-                                }
-                            }
+                        val lineStart = line.timestampMs
+                        val nextStart = lyricsLines.getOrNull(index + 1)?.timestampMs ?: -1L
+                        val estimatedWordSpan = (line.text.length * 90L).coerceIn(1800L, 8000L)
+                        val lineEnd = when {
+                            lineStart < 0 -> 0L
+                            nextStart > lineStart -> minOf(nextStart, lineStart + estimatedWordSpan)
+                            else -> lineStart + estimatedWordSpan
                         }
 
-                        val animatedAlpha by animateFloatAsState(
-                            targetValue = targetAlpha,
-                            animationSpec = tween(
-                                durationMillis = 350,
-                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                            ),
-                            label = "LyricAlpha"
-                        )
-
-                        val activeFraction by animateFloatAsState(
-                            targetValue = if (isActive || (activeLyricIndex == -1 && index < 2 && !isPlaceholder)) 1f else 0f,
-                            animationSpec = tween(
-                                durationMillis = 350,
-                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                            ),
-                            label = "LyricScale"
-                        )
-
-                        val fontSize = (21f + 5f * activeFraction).sp
-                        val lineHeight = (30f + 6f * activeFraction).sp
-                        val fontWeight = FontWeight.Bold
-
-                        val widthFraction by animateFloatAsState(
-                            targetValue = when {
-                                isPlaceholder -> 1f
-                                isActive -> 1f
-                                activeLyricIndex == -1 && index < 2 -> 1f
-                                else -> 0.78f
+                        LyricLineRow(
+                            text = line.text,
+                            index = index,
+                            activeLyricIndex = activeLyricIndex,
+                            isPlaceholder = isPlaceholder,
+                            textColor = textColor,
+                            accentColor = primaryColor,
+                            lineStartMs = lineStart,
+                            lineEndMs = lineEnd,
+                            currentPositionMs = if (index == activeLyricIndex) currentPosition else 0L,
+                            seekTimestamp = if (!isPlaceholder && line.timestampMs >= 0) {
+                                line.timestampMs
+                            } else {
+                                null
                             },
-                            animationSpec = tween(
-                                durationMillis = 350,
-                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                            ),
-                            label = "LyricWidth"
+                            onSeek = onSeekLyric
                         )
-
-                        val verticalPadding by animateDpAsState(
-                            targetValue = when {
-                                isPlaceholder -> 0.dp
-                                isActive -> 10.dp
-                                activeLyricIndex == -1 && index < 2 -> 10.dp
-                                else -> 0.dp
-                            },
-                            animationSpec = tween(
-                                durationMillis = 350,
-                                easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                            ),
-                            label = "LyricPadding"
-                        )
-
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Text(
-                                text = line.text,
-                                color = textColor.copy(alpha = animatedAlpha),
-                                fontSize = fontSize,
-                                fontWeight = fontWeight,
-                                lineHeight = lineHeight,
-                                style = LocalTextStyle.current.copy(
-                                    lineHeightStyle = LineHeightStyle(
-                                        alignment = LineHeightStyle.Alignment.Center,
-                                        trim = LineHeightStyle.Trim.None
-                                    )
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth(widthFraction)
-                                    .padding(vertical = verticalPadding)
-                                    .then(
-                                        if (!isPlaceholder && line.timestampMs >= 0) {
-                                            Modifier.clickable {
-                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                exoPlayer.seekTo(line.timestampMs)
-                                                currentPosition = line.timestampMs
-                                            }
-                                        } else {
-                                            Modifier
-                                        }
-                                    ),
-                                textAlign = if (isPlaceholder) TextAlign.Center else TextAlign.Start
-                            )
-                        }
                     }
 
                     if (lyricsLines.size > 1) {
@@ -934,8 +1194,17 @@ fun RadioScreen(
 
                 androidx.compose.animation.AnimatedVisibility(
                     visible = userHasScrolledAway && activeLyricIndex >= 0,
-                    enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
-                    exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
+                    enter = fadeIn(tween(220)) +
+                            slideInVertically(
+                                tween(300, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
+                            ) { it / 3 } +
+                            scaleIn(
+                                tween(300, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)),
+                                initialScale = 0.9f
+                            ),
+                    exit = fadeOut(tween(160)) +
+                            slideOutVertically(tween(200)) { it / 3 } +
+                            scaleOut(tween(200), targetScale = 0.9f),
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 24.dp)
@@ -946,16 +1215,10 @@ fun RadioScreen(
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             userHasScrolledAway = false
                             scope.launch {
-                                if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
-                                    val targetOffset = -10
+                                if (activeLyricIndex in lyricsLines.indices) {
                                     isAutoScrolling = true
                                     try {
-                                        val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                                        if (initialVisibleItem == null) {
-                                            listState.scrollToItem(activeLyricIndex, targetOffset)
-                                        } else {
-                                            listState.animateScrollToItem(activeLyricIndex, targetOffset)
-                                        }
+                                        listState.animateScrollToLyric(activeLyricIndex)
                                     } finally {
                                         isAutoScrolling = false
                                     }
@@ -966,15 +1229,28 @@ fun RadioScreen(
                             containerColor = primaryColor,
                             contentColor = onPrimaryColor
                         ),
-                        shape = RoundedCornerShape(20.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
-                    ) {
-                        Text(
-                            text = "Sync",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                        elevation = ButtonDefaults.buttonElevation(
+                            defaultElevation = 8.dp,
+                            pressedElevation = 2.dp
                         )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Sync,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Sync",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
@@ -1372,10 +1648,13 @@ fun RadioScreen(
         }
     }
 
+    // Full-screen stage: the inner box keeps the player's normal 24 dp side
+    // padding, while the AOD layer at the bottom can draw edge to edge.
+    Box(modifier = modifier.fillMaxSize()) {
     Box(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
-            .then(dragModifier)
+            .then(if (isAodMode) Modifier else dragModifier)
             .background(backgroundColor)
             .padding(horizontal = 24.dp, vertical = 0.dp)
     ) {
@@ -1697,18 +1976,28 @@ fun RadioScreen(
                                             }
                                         )
                                     }
-                                    .clickable(
+                                    .combinedClickable(
                                         interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                        scope.launch {
-                                            artworkScale.animateTo(0.88f, tween(80, easing = LinearEasing))
-                                            artworkScale.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow))
+                                        indication = null,
+                                        onClick = {
+                                            if (activeTab != "none") {
+                                                collapseLyricsOrQueue()
+                                            } else {
+                                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                scope.launch {
+                                                    artworkScale.animateTo(0.88f, tween(80, easing = LinearEasing))
+                                                    artworkScale.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow))
+                                                }
+                                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                            }
+                                        },
+                                        onLongClick = {
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            isStopExpanded = false
+                                            isAodMode = true
                                         }
-                                        if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                    },
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Box(
@@ -1763,6 +2052,11 @@ fun RadioScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp)
+                                    .clickable(
+                                        enabled = activeTab != "none",
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { collapseLyricsOrQueue() }
                             ) {
                                 Text(
                                     text = currentSongTitle,
@@ -2267,27 +2561,33 @@ fun RadioScreen(
                                     }
                                 )
                             }
-                            .clickable(
+                            .combinedClickable(
                                 interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                scope.launch {
-                                    artworkScale.animateTo(
-                                        targetValue = 0.88f,
-                                        animationSpec = tween(durationMillis = 80, easing = LinearEasing)
-                                    )
-                                    artworkScale.animateTo(
-                                        targetValue = 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMediumLow
+                                indication = null,
+                                onClick = {
+                                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    scope.launch {
+                                        artworkScale.animateTo(
+                                            targetValue = 0.88f,
+                                            animationSpec = tween(durationMillis = 80, easing = LinearEasing)
                                         )
-                                    )
+                                        artworkScale.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                    }
+                                    if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                },
+                                onLongClick = {
+                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                    isStopExpanded = false
+                                    isAodMode = true
                                 }
-                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                            },
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         // Sliding and Rotating Vinyl Disc body
@@ -2510,7 +2810,11 @@ fun RadioScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 0.dp),
+                            .padding(vertical = 0.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { collapseLyricsOrQueue() },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
@@ -2718,51 +3022,21 @@ fun RadioScreen(
                             }
                         }
 
+                        LaunchedEffect(lyricsLines) {
+                            // New song / refreshed source: start from the top again.
+                            if (lyricsLines.isNotEmpty()) {
+                                userHasScrolledAway = false
+                                listState.scrollToItem(0)
+                            }
+                        }
+
                         LaunchedEffect(activeLyricIndex) {
-                            if (!userHasScrolledAway && activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
-                                val targetOffset = -10
-                                val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                                if (initialVisibleItem == null) {
-                                    // If the item is not visible at all (e.g. initial load or far seek click),
-                                    // snap to it instantly so there's no jarring jump, then it's in view for tracking
-                                    listState.scrollToItem(activeLyricIndex, targetOffset)
-                                } else {
-                                    // If the item is already visible, perform a buttery-smooth chase scroll.
-                                    // It runs inside a scroll session and continuously calculates the item's live offset
-                                    // during expansion/shrinks, guaranteeing 0% overshoot or bounciness glitches.
-                                    isAutoScrolling = true
-                                    try {
-                                        listState.scroll {
-                                            var lastValue = 0f
-                                            animate(
-                                                initialValue = 0f,
-                                                targetValue = 1f,
-                                                animationSpec = tween(
-                                                    durationMillis = 600,
-                                                    easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                                )
-                                            ) { currentValue, _ ->
-                                                val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                                                if (visibleItem != null) {
-                                                    val currentOffset = visibleItem.offset
-                                                    val remainingDelta = currentOffset - targetOffset
-
-                                                    val denominator = 1f - lastValue
-                                                    val stepFraction = if (denominator > 0.001f) {
-                                                        (currentValue - lastValue) / denominator
-                                                    } else {
-                                                        1f
-                                                    }
-                                                    val scrollAmount = remainingDelta * stepFraction
-
-                                                    scrollBy(scrollAmount)
-                                                    lastValue = currentValue
-                                                }
-                                            }
-                                        }
-                                    } finally {
-                                        isAutoScrolling = false
-                                    }
+                            if (!userHasScrolledAway && activeLyricIndex in lyricsLines.indices) {
+                                isAutoScrolling = true
+                                try {
+                                    listState.animateScrollToLyric(activeLyricIndex)
+                                } finally {
+                                    isAutoScrolling = false
                                 }
                             }
                         }
@@ -2784,115 +3058,32 @@ fun RadioScreen(
                                                     line.text.startsWith("Could not") ||
                                                     line.text.startsWith("No track"))
 
-                                    val isActive = index == activeLyricIndex
-
-                                    val targetAlpha = when {
-                                        isPlaceholder -> 0.5f
-                                        isActive -> 1f
-                                        activeLyricIndex == -1 -> {
-                                            when {
-                                                index < 2 -> 1f
-                                                index in 2..4 -> 0.9f
-                                                index in 5..7 -> 0.75f
-                                                index in 8..10 -> 0.6f
-                                                else -> 0.45f
-                                            }
-                                        }
-                                        else -> {
-                                            val distance = kotlin.math.abs(index - activeLyricIndex)
-                                            when {
-                                                distance == 1 -> 0.85f
-                                                distance == 2 -> 0.7f
-                                                distance == 3 -> 0.55f
-                                                else -> 0.4f
-                                            }
-                                        }
+                                    val lineStart = line.timestampMs
+                                    val nextStart = lyricsLines.getOrNull(index + 1)?.timestampMs ?: -1L
+                                    val estimatedWordSpan = (line.text.length * 90L).coerceIn(1800L, 8000L)
+                                    val lineEnd = when {
+                                        lineStart < 0 -> 0L
+                                        nextStart > lineStart -> minOf(nextStart, lineStart + estimatedWordSpan)
+                                        else -> lineStart + estimatedWordSpan
                                     }
 
-                                    val animatedAlpha by animateFloatAsState(
-                                        targetValue = targetAlpha,
-                                        animationSpec = tween(
-                                            durationMillis = 350,
-                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                        ),
-                                        label = "LyricAlpha"
-                                    )
-
-                                    val activeFraction by animateFloatAsState(
-                                        targetValue = if (isActive || (activeLyricIndex == -1 && index < 2 && !isPlaceholder)) 1f else 0f,
-                                        animationSpec = tween(
-                                            durationMillis = 350,
-                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                        ),
-                                        label = "LyricScale"
-                                    )
-
-                                    val fontSize = (21f + 5f * activeFraction).sp
-                                    val lineHeight = (30f + 6f * activeFraction).sp
-                                    val fontWeight = FontWeight.Bold
-
-                                    val widthFraction by animateFloatAsState(
-                                        targetValue = when {
-                                            isPlaceholder -> 1f
-                                            isActive -> 1f
-                                            activeLyricIndex == -1 && index < 2 -> 1f
-                                            else -> 0.78f
+                                    LyricLineRow(
+                                        text = line.text,
+                                        index = index,
+                                        activeLyricIndex = activeLyricIndex,
+                                        isPlaceholder = isPlaceholder,
+                                        textColor = textColor,
+                                        accentColor = primaryColor,
+                                        lineStartMs = lineStart,
+                                        lineEndMs = lineEnd,
+                                        currentPositionMs = if (index == activeLyricIndex) currentPosition else 0L,
+                                        seekTimestamp = if (!isPlaceholder && line.timestampMs >= 0) {
+                                            line.timestampMs
+                                        } else {
+                                            null
                                         },
-                                        animationSpec = tween(
-                                            durationMillis = 350,
-                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                        ),
-                                        label = "LyricWidth"
+                                        onSeek = onSeekLyric
                                     )
-
-                                    val verticalPadding by animateDpAsState(
-                                        targetValue = when {
-                                            isPlaceholder -> 0.dp
-                                            isActive -> 10.dp
-                                            activeLyricIndex == -1 && index < 2 -> 10.dp
-                                            else -> 0.dp
-                                        },
-                                        animationSpec = tween(
-                                            durationMillis = 350,
-                                            easing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f)
-                                        ),
-                                        label = "LyricPadding"
-                                    )
-
-                                    Box(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        contentAlignment = Alignment.CenterStart
-                                    ) {
-                                        Text(
-                                            text = line.text,
-                                            color = textColor.copy(alpha = animatedAlpha),
-                                            fontSize = fontSize,
-                                            fontWeight = fontWeight,
-                                            lineHeight = lineHeight,
-                                            style = LocalTextStyle.current.copy(
-                                                lineHeightStyle = LineHeightStyle(
-                                                    alignment = LineHeightStyle.Alignment.Center,
-                                                    trim = LineHeightStyle.Trim.None
-                                                )
-                                            ),
-                                            modifier = Modifier
-                                                .fillMaxWidth(widthFraction)
-                                                .padding(vertical = verticalPadding)
-                                                .then(
-                                                    if (!isPlaceholder && line.timestampMs >= 0) {
-                                                        Modifier.clickable {
-                                                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
-                                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                                            exoPlayer.seekTo(line.timestampMs)
-                                                            currentPosition = line.timestampMs
-                                                        }
-                                                    } else {
-                                                        Modifier
-                                                    }
-                                                ),
-                                            textAlign = if (isPlaceholder) TextAlign.Center else TextAlign.Start
-                                        )
-                                    }
                                 }
 
                                 if (lyricsLines.size > 1) {
@@ -2904,8 +3095,17 @@ fun RadioScreen(
 
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = userHasScrolledAway && activeLyricIndex >= 0,
-                                enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
-                                exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(),
+                                enter = fadeIn(tween(220)) +
+                                        slideInVertically(
+                                            tween(300, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
+                                        ) { it / 3 } +
+                                        scaleIn(
+                                            tween(300, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)),
+                                            initialScale = 0.9f
+                                        ),
+                                exit = fadeOut(tween(160)) +
+                                        slideOutVertically(tween(200)) { it / 3 } +
+                                        scaleOut(tween(200), targetScale = 0.9f),
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
                                     .padding(bottom = 24.dp)
@@ -2916,16 +3116,10 @@ fun RadioScreen(
                                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                         userHasScrolledAway = false
                                         scope.launch {
-                                            if (activeLyricIndex >= 0 && activeLyricIndex < lyricsLines.size) {
-                                                val targetOffset = -10
+                                            if (activeLyricIndex in lyricsLines.indices) {
                                                 isAutoScrolling = true
                                                 try {
-                                                    val initialVisibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeLyricIndex }
-                                                    if (initialVisibleItem == null) {
-                                                        listState.scrollToItem(activeLyricIndex, targetOffset)
-                                                    } else {
-                                                        listState.animateScrollToItem(activeLyricIndex, targetOffset)
-                                                    }
+                                                    listState.animateScrollToLyric(activeLyricIndex)
                                                 } finally {
                                                     isAutoScrolling = false
                                                 }
@@ -2936,15 +3130,28 @@ fun RadioScreen(
                                         containerColor = primaryColor,
                                         contentColor = onPrimaryColor
                                     ),
-                                    shape = RoundedCornerShape(20.dp),
-                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
-                                ) {
-                                    Text(
-                                        text = "Sync",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold
+                                    shape = RoundedCornerShape(50),
+                                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                                    elevation = ButtonDefaults.buttonElevation(
+                                        defaultElevation = 8.dp,
+                                        pressedElevation = 2.dp
                                     )
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Sync,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "Sync",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -3123,6 +3330,301 @@ fun RadioScreen(
                     }
                 }
             } // closes the else block of activeTab == "none"
+        }
+    }
+
+        // AOD layer: pure-black full-screen canvas with only the clock, disc and
+        // song title. It fades in above the player so the transition is seamless.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = isAodMode,
+            enter = fadeIn(tween(320)),
+            exit = fadeOut(tween(240)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            AodOverlay(
+                songTitle = currentSongTitle,
+                songArtwork = currentSongArtwork,
+                isPlaying = isPlaying,
+                hasNextTrack = hasNextTrack,
+                hasPreviousTrack = hasPreviousTrack,
+                rotation = rotation,
+                swipeOffsetX = swipeOffsetX,
+                artworkScale = artworkScale,
+                onSwipingChanged = { isSwiping = it },
+                exoPlayer = exoPlayer,
+                onExit = { isAodMode = false }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AodOverlay(
+    songTitle: String,
+    songArtwork: String?,
+    isPlaying: Boolean,
+    hasNextTrack: Boolean,
+    hasPreviousTrack: Boolean,
+    rotation: Animatable<Float, AnimationVector1D>,
+    swipeOffsetX: Animatable<Float, AnimationVector1D>,
+    artworkScale: Animatable<Float, AnimationVector1D>,
+    onSwipingChanged: (Boolean) -> Unit,
+    exoPlayer: Player,
+    onExit: () -> Unit
+) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val audioManager = remember(context) {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val swipeThresholdPx = remember(density) { with(density) { 80.dp.toPx() } }
+    val swipeLimitPx = remember(density) { with(density) { 360.dp.toPx() } }
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            // The clock only shows hours and minutes, so wake at the next
+            // minute boundary instead of every second (AOD should be frugal).
+            delay(60_000L - (now % 60_000L))
+        }
+    }
+    val is24Hour = remember(context) { android.text.format.DateFormat.is24HourFormat(context) }
+    val timeFormatter = remember(is24Hour) {
+        SimpleDateFormat(if (is24Hour) "HH:mm" else "h:mm", Locale.getDefault())
+    }
+    val amPmFormatter = remember { SimpleDateFormat("a", Locale.getDefault()) }
+    val timeText = remember(now, timeFormatter) { timeFormatter.format(Date(now)) }
+    val amPmText = remember(now, is24Hour) {
+        if (is24Hour) "" else amPmFormatter.format(Date(now))
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onExit()
+            }
+    ) {
+        val discSize = if (isLandscape) {
+            minOf(maxWidth * 0.34f, maxHeight * 0.52f, 280.dp)
+        } else {
+            minOf(maxWidth * 0.72f, maxHeight * 0.42f, 300.dp)
+        }
+        val gap = if (isLandscape) 26.dp else minOf(64.dp, maxHeight * 0.10f)
+        val timeFontSize = if (isLandscape) 44.sp else 68.sp
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Clock — the largest element, sitting above the disc.
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = timeText,
+                    color = Color.White,
+                    fontSize = timeFontSize,
+                    fontWeight = FontWeight.Light,
+                    letterSpacing = (-1).sp
+                )
+                if (amPmText.isNotEmpty()) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = amPmText,
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = if (isLandscape) 15.sp else 20.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(bottom = if (isLandscape) 8.dp else 12.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(gap))
+
+            // The disc keeps every gesture from the main player: tap to
+            // play/pause, swipe for previous/next, long-press to leave AOD.
+            Box(
+                modifier = Modifier
+                    .size(discSize)
+                    .pointerInput(hasNextTrack, hasPreviousTrack, swipeThresholdPx, swipeLimitPx) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { onSwipingChanged(true) },
+                            onDragEnd = {
+                                scope.launch {
+                                    if (swipeOffsetX.value < -swipeThresholdPx && hasNextTrack) {
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        swipeOffsetX.animateTo(
+                                            -swipeLimitPx,
+                                            tween(200, easing = LinearOutSlowInEasing)
+                                        )
+                                        exoPlayer.seekToNext()
+                                        swipeOffsetX.snapTo(swipeLimitPx)
+                                        swipeOffsetX.animateTo(
+                                            0f,
+                                            spring(
+                                                Spring.DampingRatioNoBouncy,
+                                                Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                    } else if (swipeOffsetX.value > swipeThresholdPx && hasPreviousTrack) {
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        swipeOffsetX.animateTo(
+                                            swipeLimitPx,
+                                            tween(200, easing = LinearOutSlowInEasing)
+                                        )
+                                        exoPlayer.seekToPrevious()
+                                        swipeOffsetX.snapTo(-swipeLimitPx)
+                                        swipeOffsetX.animateTo(
+                                            0f,
+                                            spring(
+                                                Spring.DampingRatioNoBouncy,
+                                                Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                    } else {
+                                        swipeOffsetX.animateTo(
+                                            0f,
+                                            spring(
+                                                Spring.DampingRatioMediumBouncy,
+                                                Spring.StiffnessMedium
+                                            )
+                                        )
+                                    }
+                                    onSwipingChanged(false)
+                                }
+                            },
+                            onDragCancel = {
+                                scope.launch {
+                                    swipeOffsetX.animateTo(
+                                        0f,
+                                        spring(
+                                            Spring.DampingRatioMediumBouncy,
+                                            Spring.StiffnessMedium
+                                        )
+                                    )
+                                    onSwipingChanged(false)
+                                }
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                scope.launch { swipeOffsetX.snapTo(swipeOffsetX.value + dragAmount) }
+                            }
+                        )
+                    }
+                    .combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {
+                            audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            scope.launch {
+                                artworkScale.animateTo(0.88f, tween(80, easing = LinearEasing))
+                                artworkScale.animateTo(
+                                    1f,
+                                    spring(
+                                        Spring.DampingRatioMediumBouncy,
+                                        Spring.StiffnessMediumLow
+                                    )
+                                )
+                            }
+                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                        },
+                        onLongClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            onExit()
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationX = swipeOffsetX.value
+                            rotationZ = rotation.value
+                        }
+                        .clip(CircleShape)
+                        .background(Color(0xFF181818)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize(0.875f)
+                            .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize(0.708f)
+                            .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                    )
+
+                    val overlayAlpha by animateFloatAsState(
+                        targetValue = if (artworkScale.value < 0.95f) 0.3f else 0f,
+                        animationSpec = tween(durationMillis = 100),
+                        label = "AodArtworkTapOverlay"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize(0.458f)
+                            .graphicsLayer {
+                                scaleX = artworkScale.value
+                                scaleY = artworkScale.value
+                            }
+                            .clip(CircleShape)
+                            .background(Color(0xFF232327))
+                    ) {
+                        if (!songArtwork.isNullOrEmpty()) {
+                            AsyncImage(
+                                model = songArtwork,
+                                contentDescription = "Vinyl Artwork",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("🎵", fontSize = 32.sp)
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = overlayAlpha))
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(gap))
+
+            // Only the song title stays on screen with the clock and disc.
+            Text(
+                text = songTitle,
+                color = Color.White,
+                fontSize = if (isLandscape) 20.sp else 26.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
