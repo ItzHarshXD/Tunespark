@@ -57,6 +57,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.tunespark.music.AppScreen
+import com.tunespark.music.cast.CastManager
 import com.tunespark.music.lyrics.LyricsProviderRegistry
 import com.tunespark.music.provider.AudioProviderIds
 import com.tunespark.music.provider.SongLinks
@@ -71,6 +72,8 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.CastConnected
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Share
@@ -478,6 +481,8 @@ fun RadioTabBar(
     currentSongTitle: String,
     currentSongArtist: String,
     isSignedIn: Boolean,
+    isCasting: Boolean,
+    onCastClick: () -> Unit,
     primaryColor: Color,
     onPrimaryColor: Color,
     secondaryColor: Color,
@@ -489,22 +494,53 @@ fun RadioTabBar(
     scope: kotlinx.coroutines.CoroutineScope,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .height(40.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            // Tall enough for the largest (44 dp) action tier so nothing clips.
+            .height(44.dp)
     ) {
-        // Left: Tab Pills (Lyrics & Up Next)
+        // Fit all five actions on any phone width: gaps, pill padding and
+        // button sizes tighten on narrower layouts instead of clipping.
+        val compact = maxWidth < 330.dp
+        val ultraCompact = maxWidth < 280.dp
+        val actionGap = when {
+            ultraCompact -> 4.dp
+            compact -> 6.dp
+            else -> 8.dp
+        }
+        val actionSize = when {
+            ultraCompact -> 36.dp
+            compact -> 40.dp
+            else -> 44.dp
+        }
+        val actionIconSize = when {
+            ultraCompact -> 18.dp
+            compact -> 20.dp
+            else -> 22.dp
+        }
+        val pillPadding = when {
+            ultraCompact -> 10.dp
+            compact -> 12.dp
+            else -> 16.dp
+        }
+        val pillFontSize = when {
+            ultraCompact -> 11.sp
+            compact -> 12.sp
+            else -> 13.sp
+        }
+
         Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(actionGap),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Single evenly spaced, left-aligned action row:
+            // Lyrics, Up Next, Like, Cast and Share.
             // Lyrics Pill
             Box(
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(actionSize)
                     .clip(RoundedCornerShape(20.dp))
                     .background(if (activeTab == "lyrics") primaryColor else secondaryColor)
                     .clickable {
@@ -513,21 +549,22 @@ fun RadioTabBar(
                         val newTab = if (activeTab == "lyrics") "none" else "lyrics"
                         onTabSelected(newTab)
                     }
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = pillPadding),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "Lyrics",
                     color = if (activeTab == "lyrics") onPrimaryColor else onSecondaryColor,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = pillFontSize,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
                 )
             }
 
             // Up Next Pill
             Box(
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(actionSize)
                     .clip(RoundedCornerShape(20.dp))
                     .background(if (activeTab == "queue") primaryColor else secondaryColor)
                     .clickable {
@@ -536,29 +573,24 @@ fun RadioTabBar(
                         val newTab = if (activeTab == "queue") "none" else "queue"
                         onTabSelected(newTab)
                     }
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = pillPadding),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "Up Next",
                     color = if (activeTab == "queue") onPrimaryColor else onSecondaryColor,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = pillFontSize,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
                 )
             }
-        }
 
-        // Right: Like & Share Icon Buttons
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
             val isLiked = currentVideoId != null && LikedSongManager.isLiked(currentVideoId)
 
             // Like Button
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(actionSize)
                     .clip(CircleShape)
                     .background(secondaryColor)
                     .clickable {
@@ -580,14 +612,35 @@ fun RadioTabBar(
                     imageVector = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                     contentDescription = if (isLiked) "Unlike" else "Like",
                     tint = if (isLiked) Color(0xFFFF0000) else if (!isSignedIn || currentVideoId == null) textColor.copy(alpha = 0.35f) else onSecondaryColor,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(actionIconSize)
+                )
+            }
+
+            // Cast Button
+            Box(
+                modifier = Modifier
+                    .size(actionSize)
+                    .clip(CircleShape)
+                    .background(secondaryColor)
+                    .clickable {
+                        audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        onCastClick()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isCasting) Icons.Rounded.CastConnected else Icons.Rounded.Cast,
+                    contentDescription = if (isCasting) "Casting" else "Cast",
+                    tint = if (isCasting) Color(0xFFFF0000) else onSecondaryColor,
+                    modifier = Modifier.size(actionIconSize)
                 )
             }
 
             // Share Button
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(actionSize)
                     .clip(CircleShape)
                     .background(secondaryColor)
                     .clickable(
@@ -613,7 +666,7 @@ fun RadioTabBar(
                     imageVector = Icons.Rounded.Share,
                     contentDescription = "Share",
                     tint = if (currentVideoId == null) textColor.copy(alpha = 0.35f) else onSecondaryColor,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(actionIconSize)
                 )
             }
         }
@@ -646,6 +699,7 @@ fun RadioScreen(
     modifier: Modifier = Modifier
 ) {
     var isAodMode by remember { mutableStateOf(false) }
+    var showCastDialog by remember { mutableStateOf(false) }
 
     BackHandler {
         if (isAodMode) {
@@ -2407,6 +2461,8 @@ fun RadioScreen(
                                     currentSongTitle = currentSongTitle,
                                     currentSongArtist = currentSongArtist,
                                     isSignedIn = isSignedIn,
+                                    isCasting = CastManager.isCasting,
+                                    onCastClick = { showCastDialog = true },
                                     primaryColor = primaryColor,
                                     onPrimaryColor = onPrimaryColor,
                                     secondaryColor = secondaryColor,
@@ -2435,6 +2491,8 @@ fun RadioScreen(
                                         currentSongTitle = currentSongTitle,
                                         currentSongArtist = currentSongArtist,
                                         isSignedIn = isSignedIn,
+                                        isCasting = CastManager.isCasting,
+                                        onCastClick = { showCastDialog = true },
                                         primaryColor = primaryColor,
                                         onPrimaryColor = onPrimaryColor,
                                         secondaryColor = secondaryColor,
@@ -2775,6 +2833,8 @@ fun RadioScreen(
                     currentSongTitle = currentSongTitle,
                     currentSongArtist = currentSongArtist,
                     isSignedIn = isSignedIn,
+                    isCasting = CastManager.isCasting,
+                    onCastClick = { showCastDialog = true },
                     primaryColor = primaryColor,
                     onPrimaryColor = onPrimaryColor,
                     secondaryColor = secondaryColor,
@@ -2959,6 +3019,8 @@ fun RadioScreen(
                     currentSongTitle = currentSongTitle,
                     currentSongArtist = currentSongArtist,
                     isSignedIn = isSignedIn,
+                    isCasting = CastManager.isCasting,
+                    onCastClick = { showCastDialog = true },
                     primaryColor = primaryColor,
                     onPrimaryColor = onPrimaryColor,
                     secondaryColor = secondaryColor,
@@ -3355,6 +3417,12 @@ fun RadioScreen(
                 onExit = { isAodMode = false }
             )
         }
+
+        // Cast device picker (opened from the Radio tab bar's cast button).
+        CastDeviceDialog(
+            show = showCastDialog,
+            onDismiss = { showCastDialog = false }
+        )
     }
 }
 

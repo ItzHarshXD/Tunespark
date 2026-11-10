@@ -52,9 +52,33 @@ class PlaybackService : MediaSessionService() {
     private var playlistSongsPlayedSinceCommentary = 0
     private var lastCommentaryCheckedVideoId: String? = null
 
+    private val audioAttributes = AudioAttributes.Builder()
+        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        .setUsage(C.USAGE_MEDIA)
+        .build()
+
+    /** True while the phone player is deliberately muted for a Cast session. */
+    private var isCastMuted = false
+
     fun resetPlaylistCounter() {
         playlistSongsPlayedSinceCommentary = 0
         lastCommentaryCheckedVideoId = null
+    }
+
+    /**
+     * Keeps the local player advancing silently while a Cast session is active.
+     *
+     * Audio-focus handling is disabled for the duration so a Cast route
+     * hand-off cannot pause the muted local queue (which would stop automatic
+     * track transitions), and re-enabled with normal volume on disconnect.
+     */
+    @OptIn(UnstableApi::class)
+    fun setCastingMute(active: Boolean) {
+        val exoPlayer = mediaSession?.player as? ExoPlayer ?: return
+        if (isCastMuted == active) return
+        isCastMuted = active
+        exoPlayer.setAudioAttributes(audioAttributes, !active)
+        exoPlayer.volume = if (active) 0f else 1f
     }
 
     fun clearSeededVideoIds() {
@@ -87,11 +111,6 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-
-        val audioAttributes = AudioAttributes.Builder()
-            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-            .setUsage(C.USAGE_MEDIA)
-            .build()
 
         val exoPlayer = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(audioAttributes, true)

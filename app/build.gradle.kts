@@ -48,6 +48,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.mediarouter)
+    implementation(libs.play.services.cast)
     implementation(libs.okhttp)
     implementation(libs.coil.compose)
     implementation(project(":innertube"))

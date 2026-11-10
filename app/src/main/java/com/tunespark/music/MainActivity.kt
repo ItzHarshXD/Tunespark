@@ -34,6 +34,7 @@ import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.tunespark.music.ui.theme.TunesparkTheme
 import com.tunespark.music.ui.screens.*
+import com.tunespark.music.cast.CastManager
 import com.tunespark.music.provider.AudioProviderIds
 import com.tunespark.music.provider.SongLinks
 import com.tunespark.music.provider.StreamMetadata
@@ -815,6 +816,119 @@ fun MainPlayerScreen(
 
         onDispose {
             exoPlayer.removeListener(listener)
+        }
+    }
+
+    // ---- Cast mirroring ---------------------------------------------------
+    // The local player stays the source of truth (see CastManager): it keeps
+    // advancing the queue muted while connected, and these hooks push every
+    // transport change to the Cast receiver.
+    val castCurrentItem: (Boolean) -> Unit = { playWhenReady ->
+        val item = exoPlayer.currentMediaItem
+        val mediaId = item?.mediaId?.substringBefore('#')
+        val title = item?.mediaMetadata?.title?.toString().orEmpty()
+        val isCommentary = mediaId.isNullOrBlank() ||
+            mediaId.startsWith("commentary_") ||
+            title.startsWith("AI") ||
+            title == "Music Context"
+        if (!isCommentary) {
+            CastManager.castTrack(
+                videoId = mediaId!!,
+                title = title,
+                artist = item?.mediaMetadata?.artist?.toString().orEmpty(),
+                artwork = item?.mediaMetadata?.artworkUri?.toString(),
+                positionMs = exoPlayer.currentPosition.coerceAtLeast(0L),
+                playWhenReady = playWhenReady,
+            )
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        CastManager.initialize(context)
+        // Let the cast controller snapshot the play intent before a session
+        // starts (route hand-off can transiently pause local playback).
+        CastManager.playWhenReadyProvider = { exoPlayer.playWhenReady }
+        val castSyncListener = object : Player.Listener {
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!CastManager.isCasting) return
+                // The phone is muted while casting; don't let a brief audio
+                // focus hand-off pause the TV/stereo.
+                if (!playWhenReady &&
+                    (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ||
+                        reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY)
+                ) {
+                    return
+                }
+                CastManager.setRemotePlayback(playWhenReady)
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                if (CastManager.isCasting && reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    CastManager.seekTo(newPosition.positionMs)
+                }
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (CastManager.isCasting) {
+                    castCurrentItem(exoPlayer.playWhenReady)
+                }
+            }
+        }
+        exoPlayer.addListener(castSyncListener)
+
+        // Receiver → app: a TV remote / Google Home transport change updates
+        // the phone player so the in-app UI (and notification) follow along.
+        CastManager.onRemoteSeek = { positionMs ->
+            if (CastManager.isCasting) {
+                exoPlayer.seekTo(positionMs.coerceAtLeast(0L))
+            }
+        }
+
+        onDispose {
+            exoPlayer.removeListener(castSyncListener)
+            CastManager.onRemoteSeek = null
+            CastManager.playWhenReadyProvider = null
+        }
+    }
+
+    val isCastingNow = CastManager.isCasting
+    LaunchedEffect(isCastingNow) {
+        if (isCastingNow) {
+            // Keep the phone silent while the receiver plays, and stop ExoPlayer
+            // from reacting to audio-focus hand-offs during the session.
+            PlaybackService.instance?.setCastingMute(true)
+            exoPlayer.volume = 0f
+            // Re-assert the play intent captured before the session started so
+            // casting never leaves the song paused.
+            if (CastManager.connectPlayIntent == true && !exoPlayer.playWhenReady) {
+                exoPlayer.playWhenReady = true
+            }
+            if (exoPlayer.currentMediaItem != null) {
+                castCurrentItem(exoPlayer.playWhenReady)
+            }
+        } else {
+            PlaybackService.instance?.setCastingMute(false)
+            exoPlayer.volume = 1f
+        }
+    }
+
+    // Receiver → app: play/pause pressed on the TV remote, Google Home or the
+    // Cast notification must be reflected in the phone player (and therefore
+    // in the Radio screen, notification and Android Auto). Wait until the
+    // receiver has actually reported playback so the empty initial session
+    // status can never pause the song.
+    LaunchedEffect(CastManager.castIsPlaying, CastManager.remotePlaybackStateKnown) {
+        if (
+            CastManager.isCasting &&
+            CastManager.remoteTrackLoaded &&
+            CastManager.remotePlaybackStateKnown &&
+            exoPlayer.playWhenReady != CastManager.castIsPlaying
+        ) {
+            exoPlayer.playWhenReady = CastManager.castIsPlaying
         }
     }
 
@@ -2416,6 +2530,9 @@ fun MainPlayerScreen(
                             }
                         },
                         onStopRadio = {
+                            if (CastManager.isCasting) {
+                                CastManager.disconnect()
+                            }
                             exoPlayer.stop()
                             exoPlayer.clearMediaItems()
                             currentSongTitle = "No Track Loaded"
