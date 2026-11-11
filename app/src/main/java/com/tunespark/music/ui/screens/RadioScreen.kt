@@ -351,15 +351,6 @@ private fun LyricLineRow(
         label = "LyricCascade"
     )
 
-    val barFraction by animateFloatAsState(
-        targetValue = if (isFocused) 1f else 0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "LyricBar"
-    )
-
     val wordSyncEnabled = isActive && lineStartMs >= 0 && lineEndMs > lineStartMs
     val wordProgress = if (wordSyncEnabled) {
         ((currentPositionMs - lineStartMs).toFloat() / (lineEndMs - lineStartMs))
@@ -393,67 +384,46 @@ private fun LyricLineRow(
         }
     }
 
-    Row(
+    // No leading rail/indent: every line starts at the left edge of the lyrics
+    // column so the full width is available for the text. The active line is
+    // still distinguished by brightness, weight and its subtle scale-up.
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer { translationY = lift.toPx() }
-            .padding(vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
+            // Keeps a little headroom on the right for the active line's 6%
+            // scale-up so long lines never run into the screen edge.
+            .padding(top = 2.dp, end = 18.dp, bottom = 2.dp)
     ) {
-        // Fixed-size slot: the rail grows inside it, so the row height never
-        // changes and nothing below it shifts.
-        Box(
+        Text(
+            text = displayText,
+            color = textColor.copy(alpha = animatedAlpha),
+            fontSize = 23.sp,
+            fontWeight = FontWeight.Bold,
+            lineHeight = 33.sp,
+            style = LocalTextStyle.current.copy(
+                lineHeightStyle = LineHeightStyle(
+                    alignment = LineHeightStyle.Alignment.Center,
+                    trim = LineHeightStyle.Trim.None
+                )
+            ),
             modifier = Modifier
-                .width(3.dp)
-                .height(20.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight()
-                    .graphicsLayer {
-                        scaleY = barFraction
-                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val scale = 1f + 0.06f * focus
+                    scaleX = scale
+                    scaleY = scale
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                    translationY = -1.dp.toPx() * focus
+                }
+                .then(
+                    if (seekTimestamp != null) {
+                        Modifier.clickable { onSeek(seekTimestamp) }
+                    } else {
+                        Modifier
                     }
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(accentColor.copy(alpha = 0.9f * focus))
-            )
-        }
-        Spacer(modifier = Modifier.width(14.dp))
-
-        Box(modifier = Modifier.weight(1f).padding(end = 18.dp)) {
-
-            Text(
-                text = displayText,
-                color = textColor.copy(alpha = animatedAlpha),
-                fontSize = 23.sp,
-                fontWeight = FontWeight.Bold,
-                lineHeight = 33.sp,
-                style = LocalTextStyle.current.copy(
-                    lineHeightStyle = LineHeightStyle(
-                        alignment = LineHeightStyle.Alignment.Center,
-                        trim = LineHeightStyle.Trim.None
-                    )
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        val scale = 1f + 0.06f * focus
-                        scaleX = scale
-                        scaleY = scale
-                        transformOrigin = TransformOrigin(0f, 0.5f)
-                        translationY = -1.dp.toPx() * focus
-                    }
-                    .then(
-                        if (seekTimestamp != null) {
-                            Modifier.clickable { onSeek(seekTimestamp) }
-                        } else {
-                            Modifier
-                        }
-                    )
-            )
-        }
+                )
+        )
     }
 }
 
@@ -841,7 +811,13 @@ fun RadioScreen(
         }
     }
 
-    DisposableEffect(keepScreenOnSetting) {
+    // AOD is meant to behave like a bedside/always-on display, so it must not
+    // inherit the system screen timeout. Keep the window awake whenever AOD is
+    // showing, regardless of the user's "Keep screen on" preference (that
+    // setting still governs normal playback).
+    val shouldKeepScreenOn = keepScreenOnSetting || isAodMode
+
+    DisposableEffect(shouldKeepScreenOn) {
         var window: android.view.Window? = null
         var ctx = context
         while (ctx is android.content.ContextWrapper) {
@@ -852,12 +828,12 @@ fun RadioScreen(
             ctx = ctx.baseContext
         }
 
-        if (window != null && keepScreenOnSetting) {
+        if (window != null && shouldKeepScreenOn) {
             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
 
         onDispose {
-            if (window != null && keepScreenOnSetting) {
+            if (window != null && shouldKeepScreenOn) {
                 window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
         }
@@ -1118,6 +1094,97 @@ fun RadioScreen(
                                         )
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Modifier
+    }
+
+    // Drag reference for the compact header. The header row is only ~64 dp tall,
+    // so using the pointer node's own size here made a tiny flick collapse the
+    // whole player (the gesture read as wildly oversensitive). The window height
+    // is the same reference the full-screen drag uses, and a mild resistance
+    // keeps the header slightly calmer than dragging the body.
+    val headerDragHeightPx = with(LocalDensity.current) {
+        LocalConfiguration.current.screenHeightDp.dp.toPx()
+    }.coerceAtLeast(1f)
+
+    // Downward swipe on the song-info header (artwork / title / artist) while
+    // Lyrics or Up Next is open. Those rows are clickable to collapse the tab,
+    // and `clickable` consumes the down event, so the root `dragModifier` above
+    // never sees the gesture. This detector is attached *inside* the clickable
+    // modifier: the down is claimed from the root drag (which requires an
+    // unconsumed down) while `clickable` still accepts it, so a tap collapses
+    // the tab and a downward drag minimizes the player with the same settle
+    // rules as the rest of the screen.
+    val headerSwipeModifier = if (fullPlayerProgress != null) {
+        Modifier.pointerInput(activeTab, headerDragHeightPx) {
+            val thresholdPx = 12f * density
+            awaitPointerEventScope {
+                while (true) {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    val startTime = System.currentTimeMillis()
+                    var accumulatedDy = 0f
+                    var tracking = false
+                    var dragging = false
+
+                    do {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (change.pressed) {
+                            val deltaY = change.position.y - change.previousPosition.y
+                            if (!tracking) {
+                                accumulatedDy += deltaY
+                                if (kotlin.math.abs(accumulatedDy) >= thresholdPx) {
+                                    if (accumulatedDy > 0f) {
+                                        tracking = true
+                                        dragging = true
+                                        change.consume()
+                                    } else {
+                                        // Upward: leave the gesture alone.
+                                        break
+                                    }
+                                }
+                            } else {
+                                change.consume()
+                                // 0.85 = slightly damped compared to the body drag.
+                                val progressDelta = -deltaY / headerDragHeightPx * 0.85f
+                                val newProgress =
+                                    (fullPlayerProgress.value + progressDelta).coerceIn(0f, 1f)
+                                scope.launch { fullPlayerProgress.snapTo(newProgress) }
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
+
+                    if (dragging) {
+                        val swipeDuration = System.currentTimeMillis() - startTime
+                        val isFlingDown = swipeDuration < 250 && accumulatedDy > 30f * density
+                        val dragPassedThreshold = fullPlayerProgress.value < 0.85f
+                        if (dragPassedThreshold || isFlingDown) {
+                            scope.launch {
+                                fullPlayerProgress.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                )
+                                onNavigate(AppScreen.HOME)
+                            }
+                        } else {
+                            scope.launch {
+                                fullPlayerProgress.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                )
                             }
                         }
                     }
@@ -2111,6 +2178,7 @@ fun RadioScreen(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null
                                     ) { collapseLyricsOrQueue() }
+                                    .then(headerSwipeModifier)
                             ) {
                                 Text(
                                     text = currentSongTitle,
@@ -2874,7 +2942,8 @@ fun RadioScreen(
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
-                            ) { collapseLyricsOrQueue() },
+                            ) { collapseLyricsOrQueue() }
+                            .then(headerSwipeModifier),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(

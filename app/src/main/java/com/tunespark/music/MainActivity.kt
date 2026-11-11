@@ -8,12 +8,20 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalFocusManager
@@ -289,6 +297,26 @@ fun MainPlayerScreen(
     val fullPlayerProgress = remember { Animatable(if (isFullPlayerOpen) 1f else 0f) }
     val searchProgress = remember { Animatable(if (isSearchOpen) 1f else 0f) }
     val libraryProgress = remember { Animatable(if (isLibraryOpen) 1f else 0f) }
+
+    // On-screen bounds of the miniplayer's now-playing tile, reported by
+    // BottomDock. The full player grows out of this exact rect (and compresses
+    // back into it), so the transition reads as the miniplayer expanding rather
+    // than a screen sliding in from empty space.
+    var dockTileBounds by remember { mutableStateOf<Rect?>(null) }
+    val onDockTileBoundsChanged: (Rect) -> Unit = remember {
+        { bounds -> if (dockTileBounds != bounds) dockTileBounds = bounds }
+    }
+
+    // Same idea for the dock's Search / Library buttons: those overlays also
+    // expand out of (and compress back into) the exact control that opened them.
+    var dockSearchBounds by remember { mutableStateOf<Rect?>(null) }
+    val onDockSearchBoundsChanged: (Rect) -> Unit = remember {
+        { bounds -> if (dockSearchBounds != bounds) dockSearchBounds = bounds }
+    }
+    var dockLibraryBounds by remember { mutableStateOf<Rect?>(null) }
+    val onDockLibraryBoundsChanged: (Rect) -> Unit = remember {
+        { bounds -> if (dockLibraryBounds != bounds) dockLibraryBounds = bounds }
+    }
 
     val openFullPlayer: () -> Unit = {
         isFullPlayerOpen = true
@@ -2373,193 +2401,184 @@ fun MainPlayerScreen(
                 // First BottomDock was deleted to resolve duplicate rendering, misalignment, double-shadows, and to allow the single bottom bar to render natively on top of all overlay screens (Search, Playlists, etc.).
             }
 
-            // SearchScreen premium sliding overlay
-            val searchYOffset = with(LocalDensity.current) { screenHeight * (1f - searchProgress.value) }
-            if (searchProgress.value > 0.001f) {
-                val searchAlpha = (searchProgress.value / 0.5f).coerceIn(0f, 1f)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .graphicsLayer {
-                            translationY = searchYOffset.toPx()
-                            alpha = searchAlpha
-                        }
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null,
-                            onClick = {}
-                        )
-                ) {
-                    SearchScreen(
-                        searchQuery = searchQuery,
-                        searchResults = searchResults,
-                        isSearching = isSearching,
-                        onSearchQueryChange = { searchQuery = it },
-                        onTriggerSearch = triggerSearch,
-                        onPlaySong = { song ->
-                            playSong(song)
-                            openFullPlayer()
-                        },
-                        onSongLongPress = showQuickActions,
-                        onPlayNextSong = onQuickActionPlayNext,
-                        onAddToQueueSong = onQuickActionAddToQueue,
-                        onArtistClick = { artist ->
-                            initialArtistId = artist.id
-                            initialArtistName = artist.title
-                            initialArtistThumbnail = artist.thumbnail
-                            navigateHandler(AppScreen.PLAYLISTS)
-                        },
-                        onOpenExploreItem = openExplorePlaylist,
-                        isUserSignedIn = userSignedIn,
-                        onNavigate = navigateHandler
+            // SearchScreen: expands out of the dock's Search button and
+            // compresses back into it (same container transform as the player).
+            ExpandingDockScreen(
+                progress = searchProgress.value,
+                collapsedBounds = dockSearchBounds,
+                fallbackBounds = with(LocalDensity.current) {
+                    Rect(
+                        left = 16.dp.toPx(),
+                        top = (screenHeight - 92.dp).toPx(),
+                        right = 76.dp.toPx(),
+                        bottom = (screenHeight - 32.dp).toPx()
                     )
                 }
+            ) {
+                SearchScreen(
+                    searchQuery = searchQuery,
+                    searchResults = searchResults,
+                    isSearching = isSearching,
+                    onSearchQueryChange = { searchQuery = it },
+                    onTriggerSearch = triggerSearch,
+                    onPlaySong = { song ->
+                        playSong(song)
+                        openFullPlayer()
+                    },
+                    onSongLongPress = showQuickActions,
+                    onPlayNextSong = onQuickActionPlayNext,
+                    onAddToQueueSong = onQuickActionAddToQueue,
+                    onArtistClick = { artist ->
+                        initialArtistId = artist.id
+                        initialArtistName = artist.title
+                        initialArtistThumbnail = artist.thumbnail
+                        navigateHandler(AppScreen.PLAYLISTS)
+                    },
+                    onOpenExploreItem = openExplorePlaylist,
+                    isUserSignedIn = userSignedIn,
+                    onNavigate = navigateHandler
+                )
             }
 
-            // PlaylistsScreen premium sliding overlay
-            val libraryYOffset = with(LocalDensity.current) { screenHeight * (1f - libraryProgress.value) }
-            if (libraryProgress.value > 0.001f) {
-                val libraryAlpha = (libraryProgress.value / 0.5f).coerceIn(0f, 1f)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .graphicsLayer {
-                            translationY = libraryYOffset.toPx()
-                            alpha = libraryAlpha
-                        }
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null,
-                            onClick = {}
-                        )
-                ) {
-                    PlaylistsScreen(
-                        initialPlaylistId = initialPlaylistId,
-                        initialPlaylistName = initialPlaylistName,
-                        initialPlaylistThumbnail = initialPlaylistThumbnail,
-                        initialPlaylistSongCountText = initialPlaylistSongCountText,
-                        initialPlaylistIsLiked = initialPlaylistIsLiked,
-                        initialPlaylistRawItem = initialPlaylistRawItem,
-                        initialPlaylistAuthorName = initialPlaylistAuthorName,
-                        initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
-                        initialPlaylistSongs = initialPlaylistSongs,
-                        initialArtistId = initialArtistId,
-                        initialArtistName = initialArtistName,
-                        initialArtistThumbnail = initialArtistThumbnail,
-                        initialArtistNavRequest = initialArtistNavRequest,
-                        playlistDetailExitsLibrary = libraryPlaylistFromExternal,
-                        onPlayPlaylist = { name, songs, startIndex ->
-                            playPlaylist(name, songs, startIndex)
-                            openFullPlayer()
-                        },
-                        onPlaySong = { song ->
-                            playSong(song)
-                            openFullPlayer()
-                        },
-                        onSongLongPress = showQuickActions,
-                        onPlaylistSongLongPress = showQuickActionsInPlaylist,
-                        playlistContentVersion = playlistContentVersion,
-                        onPlayNextSong = onQuickActionPlayNext,
-                        onAddToQueueSong = onQuickActionAddToQueue,
-                        onNavigate = { screen ->
-                            if (screen != AppScreen.PLAYLISTS) {
-                                initialPlaylistId = null
-                                initialPlaylistName = ""
-                                initialPlaylistThumbnail = null
-                                initialPlaylistSongCountText = ""
-                                initialPlaylistIsLiked = false
-                                initialPlaylistRawItem = null
-                                initialPlaylistAuthorName = null
-                                initialPlaylistAuthorAvatarUrl = null
-                                initialPlaylistSongs = emptyList()
-                                initialArtistId = null
-                                initialArtistName = null
-                                initialArtistThumbnail = null
-                            }
-                            if (screen == AppScreen.RADIO) {
-                                openFullPlayer()
-                            } else {
-                                navigateHandler(screen)
-                            }
-                        }
+            // PlaylistsScreen: expands out of the dock's Library button and
+            // compresses back into it (same container transform as the player).
+            ExpandingDockScreen(
+                progress = libraryProgress.value,
+                collapsedBounds = dockLibraryBounds,
+                fallbackBounds = with(LocalDensity.current) {
+                    Rect(
+                        left = (maxWidth - 76.dp).toPx(),
+                        top = (screenHeight - 92.dp).toPx(),
+                        right = (maxWidth - 16.dp).toPx(),
+                        bottom = (screenHeight - 32.dp).toPx()
                     )
                 }
+            ) {
+                PlaylistsScreen(
+                    initialPlaylistId = initialPlaylistId,
+                    initialPlaylistName = initialPlaylistName,
+                    initialPlaylistThumbnail = initialPlaylistThumbnail,
+                    initialPlaylistSongCountText = initialPlaylistSongCountText,
+                    initialPlaylistIsLiked = initialPlaylistIsLiked,
+                    initialPlaylistRawItem = initialPlaylistRawItem,
+                    initialPlaylistAuthorName = initialPlaylistAuthorName,
+                    initialPlaylistAuthorAvatarUrl = initialPlaylistAuthorAvatarUrl,
+                    initialPlaylistSongs = initialPlaylistSongs,
+                    initialArtistId = initialArtistId,
+                    initialArtistName = initialArtistName,
+                    initialArtistThumbnail = initialArtistThumbnail,
+                    initialArtistNavRequest = initialArtistNavRequest,
+                    playlistDetailExitsLibrary = libraryPlaylistFromExternal,
+                    onPlayPlaylist = { name, songs, startIndex ->
+                        playPlaylist(name, songs, startIndex)
+                        openFullPlayer()
+                    },
+                    onPlaySong = { song ->
+                        playSong(song)
+                        openFullPlayer()
+                    },
+                    onSongLongPress = showQuickActions,
+                    onPlaylistSongLongPress = showQuickActionsInPlaylist,
+                    playlistContentVersion = playlistContentVersion,
+                    onPlayNextSong = onQuickActionPlayNext,
+                    onAddToQueueSong = onQuickActionAddToQueue,
+                    onNavigate = { screen ->
+                        if (screen != AppScreen.PLAYLISTS) {
+                            initialPlaylistId = null
+                            initialPlaylistName = ""
+                            initialPlaylistThumbnail = null
+                            initialPlaylistSongCountText = ""
+                            initialPlaylistIsLiked = false
+                            initialPlaylistRawItem = null
+                            initialPlaylistAuthorName = null
+                            initialPlaylistAuthorAvatarUrl = null
+                            initialPlaylistSongs = emptyList()
+                            initialArtistId = null
+                            initialArtistName = null
+                            initialArtistThumbnail = null
+                        }
+                        if (screen == AppScreen.RADIO) {
+                            openFullPlayer()
+                        } else {
+                            navigateHandler(screen)
+                        }
+                    }
+                )
             }
 
-            // RadioScreen premium sliding overlay
-            val yOffset = with(LocalDensity.current) { screenHeight * (1f - fullPlayerProgress.value) }
-            if (fullPlayerProgress.value > 0.001f) {
-                val radioAlpha = (fullPlayerProgress.value / 0.5f).coerceIn(0f, 1f)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .graphicsLayer {
-                            translationY = yOffset.toPx()
-                            alpha = radioAlpha
-                        }
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null,
-                            onClick = {}
-                        )
-                ) {
-                    RadioScreen(
-                        exoPlayer = exoPlayer,
-                        playQueue = playQueue,
-                        currentTrackIndex = currentTrackIndex,
-                        currentSongTitle = currentSongTitle,
-                        currentSongArtist = currentSongArtist,
-                        currentSongArtwork = currentSongArtwork,
-                        isPlaying = isPlaying,
-                        isLoading = isLoading,
-                        errorMessage = errorMessage,
-                        statusMessage = statusMessage,
-                        hasPreviousTrack = hasPreviousTrack,
-                        hasNextTrack = hasNextTrack,
-                        onNavigate = { screen ->
-                            if (screen == AppScreen.HOME) {
-                                closeFullPlayer()
-                            } else {
-                                navigateHandler(screen)
-                            }
-                        },
-                        onStopRadio = {
-                            if (CastManager.isCasting) {
-                                CastManager.disconnect()
-                            }
-                            exoPlayer.stop()
-                            exoPlayer.clearMediaItems()
-                            currentSongTitle = "No Track Loaded"
-                            currentSongArtist = ""
-                            currentSongArtwork = null
-                            nowPlayingMetadata = null
-                            playQueue = emptyList()
-                            currentTrackIndex = -1
-                            hasPreviousTrack = false
-                            hasNextTrack = false
+            // ---------- RadioScreen: miniplayer ⇄ full player container transform ----------
+            // The full player no longer slides in from the bottom edge of the screen.
+            // Its surface now grows out of the miniplayer's now-playing tile: a
+            // rounded window starts exactly on that tile, expands until it fills the
+            // screen, its corners melt away and the player content fades + scales in
+            // from the dock. Closing is the exact reverse (compress back into the
+            // dock). Every entry point — tapping the tile, dragging it up, the back
+            // button, the system/gesture back, "Stop Radio", navigation away — all
+            // drive the same `fullPlayerProgress` animatable, so they stay
+            // perfectly in sync with the morph (and 1:1 with the finger mid-drag).
+            ExpandingDockScreen(
+                progress = fullPlayerProgress.value,
+                collapsedBounds = dockTileBounds,
+                fallbackBounds = with(LocalDensity.current) {
+                    Rect(
+                        left = 88.dp.toPx(),
+                        top = (screenHeight - 92.dp).toPx(),
+                        right = (maxWidth - 88.dp).toPx(),
+                        bottom = (screenHeight - 32.dp).toPx()
+                    )
+                },
+                showScrim = true
+            ) {
+                RadioScreen(
+                    exoPlayer = exoPlayer,
+                    playQueue = playQueue,
+                    currentTrackIndex = currentTrackIndex,
+                    currentSongTitle = currentSongTitle,
+                    currentSongArtist = currentSongArtist,
+                    currentSongArtwork = currentSongArtwork,
+                    isPlaying = isPlaying,
+                    isLoading = isLoading,
+                    errorMessage = errorMessage,
+                    statusMessage = statusMessage,
+                    hasPreviousTrack = hasPreviousTrack,
+                    hasNextTrack = hasNextTrack,
+                    onNavigate = { screen ->
+                        if (screen == AppScreen.HOME) {
                             closeFullPlayer()
-                        },
-                        lyricsLines = hoistedLyricsLines,
-                        isLyricsLoading = hoistedIsLyricsLoading,
-                        lyricsProviderId = hoistedLyricsProviderId,
-                        lyricsProviderOverride = effectiveLyricsOverride,
-                        onLyricsProviderSelected = { providerId ->
-                            // Applied to the current track only; the saved
-                            // Settings order is left untouched.
-                            lyricsProviderOverride = providerId
-                            lyricsOverrideSongKey = currentSongKey
-                            lyricsFetchVersion++
-                        },
-                        nowPlayingSourceLine = nowPlayingSourceLine,
-                        fullPlayerProgress = fullPlayerProgress
-                    )
-                }
+                        } else {
+                            navigateHandler(screen)
+                        }
+                    },
+                    onStopRadio = {
+                        if (CastManager.isCasting) {
+                            CastManager.disconnect()
+                        }
+                        exoPlayer.stop()
+                        exoPlayer.clearMediaItems()
+                        currentSongTitle = "No Track Loaded"
+                        currentSongArtist = ""
+                        currentSongArtwork = null
+                        nowPlayingMetadata = null
+                        playQueue = emptyList()
+                        currentTrackIndex = -1
+                        hasPreviousTrack = false
+                        hasNextTrack = false
+                        closeFullPlayer()
+                    },
+                    lyricsLines = hoistedLyricsLines,
+                    isLyricsLoading = hoistedIsLyricsLoading,
+                    lyricsProviderId = hoistedLyricsProviderId,
+                    lyricsProviderOverride = effectiveLyricsOverride,
+                    onLyricsProviderSelected = { providerId ->
+                        // Applied to the current track only; the saved
+                        // Settings order is left untouched.
+                        lyricsProviderOverride = providerId
+                        lyricsOverrideSongKey = currentSongKey
+                        lyricsFetchVersion++
+                    },
+                    nowPlayingSourceLine = nowPlayingSourceLine,
+                    fullPlayerProgress = fullPlayerProgress
+                )
             }
 
             if (!(currentScreen == AppScreen.ACCOUNT && isAccountWebViewShowing) && fullPlayerProgress.value < 0.99f) {
@@ -2568,7 +2587,11 @@ fun MainPlayerScreen(
                         .align(Alignment.BottomCenter)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .graphicsLayer {
-                            alpha = 1f - fullPlayerProgress.value
+                            // Hand the dock over to the expanding player surface
+                            // quickly, so the tile never lingers on top of the
+                            // growing player content.
+                            val dockFade = (fullPlayerProgress.value / 0.28f).coerceIn(0f, 1f)
+                            alpha = 1f - dockFade * dockFade * (3f - 2f * dockFade)
                         }
                         .offset(y = (-10).dp) // Moved slightly up to give a beautiful floating look
                         .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)
@@ -2620,7 +2643,10 @@ fun MainPlayerScreen(
                             onOpenSearch = openSearch,
                             libraryProgress = libraryProgress,
                             onOpenLibrary = openLibrary,
-                            exoPlayer = exoPlayer
+                            exoPlayer = exoPlayer,
+                            onTileBoundsChanged = onDockTileBoundsChanged,
+                            onSearchBoundsChanged = onDockSearchBoundsChanged,
+                            onLibraryBoundsChanged = onDockLibraryBoundsChanged
                         )
                     }
                 }
@@ -2639,6 +2665,129 @@ fun MainPlayerScreen(
                 onOpenArtist = onQuickActionOpenArtist,
                 onRemoveFromPlaylist = if (quickActionPlaylistId != null) onQuickActionRemoveFromPlaylist else null
             )
+        }
+    }
+}
+
+/**
+ * Container transform shared by the full player, Search and Library overlays.
+ *
+ * The visible surface starts as [collapsedBounds] — the dock control that
+ * opened the overlay — grows to fill the window, melts its corner radius away
+ * and cross-fades the dock surface colour into the screen background. Closing
+ * is the exact reverse, so the screen visibly compresses back into the control
+ * it came from instead of sliding in/out from the edge of the display.
+ *
+ * The screen content is laid out at its natural full-screen size, centered in
+ * the surface and scaled down uniformly (never stretched) to fit it. Scaling
+ * about the *surface* center — instead of re-anchoring a full-size child
+ * against a moving clip origin — is what keeps every element inside the window
+ * while the transition runs: nothing can be clipped mid-flight and nothing
+ * drifts upward relative to its neighbours. The content alpha follows the fit
+ * scale so it is fully gone before the surface becomes a tiny pill.
+ */
+@Composable
+private fun ExpandingDockScreen(
+    progress: Float,
+    collapsedBounds: Rect?,
+    fallbackBounds: Rect,
+    showScrim: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val p = progress.coerceIn(0f, 1f)
+    if (p <= 0.001f) return
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val rootWidthPx = with(density) { maxWidth.toPx() }
+        val rootHeightPx = with(density) { maxHeight.toPx() }
+
+        // The collapsed target reported by the dock. Validated against the
+        // current window size so a rotation while an overlay is open can never
+        // fold the animation into a stale, off-screen rect.
+        val start = collapsedBounds?.takeIf { bounds ->
+            bounds.width > 1f && bounds.height > 1f &&
+                bounds.left >= -1f && bounds.top >= -1f &&
+                bounds.right <= rootWidthPx + 1f && bounds.bottom <= rootHeightPx + 1f
+        } ?: fallbackBounds
+
+        // The window tracks progress 1:1 so a drag feels physically attached.
+        val windowLeftPx = start.left * (1f - p)
+        val windowTopPx = start.top * (1f - p)
+        val windowRightPx = start.right + (rootWidthPx - start.right) * p
+        val windowBottomPx = start.bottom + (rootHeightPx - start.bottom) * p
+        val windowWidthPx = (windowRightPx - windowLeftPx).coerceAtLeast(1f)
+        val windowHeightPx = (windowBottomPx - windowTopPx).coerceAtLeast(1f)
+
+        // Keep the dock's pill curve early on, then melt square as the surface
+        // turns into the screen.
+        val cornerMorph = (p / 0.55f).coerceIn(0f, 1f)
+        val cornerRadius = with(density) {
+            (30.dp.toPx() * (1f - cornerMorph * cornerMorph)).toDp()
+        }
+
+        // Surface colour melts from the dock's off-white/off-black into the
+        // screen background so the dock control appears to become the screen.
+        val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
+        val dockSurfaceColor = if (isDarkTheme) Color(0xFF141414) else Color(0xFFF2F2F5)
+        val surfaceColor = lerp(
+            dockSurfaceColor,
+            MaterialTheme.colorScheme.background,
+            (p / 0.3f).coerceIn(0f, 1f)
+        )
+
+        // Uniform fit scale of the full-screen content inside the surface.
+        val fitScale = minOf(windowWidthPx / rootWidthPx, windowHeightPx / rootHeightPx)
+            .coerceIn(0.02f, 1f)
+        val revealLinear = ((fitScale - 0.08f) / 0.3f).coerceIn(0f, 1f)
+        val contentAlpha = revealLinear * revealLinear * (3f - 2f * revealLinear)
+
+        // Swallows taps that land outside the surface while it is still small
+        // (and provides the player's depth scrim over the screen underneath).
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(Color.Black.copy(alpha = if (showScrim) 0.28f * p else 0f))
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    onClick = {}
+                )
+        )
+
+        // The expanding / compressing surface.
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(windowLeftPx.roundToInt(), windowTopPx.roundToInt()) }
+                .size(
+                    width = with(density) { windowWidthPx.toDp() },
+                    height = with(density) { windowHeightPx.toDp() }
+                )
+                .clip(RoundedCornerShape(cornerRadius))
+                .background(surfaceColor)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = fitScale
+                        scaleY = fitScale
+                        alpha = contentAlpha
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .requiredSize(
+                            width = with(density) { rootWidthPx.toDp() },
+                            height = with(density) { rootHeightPx.toDp() }
+                        )
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                ) {
+                    content()
+                }
+            }
         }
     }
 }

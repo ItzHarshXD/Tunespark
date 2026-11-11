@@ -34,10 +34,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
@@ -971,7 +973,14 @@ fun BottomDock(
     onOpenSearch: () -> Unit = {},
     libraryProgress: Animatable<Float, *>,
     onOpenLibrary: () -> Unit = {},
-    exoPlayer: Player
+    exoPlayer: Player,
+    // Reports the now-playing tile's on-screen bounds so the full player can
+    // grow out of it (and compress back into it) instead of sliding in from the
+    // bottom edge of the screen.
+    onTileBoundsChanged: (Rect) -> Unit = {},
+    // Same for the Search / Library buttons, which anchor those overlays.
+    onSearchBoundsChanged: (Rect) -> Unit = {},
+    onLibraryBoundsChanged: (Rect) -> Unit = {}
 ) {
     val context = LocalContext.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -1127,6 +1136,9 @@ fun BottomDock(
                                 }
                             }
                         }
+                    }
+                    .onGloballyPositioned { coords ->
+                        onSearchBoundsChanged(coords.boundsInRoot())
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -1181,6 +1193,15 @@ fun BottomDock(
                         )
                         .onGloballyPositioned { coords ->
                             tileWidthPx = coords.size.width.toFloat()
+                            // Only publish the tile rect once its width has settled.
+                            // While the dock is still animating in from zero width
+                            // (e.g. the first track after launch) the player opens
+                            // from the derived dock-sized fallback instead of a
+                            // half-grown sliver.
+                            val settledWidthPx = (maxWidth - 144.dp).value * density
+                            if (kotlin.math.abs(coords.size.width - settledWidthPx) <= density * 2f) {
+                                onTileBoundsChanged(coords.boundsInRoot())
+                            }
                         }
                         .pointerInput(isTrackLoaded, tileWidthPx) {
                             val thresholdPx = 15f * density
@@ -1478,6 +1499,9 @@ fun BottomDock(
                                 }
                             }
                         }
+                    }
+                    .onGloballyPositioned { coords ->
+                        onLibraryBoundsChanged(coords.boundsInRoot())
                     },
                 contentAlignment = Alignment.Center
             ) {
