@@ -586,6 +586,15 @@ class PlaybackService : MediaSessionService() {
     ): ResolvedStream? {
         val videoId = videoIdFromMediaId(mediaItem.mediaId)
         if (videoId.isBlank()) return null
+
+        // Downloaded songs always play from their local file — even when the
+        // device is offline — and the now-playing stats keep the provider the
+        // file originally came from. Error recovery (forceAlternate) skips the
+        // local file so a corrupt download can fall back to the network.
+        if (!forceAlternate) {
+            DownloadManager.downloadedStream(this, videoId)?.let { return it }
+        }
+
         val metadata = mediaItem.mediaMetadata
         return StreamUrlResolver.resolveStream(
             songId = videoId,

@@ -77,8 +77,19 @@ import androidx.compose.material.icons.rounded.CastConnected
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
+import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.outlined.Info
 import android.widget.Toast
+import com.metrolist.innertube.models.Album
+import com.metrolist.innertube.models.Artist
+import com.metrolist.innertube.models.SongItem
+import com.tunespark.music.DownloadManager
 import com.tunespark.music.LikedSongManager
+import com.tunespark.music.NetworkStatus
+import com.tunespark.music.provider.StreamMetadata
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -443,6 +454,33 @@ fun DropIndicatorLine(
     )
 }
 
+/** Builds a [SongItem] from the currently playing queue item so the Radio
+ *  screen's three-dot menu can reuse the app-wide quick actions (share,
+ *  download, add to playlist, info). Queue items only carry display metadata,
+ *  which is everything those actions need. */
+private fun mediaItemToSongItem(item: MediaItem?): SongItem? {
+    if (item == null) return null
+    val id = item.mediaId.substringBefore('#').trim()
+    if (id.isBlank() || id.startsWith("commentary_")) return null
+    val metadata = item.mediaMetadata
+    val title = metadata.title?.toString()?.trim()
+        ?.takeIf { it.isNotBlank() && it != "No Track Loaded" } ?: return null
+    val artists = metadata.artist?.toString()
+        ?.split(", ")
+        ?.filter { it.isNotBlank() }
+        ?.map { Artist(name = it, id = null) }
+        .orEmpty()
+    val albumName = StreamMetadata.album(metadata)?.takeIf { it.isNotBlank() }
+    return SongItem(
+        id = id,
+        title = title,
+        artists = artists,
+        album = albumName?.let { Album(name = it, id = "") },
+        duration = StreamMetadata.durationSeconds(metadata),
+        thumbnail = metadata.artworkUri?.toString() ?: ""
+    )
+}
+
 @Composable
 fun RadioTabBar(
     activeTab: String,
@@ -450,9 +488,13 @@ fun RadioTabBar(
     currentVideoId: String?,
     currentSongTitle: String,
     currentSongArtist: String,
+    currentSong: SongItem?,
     isSignedIn: Boolean,
     isCasting: Boolean,
     onCastClick: () -> Unit,
+    onQuickAction: (SongItem, QuickActionDialog) -> Unit = { _, _ -> },
+    downloadsVersion: Int = 0,
+    onDownloadsChanged: () -> Unit = {},
     primaryColor: Color,
     onPrimaryColor: Color,
     secondaryColor: Color,
@@ -607,37 +649,166 @@ fun RadioTabBar(
                 )
             }
 
-            // Share Button
-            Box(
-                modifier = Modifier
-                    .size(actionSize)
-                    .clip(CircleShape)
-                    .background(secondaryColor)
-                    .clickable(
-                        enabled = currentVideoId != null,
-                        onClick = {
+            // More menu: Share, Download, Add to playlist and Info. The old
+            // standalone Share button became this three-dot menu so the radio
+            // screen exposes the same actions as everywhere else in the app.
+            var menuExpanded by remember { mutableStateOf(false) }
+            var downloadsTick by remember { mutableIntStateOf(0) }
+            var isDownloading by remember { mutableStateOf(false) }
+            var isRemovingDownload by remember { mutableStateOf(false) }
+            var showRemoveDownloadDialog by remember { mutableStateOf(false) }
+            val isDownloaded = remember(currentSong?.id, downloadsVersion, downloadsTick) {
+                currentSong?.let { DownloadManager.isDownloaded(context, it.id) } == true
+            }
+
+            fun shareCurrentSong() {
+                val song = currentSong ?: return
+                val artist = song.artists.joinToString(", ") { it.name }
+                val shareUrl = SongLinks.shareUrl(song.id, song.title, artist)
+                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "${song.title} - $artist")
+                    putExtra(Intent.EXTRA_TEXT, shareUrl)
+                }
+                context.startActivity(Intent.createChooser(sendIntent, "Share song"))
+            }
+
+            Box {
+                Box(
+                    modifier = Modifier
+                        .size(actionSize)
+                        .clip(CircleShape)
+                        .background(secondaryColor)
+                        .clickable(enabled = currentVideoId != null) {
                             audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1f)
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            if (currentVideoId != null) {
-                                val shareUrl = SongLinks.shareUrl(currentVideoId, currentSongTitle, currentSongArtist)
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, "$currentSongTitle - $currentSongArtist")
-                                    putExtra(Intent.EXTRA_TEXT, shareUrl)
+                            menuExpanded = true
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "More options",
+                        tint = if (currentVideoId == null) textColor.copy(alpha = 0.35f) else onSecondaryColor,
+                        modifier = Modifier.size(actionIconSize)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Share") },
+                        leadingIcon = { Icon(Icons.Rounded.Share, contentDescription = null) },
+                        enabled = currentSong != null,
+                        onClick = {
+                            menuExpanded = false
+                            shareCurrentSong()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                when {
+                                    isDownloading -> "Downloading…"
+                                    isDownloaded -> "Downloaded"
+                                    else -> "Download"
                                 }
-                                val chooser = Intent.createChooser(sendIntent, "Share song")
-                                context.startActivity(chooser)
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (isDownloaded) Icons.Rounded.DownloadDone else Icons.Rounded.Download,
+                                contentDescription = null
+                            )
+                        },
+                        enabled = currentSong != null && !isDownloading && !isRemovingDownload,
+                        onClick = {
+                            menuExpanded = false
+                            val song = currentSong ?: return@DropdownMenuItem
+                            if (isDownloaded) {
+                                // Already downloaded — offer removal through a
+                                // confirmation instead of disabling the action.
+                                showRemoveDownloadDialog = true
+                                return@DropdownMenuItem
+                            }
+                            if (!NetworkStatus.isOnline(context)) {
+                                Toast.makeText(context, "Connect to the internet to download", Toast.LENGTH_SHORT).show()
+                                return@DropdownMenuItem
+                            }
+                            isDownloading = true
+                            scope.launch {
+                                val ok = DownloadManager.downloadSong(context, song)
+                                isDownloading = false
+                                downloadsTick++
+                                if (ok) {
+                                    onDownloadsChanged()
+                                    Toast.makeText(context, "Downloaded '${song.title}'", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Couldn't download '${song.title}'", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Share,
-                    contentDescription = "Share",
-                    tint = if (currentVideoId == null) textColor.copy(alpha = 0.35f) else onSecondaryColor,
-                    modifier = Modifier.size(actionIconSize)
-                )
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add to playlist") },
+                        leadingIcon = { Icon(Icons.Rounded.PlaylistAdd, contentDescription = null) },
+                        enabled = currentSong != null,
+                        onClick = {
+                            menuExpanded = false
+                            val song = currentSong ?: return@DropdownMenuItem
+                            onQuickAction(song, QuickActionDialog.ADD_TO_PLAYLIST)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Info") },
+                        leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null) },
+                        enabled = currentSong != null,
+                        onClick = {
+                            menuExpanded = false
+                            val song = currentSong ?: return@DropdownMenuItem
+                            onQuickAction(song, QuickActionDialog.INFO)
+                        }
+                    )
+                }
+
+                if (showRemoveDownloadDialog) {
+                    val songToRemove = currentSong
+                    AlertDialog(
+                        onDismissRequest = { showRemoveDownloadDialog = false },
+                        title = { Text("Remove download?") },
+                        text = {
+                            Text(
+                                "'${songToRemove?.title ?: "This song"}' will be deleted from this device. You can download it again when you're online."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showRemoveDownloadDialog = false
+                                    if (songToRemove == null) return@TextButton
+                                    isRemovingDownload = true
+                                    scope.launch {
+                                        // deleteSong already hops to Dispatchers.IO.
+                                        DownloadManager.deleteSong(context, songToRemove.id)
+                                        isRemovingDownload = false
+                                        downloadsTick++
+                                        onDownloadsChanged()
+                                        Toast.makeText(context, "Removed download", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            ) {
+                                Text("Remove", color = Color(0xFFFF0000))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showRemoveDownloadDialog = false }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -665,6 +836,9 @@ fun RadioScreen(
     lyricsProviderId: String? = null,
     lyricsProviderOverride: String? = null,
     onLyricsProviderSelected: (String?) -> Unit = {},
+    onOpenQuickActionForSong: (SongItem, QuickActionDialog) -> Unit = { _, _ -> },
+    downloadsVersion: Int = 0,
+    onDownloadsChanged: () -> Unit = {},
     fullPlayerProgress: Animatable<Float, *>? = null,
     modifier: Modifier = Modifier
 ) {
@@ -973,6 +1147,7 @@ fun RadioScreen(
             ?.substringBefore('#')
             ?.takeIf { !it.startsWith("commentary_") && it.isNotBlank() }
     }
+    val currentRadioSong = remember(currentSongItem) { mediaItemToSongItem(currentSongItem) }
     val isSignedIn = remember(context) { com.tunespark.music.SessionManager.isUserSignedIn(context) }
 
     val isDarkTheme = MaterialTheme.colorScheme.background == Color.Black
@@ -2528,6 +2703,10 @@ fun RadioScreen(
                                     currentVideoId = currentVideoId,
                                     currentSongTitle = currentSongTitle,
                                     currentSongArtist = currentSongArtist,
+                                    currentSong = currentRadioSong,
+                                    onQuickAction = onOpenQuickActionForSong,
+                                    downloadsVersion = downloadsVersion,
+                                    onDownloadsChanged = onDownloadsChanged,
                                     isSignedIn = isSignedIn,
                                     isCasting = CastManager.isCasting,
                                     onCastClick = { showCastDialog = true },
@@ -2558,6 +2737,10 @@ fun RadioScreen(
                                         currentVideoId = currentVideoId,
                                         currentSongTitle = currentSongTitle,
                                         currentSongArtist = currentSongArtist,
+                                        currentSong = currentRadioSong,
+                                        onQuickAction = onOpenQuickActionForSong,
+                                        downloadsVersion = downloadsVersion,
+                                        onDownloadsChanged = onDownloadsChanged,
                                         isSignedIn = isSignedIn,
                                         isCasting = CastManager.isCasting,
                                         onCastClick = { showCastDialog = true },
@@ -2900,6 +3083,10 @@ fun RadioScreen(
                     currentVideoId = currentVideoId,
                     currentSongTitle = currentSongTitle,
                     currentSongArtist = currentSongArtist,
+                    currentSong = currentRadioSong,
+                    onQuickAction = onOpenQuickActionForSong,
+                    downloadsVersion = downloadsVersion,
+                    onDownloadsChanged = onDownloadsChanged,
                     isSignedIn = isSignedIn,
                     isCasting = CastManager.isCasting,
                     onCastClick = { showCastDialog = true },
@@ -3087,6 +3274,10 @@ fun RadioScreen(
                     currentVideoId = currentVideoId,
                     currentSongTitle = currentSongTitle,
                     currentSongArtist = currentSongArtist,
+                    currentSong = currentRadioSong,
+                    onQuickAction = onOpenQuickActionForSong,
+                    downloadsVersion = downloadsVersion,
+                    onDownloadsChanged = onDownloadsChanged,
                     isSignedIn = isSignedIn,
                     isCasting = CastManager.isCasting,
                     onCastClick = { showCastDialog = true },

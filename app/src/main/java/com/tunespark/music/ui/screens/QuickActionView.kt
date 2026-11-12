@@ -73,6 +73,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material3.AlertDialog
@@ -86,6 +88,8 @@ import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.innertube.models.YouTubeClient
 import com.tunespark.music.LikedSongManager
 import com.tunespark.music.LocalPlaylistManager
+import com.tunespark.music.DownloadManager
+import com.tunespark.music.NetworkStatus
 import com.tunespark.music.SessionManager
 import com.tunespark.music.provider.AudioProviderIds
 import kotlinx.coroutines.Dispatchers
@@ -97,8 +101,10 @@ import kotlinx.coroutines.withContext
  * Quick Action View — a premium bottom-sheet context menu that pops up when the
  * user long-presses any song anywhere in the app (Home, Search, Playlists, Recents).
  *
- * It contains the song artwork, title and artist names plus 5 fully functional
- * quick actions: Like song, Start radio, Play next, Add to queue and Share song.
+ * It contains the song artwork, title and artist names plus a set of fully
+ * functional quick actions: Like song, Start radio, Play next, Add to queue,
+ * Add to playlist, Go to artist, Info, Download, Share and (in owned playlists)
+ * Remove song.
  *
  * UX details:
  * - Slides up from the bottom of the screen with a bouncy-free spring animation.
@@ -107,6 +113,16 @@ import kotlinx.coroutines.withContext
  * - Fully theme aware (Light: off-white surfaces / Dark: off-black surfaces) with
  *   the app's signature pure red accent, subtle shadows and 1.dp hairline borders.
  */
+/**
+ * A dialog the Quick Action sheet can open directly when it appears. The Radio
+ * screen's three-dot menu uses this so "Add to playlist" and "Info" behave
+ * exactly like they do everywhere else in the app.
+ */
+enum class QuickActionDialog {
+    ADD_TO_PLAYLIST,
+    INFO
+}
+
 @Composable
 fun QuickActionView(
     song: SongItem?,
@@ -120,6 +136,13 @@ fun QuickActionView(
     // Non-null only when the song sits in a playlist the user owns — enables the
     // "Remove song" action (see PlaylistsScreen's playlist-detail rows).
     onRemoveFromPlaylist: ((SongItem) -> Unit)? = null,
+    // Opens the sheet straight on a specific dialog (used by the Radio screen).
+    initialDialog: QuickActionDialog? = null,
+    // Bumped by the host after a download so the Download button refreshes.
+    downloadsVersion: Int = 0,
+    // Called after this sheet successfully downloads a song, so the host can
+    // refresh the Library's Downloads footprint.
+    onDownloadsChanged: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
 
@@ -153,6 +176,12 @@ fun QuickActionView(
     var isPickerLoading by remember { mutableStateOf(false) }
     // Row key used by the picker's inline "New playlist" creation entry.
     val newPlaylistPickerKey = "__new_playlist__"
+
+    // ── Download action state ────────────────────────────────────────────────
+    var downloadsTick by remember { mutableIntStateOf(0) }
+    var isDownloadingSong by remember { mutableStateOf(false) }
+    var isRemovingDownload by remember { mutableStateOf(false) }
+    var showRemoveDownloadDialog by remember { mutableStateOf(false) }
 
     // Song-info enrichment: some feeds parse songs without an album or duration,
     // so the Info popup fills those gaps on demand via a lightweight watch-next
@@ -272,8 +301,18 @@ fun QuickActionView(
         showPlaylistPicker = false
         showInfoDialog = false
         showCreateFromPicker = false
+        isDownloadingSong = false
+        isRemovingDownload = false
+        showRemoveDownloadDialog = false
         if (song != null) {
             displayedSong = song
+            // The Radio screen's three-dot menu opens the sheet directly on a
+            // dialog ("Add to playlist" / "Info").
+            when (initialDialog) {
+                QuickActionDialog.ADD_TO_PLAYLIST -> showPlaylistPicker = true
+                QuickActionDialog.INFO -> showInfoDialog = true
+                null -> {}
+            }
             dragOffsetPx.floatValue = 0f
             dragAnimJob?.cancel()
             dragAnimJob = null
@@ -306,6 +345,9 @@ fun QuickActionView(
     val currentSong = displayedSong
     if (currentSong != null) {
         val isLiked = LikedSongManager.isLiked(currentSong.id)
+        val isDownloaded = remember(downloadsTick, downloadsVersion, currentSong.id) {
+            DownloadManager.isDownloaded(context, currentSong.id)
+        }
         val artistNames = currentSong.artists.joinToString(", ") { it.name }
         val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
@@ -536,6 +578,45 @@ fun QuickActionView(
                         labelColor = textColor
                     ) {
                         showInfoDialog = true
+                    }
+                }
+
+                quickActionButtons.add {
+                    QuickActionButton(
+                        icon = if (isDownloaded) Icons.Rounded.DownloadDone else Icons.Rounded.Download,
+                        label = when {
+                            isDownloadingSong -> "Downloading"
+                            isDownloaded -> "Downloaded"
+                            else -> "Download"
+                        },
+                        iconTint = if (isDownloaded) accentColor else buttonIconTint,
+                        buttonBgColor = buttonBgColor,
+                        buttonBorderColor = buttonBorderColor,
+                        labelColor = textColor
+                    ) {
+                        if (isDownloadingSong || isRemovingDownload) {
+                            // Ignore repeated taps while the file is being fetched/removed.
+                        } else if (isDownloaded) {
+                            // Tapping an already-downloaded song offers removal.
+                            showRemoveDownloadDialog = true
+                        } else if (!NetworkStatus.isOnline(context)) {
+                            Toast.makeText(context, "Connect to the internet to download", Toast.LENGTH_SHORT).show()
+                        } else {
+                            isDownloadingSong = true
+                            scope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    DownloadManager.downloadSong(context, currentSong)
+                                }
+                                isDownloadingSong = false
+                                downloadsTick++
+                                if (ok) {
+                                    onDownloadsChanged()
+                                    Toast.makeText(context, "Downloaded '${currentSong.title}'", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Couldn't download '${currentSong.title}'", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1072,6 +1153,47 @@ fun QuickActionView(
                 confirmButton = {
                     TextButton(onClick = { showInfoDialog = false }) {
                         Text(text = "Close", color = Color(0xFFFF0000), fontWeight = FontWeight.Bold)
+                    }
+                }
+            )
+        }
+
+        // Removing an existing download always goes through this confirmation.
+        if (showRemoveDownloadDialog) {
+            val songToRemove = currentSong
+            AlertDialog(
+                onDismissRequest = { showRemoveDownloadDialog = false },
+                modifier = Modifier.border(1.dp, dialogBorderColor, RoundedCornerShape(28.dp)),
+                shape = RoundedCornerShape(28.dp),
+                containerColor = dialogContainerColor,
+                title = { Text(text = "Remove download?", color = textColor, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        text = "'${songToRemove.title}' will be deleted from this device. You can download it again when you're online.",
+                        color = textColor.copy(alpha = 0.75f),
+                        fontSize = 14.sp
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showRemoveDownloadDialog = false
+                            isRemovingDownload = true
+                            scope.launch {
+                                DownloadManager.deleteSong(context, songToRemove.id)
+                                isRemovingDownload = false
+                                downloadsTick++
+                                onDownloadsChanged()
+                                Toast.makeText(context, "Removed download", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Text(text = "Remove", color = Color(0xFFFF0000), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRemoveDownloadDialog = false }) {
+                        Text(text = "Cancel", color = textColor)
                     }
                 }
             )

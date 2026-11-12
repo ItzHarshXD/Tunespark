@@ -990,6 +990,20 @@ fun MainPlayerScreen(
         }
     }
 
+    // Resolves a song for eager playback. A downloaded file always wins, so a
+    // song in the Downloads playlist (or any downloaded track) starts instantly
+    // and keeps working with no network at all.
+    suspend fun resolveStreamForSong(song: SongItem) =
+        DownloadManager.downloadedStream(context, song.id)
+            ?: StreamUrlResolver.resolveStream(
+                songId = song.id,
+                title = song.title,
+                artist = song.artists.joinToString(", ") { it.name },
+                album = song.album?.name,
+                durationSeconds = song.duration,
+                jioSaavnEnabled = SessionManager.isJioSaavnEnabled(context),
+            )
+
     // Play list of songs in playlist mode starting from a specific index
     fun playPlaylist(playlistName: String, songs: List<SongItem>, startIndex: Int) {
         isLoading = true
@@ -1011,14 +1025,7 @@ fun MainPlayerScreen(
             nowPlayingMetadata = null
 
             val resolvedStream = withContext(Dispatchers.IO) {
-                StreamUrlResolver.resolveStream(
-                    songId = targetSong.id,
-                    title = targetSong.title,
-                    artist = targetSong.artists.joinToString(", ") { it.name },
-                    album = targetSong.album?.name,
-                    durationSeconds = targetSong.duration,
-                    jioSaavnEnabled = SessionManager.isJioSaavnEnabled(context),
-                )
+                resolveStreamForSong(targetSong)
             }
 
             if (resolvedStream != null) {
@@ -1144,14 +1151,7 @@ fun MainPlayerScreen(
 
         coroutineScope.launch {
             val resolvedStream = withContext(Dispatchers.IO) {
-                StreamUrlResolver.resolveStream(
-                    songId = song.id,
-                    title = song.title,
-                    artist = song.artists.joinToString(", ") { it.name },
-                    album = song.album?.name,
-                    durationSeconds = song.duration,
-                    jioSaavnEnabled = SessionManager.isJioSaavnEnabled(context),
-                )
+                resolveStreamForSong(song)
             }
             if (resolvedStream != null) {
                 try {
@@ -1731,18 +1731,34 @@ fun MainPlayerScreen(
 
     // ── Quick Action View (long-press song context sheet) state & handlers ──
     var quickActionSong by remember { mutableStateOf<SongItem?>(null) }
+    // When set, the sheet opens directly on one of its dialogs (used by the
+    // Radio screen's three-dot menu for "Add to playlist" and "Info").
+    var quickActionInitialDialog by remember { mutableStateOf<QuickActionDialog?>(null) }
     // Playlist context of the long-pressed song — non-null only when the song was
     // opened from a playlist the user owns (enables the "Remove song" action).
     var quickActionPlaylistId by remember { mutableStateOf<String?>(null) }
     var quickActionPlaylistName by remember { mutableStateOf<String?>(null) }
     // Bumped after a successful removal so PlaylistsScreen reloads its song list.
     var playlistContentVersion by remember { mutableStateOf(0) }
+    // Bumped whenever a song/playlist download finishes so every screen that
+    // renders the Downloads footprint (sheet, radio, library grid) refreshes.
+    var downloadsVersion by remember { mutableStateOf(0) }
 
     val showQuickActions: (SongItem) -> Unit = { song ->
         // Dismiss the keyboard if it is active so the sheet is fully visible.
         focusManager.clearFocus(force = true)
         quickActionPlaylistId = null
         quickActionPlaylistName = null
+        quickActionInitialDialog = null
+        quickActionSong = song
+    }
+
+    // Radio screen: open the Quick Action sheet straight on a dialog.
+    val showQuickActionForRadio: (SongItem, QuickActionDialog) -> Unit = { song, dialog ->
+        focusManager.clearFocus(force = true)
+        quickActionPlaylistId = null
+        quickActionPlaylistName = null
+        quickActionInitialDialog = dialog
         quickActionSong = song
     }
 
@@ -1852,8 +1868,14 @@ fun MainPlayerScreen(
     // a sentinel-id fallback (the artist screen itself falls back to a song search).
     val onQuickActionOpenArtist: (String, String) -> Unit = { artistId, artistName ->
         quickActionSong = null
+        quickActionInitialDialog = null
         if (artistName.isBlank()) {
             Toast.makeText(context, "Artist information unavailable", Toast.LENGTH_SHORT).show()
+        } else if (!NetworkStatus.isOnline(context)) {
+            // Artist profiles are built entirely from live InnerTube data and
+            // have no offline footprint — keep the user in the Library instead
+            // of opening a page that can never load.
+            Toast.makeText(context, "Artist pages aren't available offline", Toast.LENGTH_SHORT).show()
         } else if (artistId.isNotBlank()) {
             initialArtistId = artistId
             initialArtistName = artistName
@@ -2345,6 +2367,8 @@ fun MainPlayerScreen(
                                 onSongLongPress = showQuickActions,
                                 onPlaylistSongLongPress = showQuickActionsInPlaylist,
                                 playlistContentVersion = playlistContentVersion,
+                                downloadsVersion = downloadsVersion,
+                                onDownloadsChanged = { downloadsVersion++ },
                                 onPlayNextSong = onQuickActionPlayNext,
                                 onAddToQueueSong = onQuickActionAddToQueue,
                                 onNavigate = { screen ->
@@ -2480,6 +2504,8 @@ fun MainPlayerScreen(
                     onSongLongPress = showQuickActions,
                     onPlaylistSongLongPress = showQuickActionsInPlaylist,
                     playlistContentVersion = playlistContentVersion,
+                    downloadsVersion = downloadsVersion,
+                    onDownloadsChanged = { downloadsVersion++ },
                     onPlayNextSong = onQuickActionPlayNext,
                     onAddToQueueSong = onQuickActionAddToQueue,
                     onNavigate = { screen ->
@@ -2577,6 +2603,9 @@ fun MainPlayerScreen(
                         lyricsFetchVersion++
                     },
                     nowPlayingSourceLine = nowPlayingSourceLine,
+                    onOpenQuickActionForSong = showQuickActionForRadio,
+                    downloadsVersion = downloadsVersion,
+                    onDownloadsChanged = { downloadsVersion++ },
                     fullPlayerProgress = fullPlayerProgress
                 )
             }
@@ -2656,14 +2685,20 @@ fun MainPlayerScreen(
             // floats on very top of every screen, overlay and the bottom dock.
             QuickActionView(
                 song = quickActionSong,
-                onDismiss = { quickActionSong = null },
+                onDismiss = {
+                    quickActionSong = null
+                    quickActionInitialDialog = null
+                },
                 onLike = onQuickActionLike,
                 onStartRadio = onQuickActionStartRadio,
                 onPlayNext = onQuickActionPlayNext,
                 onAddToQueue = onQuickActionAddToQueue,
                 onShare = onQuickActionShare,
                 onOpenArtist = onQuickActionOpenArtist,
-                onRemoveFromPlaylist = if (quickActionPlaylistId != null) onQuickActionRemoveFromPlaylist else null
+                onRemoveFromPlaylist = if (quickActionPlaylistId != null) onQuickActionRemoveFromPlaylist else null,
+                initialDialog = quickActionInitialDialog,
+                downloadsVersion = downloadsVersion,
+                onDownloadsChanged = { downloadsVersion++ }
             )
         }
     }

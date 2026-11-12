@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.QueueMusic
@@ -47,12 +48,16 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.widget.Toast
 import android.media.AudioManager
 import android.view.HapticFeedbackConstants
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -71,7 +76,10 @@ import com.metrolist.innertube.models.*
 import com.metrolist.innertube.models.response.*
 import com.metrolist.innertube.pages.ArtistSection
 import com.tunespark.music.AppScreen
+import com.tunespark.music.DownloadManager
+import com.tunespark.music.LibraryCache
 import com.tunespark.music.LocalPlaylistManager
+import com.tunespark.music.NetworkStatus
 import com.tunespark.music.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -151,6 +159,10 @@ fun PlaylistsScreen(
     onPlaylistSongLongPress: ((String, String, SongItem) -> Unit)? = null,
     // Bumped by MainActivity after a successful in-playlist song removal.
     playlistContentVersion: Int = 0,
+    // Bumped by the host whenever a download completes so the Downloads
+    // playlist, offline footprint and per-row availability state refresh.
+    downloadsVersion: Int = 0,
+    onDownloadsChanged: () -> Unit = {},
     onPlayNextSong: (SongItem) -> Unit = {},
     onAddToQueueSong: (SongItem) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
@@ -231,8 +243,11 @@ fun PlaylistsScreen(
     var playlistSongs by remember { mutableStateOf(initialPlaylistSongs) }
     var isSongsLoading by remember { mutableStateOf(false) }
 
-    // Artist navigation state
-    var activeArtistId by remember { mutableStateOf(initialArtistId) }
+    // Artist navigation state. Artist pages need live data, so an offline mount
+    // never opens one (the grid/other entry points also block this).
+    var activeArtistId by remember {
+        mutableStateOf(if (NetworkStatus.isOnline(context)) initialArtistId else null)
+    }
     var activeArtistName by remember { mutableStateOf(initialArtistName ?: "") }
     var activeArtistThumbnail by remember { mutableStateOf(initialArtistThumbnail) }
     var activeArtistSubscribers by remember { mutableStateOf<String?>(null) }
@@ -334,6 +349,49 @@ fun PlaylistsScreen(
     var isLoadingGrid by remember { mutableStateOf(false) }
 
     val isUserSignedIn = SessionManager.isUserSignedIn(context)
+
+    // ── Offline footprint ────────────────────────────────────────────────────
+    // The Library keeps rendering its last-known playlists/artists while the
+    // device is offline and greys out songs that were never downloaded.
+    var isOnline by remember { mutableStateOf(NetworkStatus.isOnline(context)) }
+    DisposableEffect(context) {
+        val connectivityManager =
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                isOnline = true
+            }
+
+            override fun onLost(network: Network) {
+                isOnline = NetworkStatus.isOnline(context)
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                isOnline = networkCapabilities
+                    .hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+        }
+        try {
+            connectivityManager?.registerDefaultNetworkCallback(callback)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        onDispose {
+            try {
+                connectivityManager?.unregisterNetworkCallback(callback)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // Ids (bare) of songs that can play without a network connection.
+    val downloadedSongIds = remember(downloadsVersion) {
+        DownloadManager.downloadedSongIds(context)
+    }
 
     // ── Custom playlist creation + rename state ──────────────────────────────
     // True while a brand-new playlist is being created (drives the grey "+" box
@@ -438,7 +496,7 @@ fun PlaylistsScreen(
         }
     }
 
-    LaunchedEffect(selectedTab, playlistsRefreshTrigger, isUserSignedIn) {
+    LaunchedEffect(selectedTab, playlistsRefreshTrigger, isUserSignedIn, isOnline) {
         isLoadingGrid = true
         coroutineScope.launch(Dispatchers.IO) {
             try {
@@ -457,6 +515,41 @@ fun PlaylistsScreen(
                         isArtist = false,
                         isLocal = true
                     )
+                }
+
+                // Offline: rebuild the grid from the last-known account footprint.
+                // Artists and playlists stay visible so the Library keeps its shape;
+                // their songs only play when they were downloaded.
+                if (!NetworkStatus.isOnline(context)) {
+                    val cachedItems = if (isUserSignedIn) {
+                        LibraryCache.loadGrid(context).map { cached ->
+                            LibraryGridItem(
+                                id = cached.id,
+                                title = cached.title,
+                                subtitle = cached.subtitle,
+                                thumbnailUrl = cached.thumbnailUrl,
+                                isLiked = cached.isLiked,
+                                rawItem = null,
+                                authorName = cached.authorName,
+                                authorAvatarUrl = cached.authorAvatarUrl,
+                                isArtist = cached.isArtist
+                            )
+                        }
+                    } else {
+                        emptyList()
+                    }
+                    val cachedLiked = cachedItems.firstOrNull { it.isLiked }
+                    val cachedRest = cachedItems.filterNot { it.isLiked }
+                    val offlineItems = buildList {
+                        cachedLiked?.let { add(it) }
+                        addAll(localPlaylists)
+                        addAll(cachedRest)
+                    }
+                    withContext(Dispatchers.Main) {
+                        isLoadingGrid = false
+                        gridItems = offlineItems
+                    }
+                    return@launch
                 }
 
                 // Fetch playlists and subscribed artists concurrently (signed in only)
@@ -645,6 +738,25 @@ fun PlaylistsScreen(
                     isLoadingGrid = false
                     gridItems = fetchedItems
                 }
+                // Persist the account-backed footprint for offline Library use.
+                if (isUserSignedIn) {
+                    LibraryCache.saveGrid(
+                        context,
+                        fetchedItems.map { item ->
+                            LibraryCache.CachedLibraryItem(
+                                id = item.id,
+                                title = item.title,
+                                subtitle = item.subtitle,
+                                thumbnailUrl = item.thumbnailUrl,
+                                isLiked = item.isLiked,
+                                authorName = item.authorName,
+                                authorAvatarUrl = item.authorAvatarUrl,
+                                isArtist = item.isArtist,
+                                isLocal = item.isLocal
+                            )
+                        }
+                    )
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
@@ -655,24 +767,47 @@ fun PlaylistsScreen(
         }
     }
 
-    LaunchedEffect(activePlaylistId, playlistsRefreshTrigger) {
+    LaunchedEffect(activePlaylistId, playlistsRefreshTrigger, isOnline, downloadsVersion) {
         val playlistId = activePlaylistId ?: return@LaunchedEffect
-        
-        // If we already have the songs from the initial playlist, don't clear or reload them
-        if (playlistsRefreshTrigger == 0 && playlistId == initialPlaylistId && playlistSongs.isNotEmpty()) {
+        val isDownloadsPlaylist = DownloadManager.isDownloadsPlaylist(playlistId)
+
+        // If we already have the songs from the initial playlist, don't clear or
+        // reload them. Downloads always reload because its contents follow the
+        // download store.
+        if (!isDownloadsPlaylist &&
+            playlistsRefreshTrigger == 0 &&
+            playlistId == initialPlaylistId &&
+            playlistSongs.isNotEmpty()
+        ) {
             return@LaunchedEffect
         }
-        
+
         isSongsLoading = true
-        playlistSongs = emptyList()
+        if (!isDownloadsPlaylist) playlistSongs = emptyList()
         activePlaylistEditable = null
 
         coroutineScope.launch(Dispatchers.IO) {
             try {
                 var tracks = emptyList<SongItem>()
                 val rawItem = activePlaylistRawItem
+                val online = NetworkStatus.isOnline(context)
+                // Only account-backed playlist tracklists are cached; local
+                // playlists and downloads already persist themselves.
+                var shouldCache = false
 
-                if (LocalPlaylistManager.isLocalPlaylistId(playlistId)) {
+                if (isDownloadsPlaylist) {
+                    // Auto-generated playlist backed entirely by local files.
+                    tracks = DownloadManager.getDownloadedSongs(context).map { it.song }
+                    withContext(Dispatchers.Main) {
+                        activePlaylistName = "Downloads"
+                        activePlaylistSongCountText = DownloadManager.songCountText(context)
+                        activePlaylistThumbnail = DownloadManager.firstThumbnail(context)
+                        activePlaylistAuthorName = "You"
+                        activePlaylistAuthorAvatarUrl = null
+                        activePlaylistEditable = false
+                        activePlaylistIsLocal = false
+                    }
+                } else if (LocalPlaylistManager.isLocalPlaylistId(playlistId)) {
                     // On-device playlist — read straight from local storage.
                     val local = LocalPlaylistManager.getPlaylist(context, playlistId)
                     tracks = local?.songs.orEmpty()
@@ -683,11 +818,28 @@ fun PlaylistsScreen(
                             list.thumbnail?.let { activePlaylistThumbnail = it }
                         }
                     }
+                } else if (!online) {
+                    // Offline: fall back to the last-known tracklist. Songs that
+                    // were never downloaded are greyed out by the UI.
+                    val cached = LibraryCache.loadPlaylist(context, playlistId)
+                    tracks = cached?.songs.orEmpty()
+                    withContext(Dispatchers.Main) {
+                        cached?.let { list ->
+                            list.name?.let { activePlaylistName = it }
+                            list.thumbnail?.let { activePlaylistThumbnail = it }
+                            activePlaylistSongCountText =
+                                list.songCountText ?: "${tracks.size} songs"
+                            list.authorName?.let { activePlaylistAuthorName = it }
+                            list.authorAvatarUrl?.let { activePlaylistAuthorAvatarUrl = it }
+                            activePlaylistEditable = list.editable
+                        }
+                    }
                 } else if (activePlaylistIsLiked || playlistId == "LM") {
                     val playlistResult = YouTube.playlist("LM")
                     if (playlistResult.isSuccess) {
                         tracks = playlistResult.getOrNull()?.songs.orEmpty()
                         com.tunespark.music.LikedSongManager.setLikedSongs(context, tracks.map { it.id })
+                        shouldCache = true
                     }
                 } else if (rawItem is PlaylistItem || playlistId.startsWith("PL") || playlistId.startsWith("RD")) {
                     val playlistResult = YouTube.playlist(playlistId)
@@ -701,10 +853,14 @@ fun PlaylistsScreen(
                                 activePlaylistEditable = playlistMeta.isEditable
                             }
                         }
+                        shouldCache = true
                     }
                 } else if (rawItem is AlbumItem) {
                     val albumResult = YouTube.albumSongs(rawItem.playlistId, rawItem)
-                    if (albumResult.isSuccess) tracks = albumResult.getOrNull().orEmpty()
+                    if (albumResult.isSuccess) {
+                        tracks = albumResult.getOrNull().orEmpty()
+                        shouldCache = true
+                    }
                 } else if (rawItem is ArtistItem) {
                     val searchResult = YouTube.search(activePlaylistName, YouTube.SearchFilter.FILTER_SONG)
                     if (searchResult.isSuccess) tracks = searchResult.getOrNull()?.items?.filterIsInstance<SongItem>().orEmpty()
@@ -726,12 +882,26 @@ fun PlaylistsScreen(
                                 activePlaylistEditable = playlistMeta.isEditable
                             }
                         }
+                        shouldCache = true
                     }
                 }
 
                 withContext(Dispatchers.Main) {
                     playlistSongs = tracks
                     isSongsLoading = false
+                    if (shouldCache && tracks.isNotEmpty()) {
+                        LibraryCache.savePlaylist(
+                            context = context,
+                            playlistId = playlistId,
+                            songs = tracks,
+                            name = activePlaylistName,
+                            thumbnail = activePlaylistThumbnail,
+                            songCountText = activePlaylistSongCountText,
+                            authorName = activePlaylistAuthorName,
+                            authorAvatarUrl = activePlaylistAuthorAvatarUrl,
+                            editable = activePlaylistEditable
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -750,8 +920,24 @@ fun PlaylistsScreen(
         artistDetailListState.scrollToItem(0)
     }
 
-    LaunchedEffect(activeArtistId, playlistsRefreshTrigger) {
+    // Artist pages need live InnerTube data. If connectivity drops (or an
+    // artist request somehow arrives offline), close the artist page instead
+    // of leaving a broken, empty view on screen.
+    LaunchedEffect(isOnline) {
+        if (!isOnline && activeArtistId != null) {
+            activeArtistId = null
+            artistTopSongs = emptyList()
+            artistAllSongs = emptyList()
+            artistSections = emptyList()
+            isArtistAllSongsVisible = false
+            Toast.makeText(context, "Artist pages need an internet connection", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(activeArtistId, playlistsRefreshTrigger, isOnline) {
         val artistId = activeArtistId ?: return@LaunchedEffect
+        // Artist pages need live data; they are never opened offline.
+        if (!NetworkStatus.isOnline(context)) return@LaunchedEffect
         isArtistSongsLoading = true
         artistTopSongs = emptyList()
         artistAllSongs = emptyList()
@@ -892,6 +1078,7 @@ fun PlaylistsScreen(
     LaunchedEffect(initialArtistNavRequest) {
         val targetId = initialArtistId ?: return@LaunchedEffect
         if (initialArtistNavRequest == 0 || activeArtistId == targetId) return@LaunchedEffect
+        if (!NetworkStatus.isOnline(context)) return@LaunchedEffect
 
         // Close whatever is currently open and show the requested artist.
         activePlaylistId = null
@@ -920,18 +1107,47 @@ fun PlaylistsScreen(
         if (playlistContentVersion > 0) playlistsRefreshTrigger++
     }
 
+    // Generated, non-editable Downloads playlist. It is derived from the live
+    // DownloadManager state so it never needs to be stored in the grid cache.
+    val gridItemsWithDownloads = remember(gridItems, downloadsVersion) {
+        val downloadsItem = LibraryGridItem(
+            id = DownloadManager.DOWNLOADS_PLAYLIST_ID,
+            title = "Downloads",
+            subtitle = DownloadManager.songCountText(context),
+            thumbnailUrl = DownloadManager.firstThumbnail(context),
+            authorName = "You",
+            isArtist = false,
+            isLocal = false
+        )
+        val likedItem = gridItems.firstOrNull { it.isLiked }
+        val rest = gridItems.filterNot { it.isLiked }
+        buildList {
+            // Downloads is always first — even ahead of Liked.
+            add(downloadsItem)
+            likedItem?.let { add(it) }
+            addAll(rest)
+        }
+    }
+
     // Filter and sorting derived states
-    val filteredGridItems = remember(gridItems, searchQuery) {
-        if (searchQuery.isBlank()) gridItems
-        else gridItems.filter {
+    val filteredGridItems = remember(gridItemsWithDownloads, searchQuery) {
+        if (searchQuery.isBlank()) gridItemsWithDownloads
+        else gridItemsWithDownloads.filter {
             it.title.contains(searchQuery, ignoreCase = true) ||
             it.subtitle.contains(searchQuery, ignoreCase = true)
         }
     }
 
     val sortedGridItems = remember(filteredGridItems, sortBy, sortAscending) {
+        // Downloads and Liked are both pinned: Downloads first, then Liked.
+        // Everything else follows the selected sort order.
+        val downloadsItem = filteredGridItems.firstOrNull {
+            it.id == DownloadManager.DOWNLOADS_PLAYLIST_ID
+        }
         val likedItem = filteredGridItems.firstOrNull { it.isLiked }
-        val restOfItems = filteredGridItems.filter { !it.isLiked }
+        val restOfItems = filteredGridItems.filter {
+            !it.isLiked && it.id != DownloadManager.DOWNLOADS_PLAYLIST_ID
+        }
 
         val sortedRest = when (sortBy) {
             "Name" -> restOfItems.sortedBy { it.title.lowercase() }
@@ -939,12 +1155,11 @@ fun PlaylistsScreen(
             else -> restOfItems // Date added (original list order)
         }
 
-        val fullySorted = if (likedItem != null) {
-            listOf(likedItem) + if (sortAscending) sortedRest else sortedRest.reversed()
-        } else {
-            if (sortAscending) sortedRest else sortedRest.reversed()
+        buildList {
+            downloadsItem?.let { add(it) }
+            likedItem?.let { add(it) }
+            addAll(if (sortAscending) sortedRest else sortedRest.reversed())
         }
-        fullySorted
     }
 
     // Library tab filter (All / Playlists / Artists)
@@ -1467,8 +1682,11 @@ fun PlaylistsScreen(
                 // quick action (owned playlists only — created in-app or the user's own).
                 // The loaded page's editable header is authoritative when present.
                 val cachedAccountName = remember(context) { SessionManager.getCachedAccountInfo(context)?.name }
-                val isUserOwnedPlaylist = activePlaylistIsLocal ||
-                    (activePlaylistId != null &&
+                val isDownloadsPlaylist = DownloadManager.isDownloadsPlaylist(activePlaylistId)
+                val isUserOwnedPlaylist = !isDownloadsPlaylist &&
+                    (activePlaylistIsLocal ||
+                    (isOnline &&
+                    activePlaylistId != null &&
                     activePlaylistId != "LM" &&
                     !activePlaylistIsLiked &&
                     (when (val raw = activePlaylistRawItem) {
@@ -1479,7 +1697,28 @@ fun PlaylistsScreen(
                                 (raw == null || (raw as? PlaylistItem)?.let { p ->
                                     p.isEditable || p.author?.name == cachedAccountName
                                 } == true))
-                    }))
+                    })))
+
+                // Bulk playlist download progress (drives the ⋮ menu label).
+                var isDownloadingPlaylist by remember(activePlaylistId) { mutableStateOf(false) }
+                var playlistDownloadProgress by remember(activePlaylistId) {
+                    mutableStateOf<String?>(null)
+                }
+
+                // Offline: only downloaded songs are playable. Every other row is
+                // greyed out (and cannot start playback), which keeps the
+                // last-known tracklist visible as a Library footprint.
+                val unavailableOfflineIds = remember(sortedSongs, isOnline, downloadedSongIds) {
+                    if (isOnline) emptySet()
+                    else sortedSongs
+                        .map { it.id.substringBefore('#') }
+                        .filterNot { it in downloadedSongIds }
+                        .toSet()
+                }
+                val playableSongs = remember(sortedSongs, isOnline, downloadedSongIds) {
+                    if (isOnline) sortedSongs
+                    else sortedSongs.filter { it.id.substringBefore('#') in downloadedSongIds }
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1621,11 +1860,23 @@ fun PlaylistsScreen(
                                             .size(180.dp)
                                             .clip(RoundedCornerShape(32.dp))
                                             .background(
-                                                color = if (activePlaylistIsLiked) Color(0xFFFF0000) else textColor
+                                                color = when {
+                                                    activePlaylistIsLiked -> Color(0xFFFF0000)
+                                                    isDownloadsPlaylist -> Color(0xFF6E6E73)
+                                                    else -> textColor
+                                                }
                                             ),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        if (activePlaylistIsLiked) {
+                                        if (isDownloadsPlaylist) {
+                                            // Same stable grey Downloads cover as the grid.
+                                            Icon(
+                                                imageVector = Icons.Default.Download,
+                                                contentDescription = "Downloads",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(76.dp)
+                                            )
+                                        } else if (activePlaylistIsLiked) {
                                             Icon(
                                                 imageVector = Icons.Default.Favorite,
                                                 contentDescription = "Heart",
@@ -1649,8 +1900,9 @@ fun PlaylistsScreen(
                                     val canRenamePlaylist = activePlaylistId != null &&
                                         activePlaylistId != "LM" &&
                                         !activePlaylistIsLiked &&
+                                        !isDownloadsPlaylist &&
                                         activePlaylistRawItem !is AlbumItem &&
-                                        (activePlaylistIsLocal || activePlaylistRawItem !is ArtistItem)
+                                        (activePlaylistIsLocal || (isOnline && activePlaylistRawItem !is ArtistItem))
 
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -1761,6 +2013,36 @@ fun PlaylistsScreen(
                                         Spacer(modifier = Modifier.height(12.dp))
                                     }
 
+                                    // The generated Downloads playlist is never editable;
+                                    // a small tag makes that clear.
+                                    if (isDownloadsPlaylist) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .background(Color.Gray.copy(alpha = 0.15f))
+                                                .border(1.dp, textColor.copy(alpha = 0.15f), CircleShape)
+                                                .padding(horizontal = 12.dp, vertical = 5.dp)
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Download,
+                                                    contentDescription = null,
+                                                    tint = textColor.copy(alpha = 0.7f),
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(5.dp))
+                                                Text(
+                                                    text = "Downloaded songs",
+                                                    color = textColor.copy(alpha = 0.7f),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                    }
+
                                     Row(
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                                         verticalAlignment = Alignment.CenterVertically,
@@ -1768,17 +2050,29 @@ fun PlaylistsScreen(
                                             .fillMaxWidth()
                                             .padding(horizontal = 16.dp)
                                     ) {
-                                        val isSaved = remember(activePlaylistId, gridItems) {
-                                            activePlaylistId == "LM" || activePlaylistIsLiked || gridItems.any { it.id == activePlaylistId }
+                                        val isSaved = remember(activePlaylistId, gridItemsWithDownloads) {
+                                            activePlaylistId == "LM" || activePlaylistIsLiked ||
+                                                activePlaylistId == DownloadManager.DOWNLOADS_PLAYLIST_ID ||
+                                                gridItemsWithDownloads.any { it.id == activePlaylistId }
                                         }
-                                        val showSaveOption = activePlaylistId != null && activePlaylistId != "LM" && !isSaved && !isLocallySaved
+                                        val showSaveOption = activePlaylistId != null &&
+                                            activePlaylistId != "LM" &&
+                                            !isDownloadsPlaylist &&
+                                            !isSaved &&
+                                            !isLocallySaved
 
                                         Button(
                                             onClick = {
                                                 playSoundAndHaptic()
-                                                if (sortedSongs.isNotEmpty()) {
-                                                    onPlayPlaylist(activePlaylistName, sortedSongs, 0)
+                                                if (playableSongs.isNotEmpty()) {
+                                                    onPlayPlaylist(activePlaylistName, playableSongs, 0)
                                                     onNavigate(AppScreen.RADIO)
+                                                } else if (!isOnline) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "No downloaded songs in this playlist",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
                                                 }
                                             },
                                             shape = RoundedCornerShape(30.dp),
@@ -1799,10 +2093,16 @@ fun PlaylistsScreen(
                                         Button(
                                             onClick = {
                                                 playSoundAndHaptic()
-                                                if (sortedSongs.isNotEmpty()) {
-                                                    val shuffled = sortedSongs.shuffled()
+                                                if (playableSongs.isNotEmpty()) {
+                                                    val shuffled = playableSongs.shuffled()
                                                     onPlayPlaylist(activePlaylistName, shuffled, 0)
                                                     onNavigate(AppScreen.RADIO)
+                                                } else if (!isOnline) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "No downloaded songs in this playlist",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
                                                 }
                                             },
                                             shape = RoundedCornerShape(30.dp),
@@ -1821,7 +2121,9 @@ fun PlaylistsScreen(
                                         }
 
                                         val currentActiveId = activePlaylistId
-                                        if (currentActiveId != null) {
+                                        // The generated Downloads playlist has no
+                                        // editable/manage actions, so it has no ⋮ menu.
+                                        if (currentActiveId != null && !isDownloadsPlaylist) {
                                             var menuExpanded by remember { mutableStateOf(false) }
                                             Box {
                                                 IconButton(
@@ -1859,7 +2161,7 @@ fun PlaylistsScreen(
                                                                 showSaveDialog = true
                                                             }
                                                         )
-                                                    } else if (!activePlaylistIsLocal) {
+                                                    } else if (!activePlaylistIsLocal && !isDownloadsPlaylist) {
                                                         // (Local playlists are never saved to the account,
                                                         // so the "Already saved" row is skipped for them.)
                                                         DropdownMenuItem(
@@ -1867,6 +2169,68 @@ fun PlaylistsScreen(
                                                             leadingIcon = { Icon(Icons.Default.Favorite, contentDescription = "Saved", tint = textColor.copy(alpha = 0.5f)) },
                                                             enabled = false,
                                                             onClick = {}
+                                                        )
+                                                    }
+
+                                                    // Download every song in this playlist to the device.
+                                                    // The generated Downloads playlist is already local,
+                                                    // so it never offers this action.
+                                                    if (!isDownloadsPlaylist) {
+                                                        DropdownMenuItem(
+                                                            text = {
+                                                                Text(
+                                                                    text = if (isDownloadingPlaylist) {
+                                                                        "Downloading ${playlistDownloadProgress ?: ""}…"
+                                                                    } else {
+                                                                        "Download"
+                                                                    },
+                                                                    color = textColor
+                                                                )
+                                                            },
+                                                            leadingIcon = {
+                                                                Icon(
+                                                                    Icons.Default.Download,
+                                                                    contentDescription = "Download playlist",
+                                                                    tint = textColor
+                                                                )
+                                                            },
+                                                            enabled = !isDownloadingPlaylist && sortedSongs.isNotEmpty(),
+                                                            onClick = {
+                                                                playSoundAndHaptic()
+                                                                menuExpanded = false
+                                                                if (!NetworkStatus.isOnline(context)) {
+                                                                    Toast.makeText(
+                                                                        context,
+                                                                        "Connect to the internet to download",
+                                                                        Toast.LENGTH_SHORT
+                                                                    ).show()
+                                                                    return@DropdownMenuItem
+                                                                }
+                                                                val songsToDownload = sortedSongs
+                                                                val total = songsToDownload.size
+                                                                isDownloadingPlaylist = true
+                                                                playlistDownloadProgress = "0/$total"
+                                                                coroutineScope.launch {
+                                                                    val success = DownloadManager.downloadSongs(
+                                                                        context,
+                                                                        songsToDownload
+                                                                    ) { completed, count ->
+                                                                        playlistDownloadProgress = "$completed/$count"
+                                                                    }
+                                                                    isDownloadingPlaylist = false
+                                                                    playlistDownloadProgress = null
+                                                                    if (success > 0) onDownloadsChanged()
+                                                                    Toast.makeText(
+                                                                        context,
+                                                                        if (success > 0) {
+                                                                            "Downloaded $success of $total songs"
+                                                                        } else {
+                                                                            "Couldn't download songs"
+                                                                        },
+                                                                        Toast.LENGTH_SHORT
+                                                                    ).show()
+                                                                }
+                                                            }
                                                         )
                                                     }
 
@@ -1921,7 +2285,10 @@ fun PlaylistsScreen(
                                     )
                                 }
                             } else {
-                                itemsIndexed(sortedSongs) { index, song ->
+                                items(sortedSongs) { song ->
+                                    val isUnavailableOffline =
+                                        song.id.substringBefore('#') in unavailableOfflineIds
+                                    val playIndex = playableSongs.indexOfFirst { it.id == song.id }
                                     // Owned playlists get the playlist-aware variant so the
                                     // Quick Action sheet can offer "Remove song" for this list.
                                     val songQuickActions: (SongItem) -> Unit = { s ->
@@ -1933,18 +2300,26 @@ fun PlaylistsScreen(
                                         }
                                     }
                                     SwipeQueueContainer(
-                                        onPlayNext = { onPlayNextSong(song) },
-                                        onAddToQueue = { onAddToQueueSong(song) }
+                                        onPlayNext = {
+                                            if (!isUnavailableOffline) onPlayNextSong(song)
+                                        },
+                                        onAddToQueue = {
+                                            if (!isUnavailableOffline) onAddToQueueSong(song)
+                                        }
                                     ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .alpha(if (isUnavailableOffline) 0.4f else 1f)
                                             .combinedClickable(
+                                                enabled = !isUnavailableOffline,
                                                 onClick = {
                                                     playSoundAndHaptic()
-                                                    onPlayPlaylist(activePlaylistName, sortedSongs, index)
-                                                    onNavigate(AppScreen.RADIO)
+                                                    if (playIndex >= 0) {
+                                                        onPlayPlaylist(activePlaylistName, playableSongs, playIndex)
+                                                        onNavigate(AppScreen.RADIO)
+                                                    }
                                                 },
                                                 onLongClick = {
                                                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
@@ -2000,7 +2375,7 @@ fun PlaylistsScreen(
                                             modifier = Modifier
                                                 .size(36.dp)
                                                 .clip(CircleShape)
-                                                .clickable {
+                                                .clickable(enabled = !isUnavailableOffline) {
                                                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 1.0f)
                                                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                                     songQuickActions(song)
@@ -2193,7 +2568,7 @@ fun PlaylistsScreen(
                             }
                         }
 
-                        if (isLoadingGrid && tabFilteredGridItems.isEmpty()) {
+                        if (isLoadingGrid && gridItems.isEmpty()) {
                             Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(color = textColor)
                             }
@@ -2261,11 +2636,19 @@ fun PlaylistsScreen(
                                                     .clickable {
                                                         playSoundAndHaptic()
                                                         if (item.isArtist) {
-                                                            activeArtistId = item.id
-                                                            activeArtistName = item.title
-                                                            activeArtistThumbnail = item.thumbnailUrl?.toHighResArtistThumbnail()
-                                                            activeArtistSubscribers = if (item.subtitle != "Artist") item.subtitle else null
-                                                            activeArtistRawItem = item.rawItem as? ArtistItem
+                                                            if (!isOnline) {
+                                                                Toast.makeText(
+                                                                    context,
+                                                                    "Artist pages need an internet connection",
+                                                                    Toast.LENGTH_SHORT
+                                                                ).show()
+                                                            } else {
+                                                                activeArtistId = item.id
+                                                                activeArtistName = item.title
+                                                                activeArtistThumbnail = item.thumbnailUrl?.toHighResArtistThumbnail()
+                                                                activeArtistSubscribers = if (item.subtitle != "Artist") item.subtitle else null
+                                                                activeArtistRawItem = item.rawItem as? ArtistItem
+                                                            }
                                                         } else {
                                                             activePlaylistId = item.id
                                                             activePlaylistName = item.title
@@ -2287,10 +2670,25 @@ fun PlaylistsScreen(
                                                         .aspectRatio(1f)
                                                         .fillMaxWidth()
                                                         .clip(if (item.isArtist) CircleShape else RoundedCornerShape(28.dp))
-                                                        .background(color = if (item.isLiked) Color(0xFFFF0000) else textColor),
+                                                        .background(
+                                                            color = when {
+                                                                item.isLiked -> Color(0xFFFF0000)
+                                                                item.id == DownloadManager.DOWNLOADS_PLAYLIST_ID -> Color(0xFF6E6E73)
+                                                                else -> textColor
+                                                            }
+                                                        ),
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    if (item.isLiked) {
+                                                    if (item.id == DownloadManager.DOWNLOADS_PLAYLIST_ID) {
+                                                        // Stable grey Downloads cover — never a
+                                                        // changing song thumbnail.
+                                                        Icon(
+                                                            imageVector = Icons.Default.Download,
+                                                            contentDescription = "Downloads",
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(44.dp)
+                                                        )
+                                                    } else if (item.isLiked) {
                                                         Icon(imageVector = Icons.Default.Favorite, contentDescription = "Heart", tint = Color.White, modifier = Modifier.size(44.dp))
                                                     } else if (!item.thumbnailUrl.isNullOrEmpty()) {
                                                         AsyncImage(model = item.thumbnailUrl, contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
